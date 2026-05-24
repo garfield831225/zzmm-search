@@ -27,12 +27,11 @@ export async function GET(request: NextRequest) {
     const { neon } = await import('@neondatabase/serverless');
     const sql = neon(process.env.DATABASE_URL!);
 
-    // 构建动态条件 - neon tagged template不支持动态WHERE
-    // 用JS侧拼接SQL，参数化防注入
+    // 动态WHERE拼接，参数化防注入
     let whereClause = "status = 'active'";
     const params: any[] = [];
     let paramIdx = 1;
-    
+
     if (category !== '全部') {
       whereClause += ` AND category = $${paramIdx++}`;
       params.push(category);
@@ -51,13 +50,11 @@ export async function GET(request: NextRequest) {
     }
 
     const offset = (page - 1) * pageSize;
-
-    // 用(sql as any)绕过TypeScript类型检查，调用底层query方法
     const sqlAny = sql as any;
 
     const countSql = `SELECT COUNT(*) as count FROM xx_resources WHERE ${whereClause}`;
     const countResult = await sqlAny.query(countSql, params) as any[];
-    const total = Number(countResult[0]?.count || 0);
+    const total = Number(countResult?.[0]?.count || 0);
 
     const itemsSql = `SELECT id, name, link, link_code, source, category, size, type, tags, tmdb_id, view_count
       FROM xx_resources WHERE ${whereClause}
@@ -66,7 +63,7 @@ export async function GET(request: NextRequest) {
     const items = await sqlAny.query(itemsSql, [...params, pageSize, offset]) as any[];
 
     // TMDB信息
-    const tmdbIds = Array.from(new Set(items.map((item: any) => item.tmdb_id).filter(Boolean))) as string[];
+    const tmdbIds = Array.from(new Set(items.map((i: any) => i.tmdb_id).filter(Boolean))) as string[];
     const tmdbMap = new Map();
     if (tmdbIds.length > 0) {
       const tmdbInfos = await sql`SELECT * FROM xx_tmdb_cache WHERE tmdb_id = ANY(${tmdbIds})` as any[];

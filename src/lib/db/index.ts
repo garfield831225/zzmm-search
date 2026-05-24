@@ -1,4 +1,7 @@
 import { neon } from '@neondatabase/serverless';
 
-const connectionString = process.env.DATABASE_URL!;
-export const sql = neon(connectionString);
+export function getDb() {
+  return neon(process.env.DATABASE_URL!);
+}
+
+export const sql = neon(process.env.DATABASE_URL!);
