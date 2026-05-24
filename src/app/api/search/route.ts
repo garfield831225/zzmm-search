@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
     `);
 
     // 批量获取TMDB信息
-    const itemsArr = (items as any[]) || [];
+    const itemsArr = (items as unknown as any[]) || [];
     const tmdbIds = itemsArr
       .map((item: any) => item.tmdb_id)
       .filter(Boolean)
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
     if (tmdbIds.length > 0) {
       const inClause = tmdbIds.map((id: string) => `'${id}'`).join(',');
       const tmdbInfos = await db.execute(sql`SELECT * FROM xx_tmdb_cache WHERE tmdb_id IN (${sql.raw(inClause)})`);
-      tmdbMap = new Map((tmdbInfos as any[]).map((info: any) => [info.tmdb_id, info]));
+      tmdbMap = new Map((tmdbInfos as unknown as any[]).map((info: any) => [info.tmdb_id, info]));
     }
 
     // 组装返回数据
