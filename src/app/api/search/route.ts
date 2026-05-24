@@ -27,40 +27,22 @@ export async function GET(request: NextRequest) {
     const { neon } = await import('@neondatabase/serverless');
     const sql = neon(process.env.DATABASE_URL!);
 
-    // 动态WHERE拼接，参数化防注入
-    let whereClause = "status = 'active'";
-    const params: any[] = [];
-    let paramIdx = 1;
-
-    if (category !== '全部') {
-      whereClause += ` AND category = $${paramIdx++}`;
-      params.push(category);
-    }
-    if (source !== '全部') {
-      const sourceKey = Object.keys(SOURCE_MAP).find(k => SOURCE_MAP[k] === source);
-      if (sourceKey) {
-        whereClause += ` AND source = $${paramIdx++}`;
-        params.push(sourceKey);
-      }
-    }
-    if (q) {
-      whereClause += ` AND (name ILIKE $${paramIdx++} OR category ILIKE $${paramIdx++})`;
-      params.push(`%${q}%`);
-      params.push(`%${q}%`);
-    }
-
     const offset = (page - 1) * pageSize;
-    const sqlAny = sql as any;
+    const sourceKey = source !== '全部' ? Object.keys(SOURCE_MAP).find(k => SOURCE_MAP[k] === source) : null;
 
-    const countSql = `SELECT COUNT(*) as count FROM xx_resources WHERE ${whereClause}`;
-    const countResult = await sqlAny.query(countSql, params) as any[];
+    // 用neon tagged template + 条件SQL拼接
+    // neon的sql``支持嵌套sql片段
+    const categoryCond = category !== '全部' ? sql` AND category = ${category}` : sql``;
+    const sourceCond = sourceKey ? sql` AND source = ${sourceKey}` : sql``;
+    const qCond = q ? sql` AND (name ILIKE ${'%' + q + '%'} OR category ILIKE ${'%' + q + '%'})` : sql``;
+
+    const countResult = await sql`SELECT COUNT(*) as count FROM xx_resources WHERE status = 'active'${categoryCond}${sourceCond}${qCond}` as any[];
     const total = Number(countResult?.[0]?.count || 0);
 
-    const itemsSql = `SELECT id, name, link, link_code, source, category, size, type, tags, tmdb_id, view_count
-      FROM xx_resources WHERE ${whereClause}
+    const items = await sql`SELECT id, name, link, link_code, source, category, size, type, tags, tmdb_id, view_count
+      FROM xx_resources WHERE status = 'active'${categoryCond}${sourceCond}${qCond}
       ORDER BY view_count DESC, created_at DESC
-      LIMIT $${paramIdx} OFFSET $${paramIdx + 1}`;
-    const items = await sqlAny.query(itemsSql, [...params, pageSize, offset]) as any[];
+      LIMIT ${pageSize} OFFSET ${offset}` as any[];
 
     // TMDB信息
     const tmdbIds = Array.from(new Set(items.map((i: any) => i.tmdb_id).filter(Boolean))) as string[];

@@ -22,29 +22,26 @@ export async function POST(request: NextRequest) {
 
     console.log(`开始导入 ${items.length} 条数据...`);
 
-    const BATCH = 200;
+    const BATCH = 100;
     let imported = 0;
     let failed = 0;
 
     for (let i = 0; i < items.length; i += BATCH) {
       const batch = items.slice(i, i + BATCH);
-      const values = batch.map((item: any) => {
-        const name = (item.name || '').replace(/'/g, "''");
-        const link = (item.link || '').replace(/'/g, "''");
-        const linkCode = (item.link_code || '').replace(/'/g, "''");
-        const size = (item.size || '').replace(/'/g, "''");
-        const category = (item.category || '其他').replace(/'/g, "''");
-        const source = item.source || detectSource(item.link || '');
-        return `(DEFAULT, '${name}', '${link}', '${linkCode}', '${source}', '${category}', '${size}', NULL, '{}', NULL, NULL, 'active', 'unchecked', NULL, NULL, NULL, NULL, 0, NOW(), NOW())`;
-      });
-
-      const insertSql = `INSERT INTO xx_resources (id, name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, valid_checked_at, uploaded_by, approved_by, approved_at, view_count, created_at, updated_at) VALUES ${values.join(',')}`;
-      
       try {
-        await (sql as any).query(insertSql);
+        for (const item of batch) {
+          const name = item.name || '';
+          const link = item.link || '';
+          const linkCode = item.link_code || '';
+          const size = item.size || '';
+          const category = item.category || '其他';
+          const source = item.source || detectSource(link);
+          await sql`INSERT INTO xx_resources (name, link, link_code, source, category, size, status, valid_status, view_count, created_at, updated_at)
+            VALUES (${name}, ${link}, ${linkCode}, ${source}, ${category}, ${size}, 'active', 'unchecked', 0, NOW(), NOW())`;
+        }
         imported += batch.length;
       } catch (err: any) {
-        console.error(`批次 ${i / BATCH + 1} 失败:`, err.message);
+        console.error(`批次失败:`, err.message);
         failed += batch.length;
       }
     }
