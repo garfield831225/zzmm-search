@@ -11,7 +11,6 @@ class RedisCache {
         host: env.REDIS_HOST || 'localhost',
         port: parseInt(env.REDIS_PORT || '6379'),
         password: env.REDIS_PASSWORD || undefined,
-        tls: env.REDIS_TLS === 'true' ? {} : undefined,
         retryStrategy: (times) => {
           if (times > 3) {
             console.warn('Redis连接失败，禁用缓存层');

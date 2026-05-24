@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import ImportPanel from './import/ImportPanel';
+import ZzmmImportPanel from './import/ZzmmImportPanel';
 
 interface Stats {
   totalResources: number;
@@ -48,15 +49,16 @@ export default function AdminPage() {
   };
 
   const adminNavItems = [
-    { key: 'dashboard', label: '📊 数据统计', icon: '📊' },
-    { key: 'users', label: '👥 用户管理', icon: '👥' },
-    { key: 'resources', label: '📁 资源管理', icon: '📁' },
-    { key: 'plans', label: '💰 套餐管理', icon: '💰' },
-    { key: 'codes', label: '🔑 激活码', icon: '🔑' },
-    { key: 'docs', label: '📄 线上文档', icon: '📄' },
-    { key: 'announcements', label: '📢 公告管理', icon: '📢' },
-    { key: 'settings', label: '⚙️ 系统设置', icon: '⚙️' },
-    { key: 'import', label: '📤 数据导入', icon: '📤' },
+    { key: 'dashboard', label: '数据统计', icon: '📊' },
+    { key: 'users', label: '用户管理', icon: '👥' },
+    { key: 'resources', label: '资源管理', icon: '📁' },
+    { key: 'plans', label: '套餐管理', icon: '💰' },
+    { key: 'codes', label: '激活码', icon: '🔑' },
+    { key: 'docs', label: '线上文档', icon: '📄' },
+    { key: 'announcements', label: '公告管理', icon: '📢' },
+    { key: 'settings', label: '系统设置', icon: '⚙️' },
+    { key: 'import', label: '标准导入', icon: '📤' },
+    { key: 'zzmm', label: '泽泽妈妈导入', icon: '🏠' },
   ];
 
   if (loading) {
@@ -190,7 +192,26 @@ export default function AdminPage() {
         {activeTab === 'docs' && <DocConfig />}
         {activeTab === 'announcements' && <AnnouncementManagement />}
         {activeTab === 'settings' && <SystemSettings />}
-        {activeTab === 'import' && <ImportPage />}
+        {activeTab === 'import' && (
+          <div className="p-6">
+            <ImportPanel />
+          </div>
+        )}
+        {activeTab === 'zzmm' && (
+          <div className="p-6">
+            <ZzmmImportPanel />
+          </div>
+        )}
+        {activeTab === 'login' && (
+          <div className="p-6">
+            <LoginPage />
+          </div>
+        )}
+        {activeTab === 'register' && (
+          <div className="p-6">
+            <RegisterPage />
+          </div>
+        )}
       </main>
     </div>
   );
@@ -259,14 +280,6 @@ function AnnouncementManagement() {
       <div className="bg-[#12121a] rounded-xl p-5 border border-white/5">
         <p className="text-white/60">公告列表将在此处显示...</p>
       </div>
-    </div>
-  );
-}
-
-function ImportPage() {
-  return (
-    <div className="p-6">
-      <ImportPanel />
     </div>
   );
 }
