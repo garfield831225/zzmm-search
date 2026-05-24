@@ -21,6 +21,7 @@
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
     "jose": "^5.6.3",
+    "framer-motion": "^11.3.8",
     "zod": "^3.23.8",
     "xlsx": "^0.18.5",
     "uuid": "^10.0.0"
