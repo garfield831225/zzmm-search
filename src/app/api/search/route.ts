@@ -3,10 +3,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { resources, tmdbCache } from '@/lib/db/schema';
-import { eq, like, or, and, inArray, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import RedisCache from '@/lib/redis';
-import { TMDB_KEY } from '@/lib/tmdb';
 
 // 来源映射
 const SOURCE_MAP: Record<string, string> = {
@@ -34,73 +32,59 @@ export async function GET(request: NextRequest) {
     const pageSize = parseInt(searchParams.get('pageSize') || '30');
 
     // 构建缓存key
-    const cacheKey = `${q}:${category}:${source}:${page}`;
+    const cacheKey = `search:${q}:${category}:${source}:${page}`;
     const cached = await RedisCache.getSearch(cacheKey);
     if (cached) {
       return NextResponse.json(cached);
     }
 
-    // 构建查询条件
-    const conditions = [eq(resources.status, 'active')];
-
+    // 构建WHERE子句
+    let whereConditions = `status = 'active'`;
     if (category !== '全部') {
-      conditions.push(eq(resources.category, category));
+      whereConditions += ` AND category = '${category.replace(/'/g, "''")}'`;
     }
-
     if (source !== '全部') {
-      conditions.push(eq(resources.source, source));
+      whereConditions += ` AND source = '${source.replace(/'/g, "''")}'`;
     }
-
     if (q) {
-      conditions.push(
-        or(
-          like(resources.name, `%${q}%`),
-          like(resources.category, `%${q}%`)
-        )
-      );
+      const qEscaped = q.replace(/'/g, "''");
+      whereConditions += ` AND (name ILIKE '%${qEscaped}%' OR category ILIKE '%${qEscaped}%')`;
     }
 
     // 查询总数
-    const countResult = await db.execute<{ count: number }>(
-      sql`SELECT COUNT(*) as count FROM xx_resources WHERE status = 'active' ${
-        category !== '全部' ? sql` AND category = ${category}` : sql``
-      } ${source !== '全部' ? sql` AND source = ${source}` : sql``} ${
-        q ? sql` AND (name ILIKE ${'%' + q + '%'} OR category ILIKE ${'%' + q + '%'})` : sql``
-      }`
-    );
-    const total = countResult[0]?.count || 0;
+    const countResult = await db.execute(sql`SELECT COUNT(*) as count FROM xx_resources WHERE ${sql.raw(whereConditions)}`);
+    const total = (countResult as any)[0]?.count || 0;
 
     // 分页查询
     const offset = (page - 1) * pageSize;
-    const items = await db.execute(
-      sql`SELECT id, name, link, link_code, source, category, size, type, tags, tmdb_id, view_count
-          FROM xx_resources
-          WHERE status = 'active'
-          ${category !== '全部' ? sql` AND category = ${category}` : sql``}
-          ${source !== '全部' ? sql` AND source = ${source}` : sql``}
-          ${q ? sql` AND (name ILIKE ${'%' + q + '%'} OR category ILIKE ${'%' + q + '%'})` : sql``}
-          ORDER BY view_count DESC, created_at DESC
-          LIMIT ${pageSize} OFFSET ${offset}`
-    );
+    const items = await db.execute(sql`
+      SELECT id, name, link, link_code, source, category, size, type, tags, tmdb_id, view_count
+      FROM xx_resources
+      WHERE ${sql.raw(whereConditions)}
+      ORDER BY view_count DESC, created_at DESC
+      LIMIT ${pageSize} OFFSET ${offset}
+    `);
 
     // 批量获取TMDB信息
-    const tmdbIds = items
+    const itemsArr = (items as any[]) || [];
+    const tmdbIds = itemsArr
       .map((item: any) => item.tmdb_id)
       .filter(Boolean)
       .filter((id: string, index: number, arr: string[]) => arr.indexOf(id) === index);
 
-    const tmdbInfos = await db.execute(
-      sql`SELECT * FROM xx_tmdb_cache WHERE tmdb_id IN (${tmdbIds.map((id: string) => `'${id}'`).join(',')})`
-    );
-
-    const tmdbMap = new Map(tmdbInfos.map((info: any) => [info.tmdb_id, info]));
+    let tmdbMap = new Map<string, any>();
+    if (tmdbIds.length > 0) {
+      const inClause = tmdbIds.map((id: string) => `'${id}'`).join(',');
+      const tmdbInfos = await db.execute(sql`SELECT * FROM xx_tmdb_cache WHERE tmdb_id IN (${sql.raw(inClause)})`);
+      tmdbMap = new Map((tmdbInfos as any[]).map((info: any) => [info.tmdb_id, info]));
+    }
 
     // 组装返回数据
     const result = {
       total,
       page,
       pageSize,
-      items: items.map((item: any) => ({
+      items: itemsArr.map((item: any) => ({
         id: item.id,
         name: item.name,
         link: item.link,
@@ -123,8 +107,8 @@ export async function GET(request: NextRequest) {
     await RedisCache.setSearch(cacheKey, result);
 
     return NextResponse.json(result);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Search error:', error);
-    return NextResponse.json({ error: '搜索失败' }, { status: 500 });
+    return NextResponse.json({ error: '搜索失败: ' + error.message }, { status: 500 });
   }
 }
