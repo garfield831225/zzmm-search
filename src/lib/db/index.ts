@@ -1,5 +1,5 @@
-import { sql } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-serverless';
+import { neon } from '@neondatabase/serverless';
+import { drizzle } from 'drizzle-orm/neon-http';
 
-const client = sql;
+const client = neon;
 export const db = drizzle(client);

@@ -1,7 +1,7 @@
-import { sql } from '@neondatabase/serverless';
+import { neon } from '@neondatabase/serverless';
 import { readFileSync } from 'fs';
 
-const client = sql;
+const client = neon;
 
 // 来源识别
 function detectSource(link: string): string {
