@@ -68,7 +68,7 @@ export async function GET() {
   // 查看导入进度
   const result = await db.execute<{ count: string }>(sql`SELECT COUNT(*) as count FROM xx_resources`);
   return NextResponse.json({
-    total: parseInt(result[0]?.count || '0'),
+    total: parseInt((result as any)[0]?.count || '0'),
     message: 'POST JSON数据到 /api/admin/import 进行导入',
   });
 }
