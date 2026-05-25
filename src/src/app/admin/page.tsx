@@ -204,12 +204,16 @@ export default function AdminPage() {
         )}
         {activeTab === 'login' && (
           <div className="p-6">
-            <LoginPage />
+            <div className="bg-[#12121a] rounded-xl p-5 border border-white/5">
+              <p className="text-white/60">登录日志将在此处显示...</p>
+            </div>
           </div>
         )}
         {activeTab === 'register' && (
           <div className="p-6">
-            <RegisterPage />
+            <div className="bg-[#12121a] rounded-xl p-5 border border-white/5">
+              <p className="text-white/60">注册统计将在此处显示...</p>
+            </div>
           </div>
         )}
       </main>
