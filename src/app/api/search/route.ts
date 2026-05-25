@@ -2,8 +2,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { sql } from 'drizzle-orm';
+import { sql } from '@/lib/db';
 import RedisCache from '@/lib/redis';
 
 // 来源映射
@@ -52,18 +51,18 @@ export async function GET(request: NextRequest) {
     }
 
     // 查询总数
-    const countResult = await db.execute(sql`SELECT COUNT(*) as count FROM xx_resources WHERE ${sql.raw(whereConditions)}`);
-    const total = (countResult as any)[0]?.count || 0;
+    const countResult = await sql`SELECT COUNT(*) as count FROM xx_resources WHERE ${whereConditions}`;
+    const total = (countResult as unknown as any[])[0]?.count || 0;
 
     // 分页查询
     const offset = (page - 1) * pageSize;
-    const items = await db.execute(sql`
+    const items = await sql`
       SELECT id, name, link, link_code, source, category, size, type, tags, tmdb_id, view_count
       FROM xx_resources
-      WHERE ${sql.raw(whereConditions)}
+      WHERE ${whereConditions}
       ORDER BY view_count DESC, created_at DESC
       LIMIT ${pageSize} OFFSET ${offset}
-    `);
+    `;
 
     // 批量获取TMDB信息
     const itemsArr = (items as unknown as any[]) || [];
@@ -75,7 +74,7 @@ export async function GET(request: NextRequest) {
     let tmdbMap = new Map<string, any>();
     if (tmdbIds.length > 0) {
       const inClause = tmdbIds.map((id: string) => `'${id}'`).join(',');
-      const tmdbInfos = await db.execute(sql`SELECT * FROM xx_tmdb_cache WHERE tmdb_id IN (${sql.raw(inClause)})`);
+      const tmdbInfos = await sql`SELECT * FROM xx_tmdb_cache WHERE tmdb_id IN (${inClause})`;
       tmdbMap = new Map((tmdbInfos as unknown as any[]).map((info: any) => [info.tmdb_id, info]));
     }
 
