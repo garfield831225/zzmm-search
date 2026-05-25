@@ -1,5 +1,4 @@
 import { neon } from '@neondatabase/serverless';
-import { drizzle } from 'drizzle-orm/neon-http';
 
-const client = neon;
-export const db = drizzle(client);
+// neondatabase v3: 直接导出 tagged template 函数
+export const sql = neon(process.env.DATABASE_URL!);
