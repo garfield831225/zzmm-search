@@ -1,13 +1,8 @@
 {
   "framework": "nextjs",
-  "buildCommand": "npm run build",
+  "buildCommand": "NEXT_TELEMETRY_DISABLED=1 npx next build",
   "installCommand": "npm install",
-  "headers": [
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "Cache-Control", "value": "no-store" }
-      ]
-    }
-  ]
+  "github": {
+    "autoJobCancelInProgress": true
+  }
 }
