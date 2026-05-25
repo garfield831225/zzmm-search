@@ -38,7 +38,11 @@ export async function GET() {
       })),
     });
   } catch (error: any) {
-    console.error('Stats error:', error);
-    return NextResponse.json({ stats: { totalResources: 0, totalUsers: 0, activeUsers: 0, totalViews: 0, todayNew: 0, sourceStats: {}, categoryStats: {} }, recentLogs: [] });
+    console.error('[/api/admin/stats]', error.message);
+    return NextResponse.json({ 
+      error: 'Stats endpoint error',
+      message: error.message,
+      stack: error.stack,
+    }, { status: 500 });
   }
 }

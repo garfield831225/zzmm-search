@@ -6,25 +6,17 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    // 资源总数
     const resourcesRes = await sql`SELECT COUNT(*) as count FROM xx_resources`;
     const totalResources = (resourcesRes as unknown as any[])[0]?.count || 0;
 
-    // 用户总数
     const usersRes = await sql`SELECT COUNT(*) as count FROM xx_users`;
     const totalUsers = (usersRes as unknown as any[])[0]?.count || 0;
 
-    // 今日新增
     const todayRes = await sql`SELECT COUNT(*) as count FROM xx_resources WHERE created_at::date = CURRENT_DATE`;
     const todayNew = (todayRes as unknown as any[])[0]?.count || 0;
 
-    // 分类统计
     const catRes = await sql`SELECT category, COUNT(*) as count FROM xx_resources GROUP BY category ORDER BY count DESC LIMIT 20`;
-
-    // 来源统计
     const sourceRes = await sql`SELECT source, COUNT(*) as count FROM xx_resources GROUP BY source ORDER BY count DESC`;
-
-    // 最近导入日志（取最近10条）
     const logsRes = await sql`SELECT id, action, target, detail, created_at FROM xx_logs ORDER BY created_at DESC LIMIT 10`;
 
     return NextResponse.json({
@@ -46,7 +38,11 @@ export async function GET() {
       })),
     });
   } catch (error: any) {
-    console.error('Stats error:', error);
-    return NextResponse.json({ stats: { totalResources: 0, totalUsers: 0, activeUsers: 0, totalViews: 0, todayNew: 0, sourceStats: {}, categoryStats: {} }, recentLogs: [] });
+    console.error('[/api/admin/stats]', error.message);
+    return NextResponse.json({ 
+      error: 'Stats endpoint error',
+      message: error.message,
+      stack: error.stack,
+    }, { status: 500 });
   }
 }
