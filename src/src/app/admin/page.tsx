@@ -3,6 +3,10 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
+import {
+  LayoutDashboard, Users, FolderOpen, CreditCard, Key, FileText,
+  Volume2, Settings, Upload, Home
+} from 'lucide-react';
 import ImportPanel from './import/ImportPanel';
 import ZzmmImportPanel from './import/ZzmmImportPanel';
 
@@ -49,16 +53,16 @@ export default function AdminPage() {
   };
 
   const adminNavItems = [
-    { key: 'dashboard', label: '数据统计', icon: '📊' },
-    { key: 'users', label: '用户管理', icon: '👥' },
-    { key: 'resources', label: '资源管理', icon: '📁' },
-    { key: 'plans', label: '套餐管理', icon: '💰' },
-    { key: 'codes', label: '激活码', icon: '🔑' },
-    { key: 'docs', label: '线上文档', icon: '📄' },
-    { key: 'announcements', label: '公告管理', icon: '📢' },
-    { key: 'settings', label: '系统设置', icon: '⚙️' },
-    { key: 'import', label: '标准导入', icon: '📤' },
-    { key: 'zzmm', label: '泽泽妈妈导入', icon: '🏠' },
+    { key: 'dashboard', label: '数据统计', icon: LayoutDashboard },
+    { key: 'users', label: '用户管理', icon: Users },
+    { key: 'resources', label: '资源管理', icon: FolderOpen },
+    { key: 'plans', label: '套餐管理', icon: CreditCard },
+    { key: 'codes', label: '激活码', icon: Key },
+    { key: 'docs', label: '线上文档', icon: FileText },
+    { key: 'announcements', label: '公告管理', icon: Volume2 },
+    { key: 'settings', label: '系统设置', icon: Settings },
+    { key: 'import', label: '标准导入', icon: Upload },
+    { key: 'zzmm', label: '🏠 泽泽妈妈导入', icon: Home },
   ];
 
   if (loading) {
@@ -75,8 +79,8 @@ export default function AdminPage() {
       <aside className="w-64 bg-[#12121a] border-r border-white/5 shrink-0">
         <div className="p-4 border-b border-white/5">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-violet-500 to-pink-500 rounded-xl flex items-center justify-center">
-              <span>🎬</span>
+            <div className="w-10 h-10 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg shadow-violet-500/30">
+              <LayoutDashboard size={20} className="text-white" />
             </div>
             <div>
               <div className="font-bold">管理后台</div>
@@ -92,11 +96,12 @@ export default function AdminPage() {
               onClick={() => setActiveTab(item.key)}
               className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm transition ${
                 activeTab === item.key
-                  ? 'bg-violet-600 text-white'
-                  : 'text-white/60 hover:bg-white/5'
+                  ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-violet-500/20'
+                  : 'text-white/50 hover:text-white hover:bg-white/5'
               }`}
             >
-              {item.icon} {item.label}
+              <item.icon size={18} className={activeTab === item.key ? 'text-white' : 'text-white/40'} />
+              <span>{item.label}</span>
             </button>
           ))}
         </nav>
