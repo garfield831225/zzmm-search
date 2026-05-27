@@ -126,7 +126,7 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', year?: string, lan
 }
 
 // 核心匹配函数（精简策略，3次尝试上限）
-async function matchOne(rawName: string): Promise<{ id: string; poster: string; title: string; vote: number; year: string } | 'GARBLED' | 'NOMATCH'> {
+async function matchOne(rawName: string): Promise<{ id: string; tmdb_type: 'movie' | 'tv'; poster: string; title: string; vote: number; year: string } | 'GARBLED' | 'NOMATCH'> {
   if (isGarbled(rawName)) return 'GARBLED';
 
   const { cleanName, year, season } = cleanFolderName(rawName);
@@ -160,6 +160,7 @@ async function matchOne(rawName: string): Promise<{ id: string; poster: string; 
         if (result) {
           return {
             id: String(result.id),
+            tmdb_type: type,
             poster: result.poster_path ? `${TMDB_IMG}${result.poster_path}` : '',
             title: result.title || result.name || cleanName,
             vote: result.vote_average || 0,
@@ -172,17 +173,17 @@ async function matchOne(rawName: string): Promise<{ id: string; poster: string; 
 }
 
 // 缓存到 xx_tmdb_cache
-async function cacheIt(r: { id: string; poster: string; title: string; vote: number; year: string }, sqlFn: any) {
+async function cacheIt(r: { id: string; tmdb_type: 'movie' | 'tv'; poster: string; title: string; vote: number; year: string }, sqlFn: any) {
   try {
     await sqlFn`
       INSERT INTO xx_tmdb_cache (tmdb_id, tmdb_type, title, original_title, overview, poster_path, vote_average, vote_count, release_date, status, tagline, genres, cached_at)
-      VALUES (${r.id}, ${'movie'}, ${r.title}, ${''}, ${''}, ${r.poster}, ${r.vote}, ${0}, ${r.year || null}, ${null}, ${''}, ${''}, NOW())
+      VALUES (${r.id}, ${r.tmdb_type}, ${r.title}, ${''}, ${''}, ${r.poster}, ${r.vote}, ${0}, ${r.year || null}, ${null}, ${''}, ${''}, NOW())
       ON CONFLICT (tmdb_id) DO UPDATE SET title = EXCLUDED.title, poster_path = EXCLUDED.poster_path, vote_average = EXCLUDED.vote_average, cached_at = NOW()
     `;
   } catch {}
 }
 
-// ─── 主入口 ─────────────────────────────────────────────────────────────────
+// ─── 辅助函数 ─────────────────────────────────────────────────────────────────
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const key = searchParams.get('key');
