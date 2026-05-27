@@ -1,5 +1,7 @@
 'use client';
 
+// Fixed git email for Vercel deployment
+
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
