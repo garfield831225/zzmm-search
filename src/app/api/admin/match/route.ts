@@ -130,7 +130,7 @@ async function matchOne(rawName: string): Promise<{ id: string; poster: string; 
   if (isGarbled(rawName)) return 'GARBLED';
 
   const { cleanName, year, season } = cleanFolderName(rawName);
-  if (cleanName.length < 2) return null;
+  if (cleanName.length < 2) return 'NOMATCH';
 
   const isEng = isEnglishName(cleanName);
 
