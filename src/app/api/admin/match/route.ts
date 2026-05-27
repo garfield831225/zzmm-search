@@ -197,7 +197,7 @@ export async function GET(req: Request) {
     const rows = await sql`
       SELECT id, name, link, category, source
       FROM xx_resources
-      WHERE (tmdb_id IS NULL OR tmdb_id NOT IN ('GARBLED', 'NOMATCH'))
+      WHERE tmdb_id IS NULL
         AND status = 'active'
         AND name IS NOT NULL
         AND LENGTH(name) > 2
