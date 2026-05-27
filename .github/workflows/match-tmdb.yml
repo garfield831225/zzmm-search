@@ -9,7 +9,7 @@ on:
         default: '500'
         type: string
   schedule:
-    - cron: '*/3 * * * *'
+    - cron: '*/8 * * * *'
 
 jobs:
   match:
