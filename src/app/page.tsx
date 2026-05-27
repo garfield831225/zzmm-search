@@ -72,7 +72,9 @@ export default function HomePage() {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [mounted, setMounted] = useState(false);
   const [downloadToasts, setDownloadToasts] = useState<DownloadToast[]>([]);
+  const [copyToasts, setCopyToasts] = useState<DownloadToast[]>([]);
   let toastCounter = 0;
+  let copyToastCounter = 0;
 
   const addToast = useCallback((type: DownloadToast['type'], message: string) => {
     const id = ++toastCounter;
@@ -110,6 +112,26 @@ export default function HomePage() {
       addToast('error', '网络错误，请重试');
     }
   }, [addToast]);
+
+  const isMagnetOrEd2k = useCallback((link: string) => {
+    return link?.startsWith('magnet:') || link?.startsWith('ed2k://');
+  }, []);
+
+  const addCopyToast = useCallback((msg: string) => {
+    const id = ++copyToastCounter;
+    setCopyToasts(prev => [...prev, { id, type: 'success', message: msg }]);
+    setTimeout(() => setCopyToasts(prev => prev.filter(t => t.id !== id)), 2000);
+  }, []);
+
+  const handleCopyLink = useCallback(async (link: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(link);
+      addCopyToast('已复制到剪贴板');
+    } catch {
+      addCopyToast('复制失败，请手动复制');
+    }
+  }, [addCopyToast]);
 
   // 从 localStorage 恢复登录状态
   useEffect(() => {
@@ -317,12 +339,21 @@ export default function HomePage() {
                 )}
 
                 {/* Download Button */}
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleDownload(item.id, e); }}
-                  className="absolute bottom-2 left-2 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs font-medium opacity-0 group-hover:opacity-100 transition flex items-center gap-1"
-                >
-                  ⬇ 下载
-                </button>
+                {isMagnetOrEd2k(item.link) ? (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleCopyLink(item.link, e); }}
+                    className="absolute bottom-2 left-2 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-xs font-medium opacity-0 group-hover:opacity-100 transition flex items-center gap-1"
+                  >
+                    📋 复制链接
+                  </button>
+                ) : (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDownload(item.id, e); }}
+                    className="absolute bottom-2 left-2 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs font-medium opacity-0 group-hover:opacity-100 transition flex items-center gap-1"
+                  >
+                    ⬇ 下载
+                  </button>
+                )}
               </div>
 
               {/* Info */}
@@ -434,23 +465,41 @@ export default function HomePage() {
                     {/* Current link */}
                     <div className="space-y-2">
                       <div className="text-xs text-white/40 mb-1">📌 当前版本</div>
-                      <button
-                        onClick={(e) => { e.preventDefault(); handleDownload(selectedItem.id, e); }}
-                        className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left"
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className="text-xl">🔗</span>
-                          <div>
-                            <div className="font-medium">{selectedItem.source}</div>
-                            <div className="text-sm text-white/50">
-                              {selectedItem.linkCode ? `提取码：${selectedItem.linkCode}` : '无需提取码'}
+                      {isMagnetOrEd2k(selectedItem.link) ? (
+                        <button
+                          onClick={(e) => { e.preventDefault(); handleCopyLink(selectedItem.link, e); }}
+                          className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-xl">🔗</span>
+                            <div>
+                              <div className="font-medium">{selectedItem.source}</div>
+                              <div className="text-sm text-cyan-400">磁力/ED2K链接，点击复制</div>
                             </div>
                           </div>
-                        </div>
-                        <span className="px-3 py-1 bg-violet-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">
-                          ⬇ 下载
-                        </span>
-                      </button>
+                          <span className="px-3 py-1 bg-cyan-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">
+                            📋 复制
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => { e.preventDefault(); handleDownload(selectedItem.id, e); }}
+                          className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-xl">🔗</span>
+                            <div>
+                              <div className="font-medium">{selectedItem.source}</div>
+                              <div className="text-sm text-white/50">
+                                {selectedItem.linkCode ? `提取码：${selectedItem.linkCode}` : '无需提取码'}
+                              </div>
+                            </div>
+                          </div>
+                          <span className="px-3 py-1 bg-violet-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">
+                            ⬇ 下载
+                          </span>
+                        </button>
+                      )}
                     </div>
 
                     {/* Related Links (same TMDB ID) */}
@@ -458,17 +507,33 @@ export default function HomePage() {
                       <div className="space-y-2">
                         <div className="text-xs text-white/40 mb-1">📦 其他版本（共 {relatedItems.length} 个）</div>
                         {relatedItems.map((rel) => (
-                          <button
-                            key={rel.id}
-                            onClick={(e) => { e.preventDefault(); handleDownload(rel.id, e); }}
-                            className="w-full flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 rounded-lg transition text-left"
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="px-2 py-0.5 bg-pink-600/30 rounded text-xs shrink-0">{rel.source}</span>
-                              <span className="text-sm truncate">{rel.name}</span>
-                            </div>
-                            <span className="text-white/40 text-xs shrink-0 ml-2">{rel.size || ''}</span>
-                          </button>
+                          isMagnetOrEd2k(rel.link) ? (
+                            <button
+                              key={rel.id}
+                              onClick={(e) => { e.preventDefault(); handleCopyLink(rel.link, e); }}
+                              className="w-full flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 rounded-lg transition text-left"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="px-2 py-0.5 bg-cyan-600/30 rounded text-xs shrink-0">{rel.source}</span>
+                                <span className="text-sm truncate">{rel.name}</span>
+                              </div>
+                              <span className="text-cyan-400 text-xs shrink-0 ml-2 flex items-center gap-1">
+                                📋 复制
+                              </span>
+                            </button>
+                          ) : (
+                            <button
+                              key={rel.id}
+                              onClick={(e) => { e.preventDefault(); handleDownload(rel.id, e); }}
+                              className="w-full flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 rounded-lg transition text-left"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="px-2 py-0.5 bg-pink-600/30 rounded text-xs shrink-0">{rel.source}</span>
+                                <span className="text-sm truncate">{rel.name}</span>
+                              </div>
+                              <span className="text-white/40 text-xs shrink-0 ml-2">{rel.size || ''}</span>
+                            </button>
+                          )
                         ))}
                       </div>
                     )}
@@ -518,6 +583,23 @@ export default function HomePage() {
                  toast.type === 'banned' ? '🚫' : '✕'}
               </span>
               {toast.message}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      {/* Copy Toasts */}
+      <div className="fixed bottom-6 left-6 z-50 flex flex-col gap-2">
+        <AnimatePresence>
+          {copyToasts.map((toast) => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, x: -80, scale: 0.8 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: -80, scale: 0.8 }}
+              className="px-5 py-3 rounded-xl text-sm font-medium shadow-lg flex items-center gap-2 min-w-[180px] bg-cyan-600/90 text-white"
+            >
+              📋 {toast.message}
             </motion.div>
           ))}
         </AnimatePresence>
