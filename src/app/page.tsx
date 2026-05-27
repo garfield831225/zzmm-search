@@ -1,6 +1,4 @@
-'use client';
-
-// Fixed git email for Vercel deployment
+'use client'
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -93,6 +91,13 @@ export default function HomePage() {
     if (link) window.open(link, '_blank');
     else addToast('error', '链接无效');
   }, [addToast]);
+
+  // 从URL提取真正的提取码
+  const extractCodeFromUrl = (link: string): string | null => {
+    if (!link) return null;
+    const match = link.match(/[?&]password=([^&]+)/i);
+    return match ? match[1] : null;
+  };
 
   const handleDownload = useCallback(async (resourceId: number, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -507,7 +512,10 @@ export default function HomePage() {
                             <div>
                               <div className="font-medium">{selectedItem.source}</div>
                               <div className="text-sm text-white/50">
-                                {selectedItem.linkCode ? `提取码：${selectedItem.linkCode}` : '无需提取码'}
+                                {(() => {
+                                  const realCode = extractCodeFromUrl(selectedItem.link);
+                                  return realCode ? `提取码：${realCode}` : '无需提取码';
+                                })()}
                               </div>
                             </div>
                           </div>
