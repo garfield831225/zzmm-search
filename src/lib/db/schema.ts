@@ -1,23 +1,23 @@
-import { pgTable, text, timestamp, boolean, integer, serial, pgSequence } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean, integer, serial } from 'drizzle-orm/pg-core';
 
 // ============ 资源表 ============
 export const resources = pgTable('xx_resources', {
   id: serial('id').primaryKey(),
-  name: text('name').notNull(),           // 资源名称
-  link: text('link').notNull(),            // 分享链接
-  linkCode: text('link_code'),            // 提取码
-  source: text('source').notNull(),        // 来源：115/百度/阿里/磁力/ed2k/迅雷/天翼/123
-  category: text('category').notNull(),   // 分类：电影/剧集/动漫/综艺/音乐等
-  size: text('size'),                     // 文件大小
-  type: text('type'),                     // 类型：4K/1080P/720P等
-  tags: text('tags').array(),              // 标签数组
-  tmdbId: text('tmdb_id'),                // TMDB电影ID
-  imdbId: text('imdb_id'),                // IMDB电影ID
-  status: text('status').default('pending'), // pending/active/disabled
-  validStatus: text('valid_status').default('unchecked'), // unchecked/valid/invalid
+  name: text('name').notNull(),
+  link: text('link').notNull(),
+  linkCode: text('link_code'),
+  source: text('source').notNull(),
+  category: text('category').notNull(),
+  size: text('size'),
+  type: text('type'),
+  tags: text('tags').array(),
+  tmdbId: text('tmdb_id'),
+  imdbId: text('imdb_id'),
+  status: text('status').default('pending'),
+  validStatus: text('valid_status').default('unchecked'),
   validCheckedAt: timestamp('valid_checked_at'),
-  uploadedBy: text('uploaded_by'),        // 上传用户ID
-  approvedBy: text('approved_by'),        // 审核人ID
+  uploadedBy: text('uploaded_by'),
+  approvedBy: text('approved_by'),
   approvedAt: timestamp('approved_at'),
   viewCount: integer('view_count').default(0),
   createdAt: timestamp('created_at').defaultNow(),
@@ -45,7 +45,7 @@ export const users = pgTable('xx_users', {
   username: text('username').notNull().unique(),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
-  userGroup: text('user_group').default('free'), // free/vip/premium/admin
+  userGroup: text('user_group').default('free'),
   isAdmin: boolean('is_admin').default(false),
   isActive: boolean('is_active').default(true),
   expireAt: timestamp('expire_at'),
@@ -64,7 +64,7 @@ export const userGroups = pgTable('xx_user_groups', {
   canComment: boolean('can_comment').default(false),
   canReport: boolean('can_report').default(false),
   maxDailySearch: integer('max_daily_search').default(100),
-  allowedCategories: text('allowed_categories').array(), // 允许查看的分类，为空则全部
+  allowedCategories: text('allowed_categories').array(),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -72,10 +72,10 @@ export const userGroups = pgTable('xx_user_groups', {
 export const plans = pgTable('xx_plans', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),
-  price: integer('price').default(0),     // 价格（分）
-  duration: integer('duration').notNull(), // 天数
-  userGroup: text('user_group').notNull(), // 升级到的用户组
-  permissions: text('permissions').array(), // 额外权限列表
+  price: integer('price').default(0),
+  duration: integer('duration').notNull(),
+  userGroup: text('user_group').notNull(),
+  permissions: text('permissions').array(),
   isActive: boolean('is_active').default(true),
   sortOrder: integer('sort_order').default(0),
   createdAt: timestamp('created_at').defaultNow(),
@@ -85,13 +85,13 @@ export const plans = pgTable('xx_plans', {
 export const activationCodes = pgTable('xx_activation_codes', {
   id: serial('id').primaryKey(),
   code: text('code').notNull().unique(),
-  planId: text('plan_id'),                 // 对应套餐ID
+  planId: text('plan_id'),
   userGroup: text('user_group').notNull(),
-  duration: integer('duration').notNull(), // 天数
+  duration: integer('duration').notNull(),
   isUsed: boolean('is_used').default(false),
-  usedBy: text('used_by'),               // 使用者ID
+  usedBy: text('used_by'),
   usedAt: timestamp('used_at'),
-  createdBy: text('created_by'),         // 创建者ID
+  createdBy: text('created_by'),
   createdAt: timestamp('created_at').defaultNow(),
   expiresAt: timestamp('expires_at'),
 });
@@ -102,8 +102,8 @@ export const payments = pgTable('xx_payments', {
   userId: text('user_id').notNull(),
   planId: text('plan_id').notNull(),
   amount: integer('amount').notNull(),
-  status: text('status').default('pending'), // pending/paid/refunded/cancelled
-  tradeNo: text('trade_no'),                // 第三方交易号
+  status: text('status').default('pending'),
+  tradeNo: text('trade_no'),
   paidAt: timestamp('paid_at'),
   createdAt: timestamp('created_at').defaultNow(),
 });
@@ -121,9 +121,9 @@ export const reports = pgTable('xx_reports', {
   id: serial('id').primaryKey(),
   userId: text('user_id'),
   resourceId: integer('resource_id').notNull(),
-  type: text('type').notNull(),             // invalid_link/wrong_info/other
+  type: text('type').notNull(),
   description: text('description'),
-  status: text('status').default('pending'), // pending/processed/resolved
+  status: text('status').default('pending'),
   handledBy: text('handled_by'),
   handledAt: timestamp('handled_at'),
   createdAt: timestamp('created_at').defaultNow(),
@@ -134,7 +134,7 @@ export const announcements = pgTable('xx_announcements', {
   id: serial('id').primaryKey(),
   title: text('title').notNull(),
   content: text('content').notNull(),
-  type: text('type').default('info'),     // info/warning/error
+  type: text('type').default('info'),
   isTop: boolean('is_top').default(false),
   isActive: boolean('is_active').default(true),
   startAt: timestamp('start_at'),
@@ -147,7 +147,7 @@ export const announcements = pgTable('xx_announcements', {
 export const onlineDocConfigs = pgTable('xx_online_doc_configs', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),
-  type: text('type').notNull(),           // tencent/wps
+  type: text('type').notNull(),
   url: text('url').notNull(),
   enabled: boolean('enabled').default(true),
   lastFetchAt: timestamp('last_fetch_at'),
@@ -164,6 +164,27 @@ export const systemSettings = pgTable('xx_system_settings', {
   value: text('value'),
   description: text('description'),
   updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// ============ 下载记录表 ============
+export const downloadLogs = pgTable('xx_download_logs', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  resourceId: integer('resource_id').notNull(),
+  resourceName: text('resource_name'),
+  source: text('source'),
+  ip: text('ip'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ============ 用户封禁/冷却记录表 ============
+export const userBlocks = pgTable('xx_user_blocks', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  blockType: text('block_type').notNull(),
+  reason: text('reason'),
+  expireAt: timestamp('expire_at'),
+  createdAt: timestamp('created_at').defaultNow(),
 });
 
 // ============ 操作日志表 ============

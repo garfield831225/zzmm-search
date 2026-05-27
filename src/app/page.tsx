@@ -8,6 +8,12 @@ import { useRouter } from 'next/navigation';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
 
+interface DownloadToast {
+  id: number;
+  type: 'success' | 'cooldown' | 'limit' | 'banned' | 'error';
+  message: string;
+}
+
 const CATEGORIES = ['全部', '电影', '剧集', '动漫', '综艺', '音乐', '纪录片', '学习资料', '其他'];
 const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '夸克网盘', '123网盘', '天翼云盘', '磁力链接', 'ed2k链接', '迅雷链接'];
 
@@ -65,7 +71,45 @@ export default function HomePage() {
   const [relatedItems, setRelatedItems] = useState<ResourceItem[]>([]);
   const [user, setUser] = useState<UserInfo | null>(null);
   const [mounted, setMounted] = useState(false);
-  const router = useRouter();
+  const [downloadToasts, setDownloadToasts] = useState<DownloadToast[]>([]);
+  let toastCounter = 0;
+
+  const addToast = useCallback((type: DownloadToast['type'], message: string) => {
+    const id = ++toastCounter;
+    setDownloadToasts(prev => [...prev, { id, type, message }]);
+    setTimeout(() => setDownloadToasts(prev => prev.filter(t => t.id !== id)), 4000);
+  }, []);
+
+  const handleDownload = useCallback(async (resourceId: number, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const token = localStorage.getItem('token');
+    if (!token) {
+      addToast('error', '请先登录');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/download?id=${resourceId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success && data.url) {
+        addToast('success', '下载链接已就绪，正在跳转...');
+        setTimeout(() => window.open(data.url, '_blank'), 800);
+      } else if (data.error === 'cooldown') {
+        addToast('cooldown', data.message);
+      } else if (data.error === 'limit_reached') {
+        addToast('limit', `今日次数已用完（${data.usedToday}/${data.limit}）`);
+      } else if (data.error === 'banned') {
+        addToast('banned', data.message);
+      } else if (data.error === 'no_permission') {
+        addToast('error', '免费用户无法使用下载功能，请升级会员');
+      } else {
+        addToast('error', data.message || '下载失败');
+      }
+    } catch {
+      addToast('error', '网络错误，请重试');
+    }
+  }, [addToast]);
 
   // 从 localStorage 恢复登录状态
   useEffect(() => {
@@ -271,6 +315,14 @@ export default function HomePage() {
                     <span>{parseFloat(item.tmdb.vote_average).toFixed(1)}</span>
                   </div>
                 )}
+
+                {/* Download Button */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleDownload(item.id, e); }}
+                  className="absolute bottom-2 left-2 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs font-medium opacity-0 group-hover:opacity-100 transition flex items-center gap-1"
+                >
+                  ⬇ 下载
+                </button>
               </div>
 
               {/* Info */}
@@ -382,11 +434,9 @@ export default function HomePage() {
                     {/* Current link */}
                     <div className="space-y-2">
                       <div className="text-xs text-white/40 mb-1">📌 当前版本</div>
-                      <a
-                        href={selectedItem.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group"
+                      <button
+                        onClick={(e) => { e.preventDefault(); handleDownload(selectedItem.id, e); }}
+                        className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left"
                       >
                         <div className="flex items-center gap-3">
                           <span className="text-xl">🔗</span>
@@ -397,10 +447,10 @@ export default function HomePage() {
                             </div>
                           </div>
                         </div>
-                        <span className="px-3 py-1 bg-violet-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition">
-                          打开 →
+                        <span className="px-3 py-1 bg-violet-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">
+                          ⬇ 下载
                         </span>
-                      </a>
+                      </button>
                     </div>
 
                     {/* Related Links (same TMDB ID) */}
@@ -408,19 +458,17 @@ export default function HomePage() {
                       <div className="space-y-2">
                         <div className="text-xs text-white/40 mb-1">📦 其他版本（共 {relatedItems.length} 个）</div>
                         {relatedItems.map((rel) => (
-                          <a
+                          <button
                             key={rel.id}
-                            href={rel.link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 rounded-lg transition"
+                            onClick={(e) => { e.preventDefault(); handleDownload(rel.id, e); }}
+                            className="w-full flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 rounded-lg transition text-left"
                           >
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="px-2 py-0.5 bg-pink-600/30 rounded text-xs shrink-0">{rel.source}</span>
                               <span className="text-sm truncate">{rel.name}</span>
                             </div>
                             <span className="text-white/40 text-xs shrink-0 ml-2">{rel.size || ''}</span>
-                          </a>
+                          </button>
                         ))}
                       </div>
                     )}
@@ -445,6 +493,35 @@ export default function HomePage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Download Toasts */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
+        <AnimatePresence>
+          {downloadToasts.map((toast) => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, x: 80, scale: 0.8 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 80, scale: 0.8 }}
+              className={`px-5 py-3 rounded-xl text-sm font-medium shadow-lg flex items-center gap-2 min-w-[220px] ${
+                toast.type === 'success' ? 'bg-green-600/90 text-white' :
+                toast.type === 'cooldown' ? 'bg-orange-600/90 text-white' :
+                toast.type === 'limit' ? 'bg-blue-600/90 text-white' :
+                toast.type === 'banned' ? 'bg-red-700/90 text-white' :
+                'bg-red-600/90 text-white'
+              }`}
+            >
+              <span className="text-base">
+                {toast.type === 'success' ? '✓' :
+                 toast.type === 'cooldown' ? '⏳' :
+                 toast.type === 'limit' ? '📊' :
+                 toast.type === 'banned' ? '🚫' : '✕'}
+              </span>
+              {toast.message}
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }
