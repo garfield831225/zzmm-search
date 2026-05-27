@@ -211,6 +211,9 @@ export default function HomePage() {
                   <span className="px-3 py-1.5 bg-violet-600/30 rounded-lg text-sm text-violet-300">
                     {user.username}
                   </span>
+                  <Link href="/nonfilm" className="px-3 py-1.5 bg-cyan-600/30 hover:bg-cyan-600/50 rounded-lg text-sm transition text-cyan-300">
+                    🎵 非影视
+                  </Link>
                   <Link href="/admin/codes" className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">
                     查看卡密
                   </Link>
@@ -225,9 +228,14 @@ export default function HomePage() {
                   </Link>
                 </div>
               ) : (
-                <Link href="/login" className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">
-                  登录 / 注册
-                </Link>
+                <div className="flex items-center gap-2">
+                  <Link href="/nonfilm" className="px-3 py-1.5 bg-cyan-600/30 hover:bg-cyan-600/50 rounded-lg text-sm transition text-cyan-300">
+                    🎵 非影视
+                  </Link>
+                  <Link href="/login" className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">
+                    登录 / 注册
+                  </Link>
+                </div>
               )}
             </div>
           </div>
