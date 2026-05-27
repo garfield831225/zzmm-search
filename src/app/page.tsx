@@ -98,7 +98,7 @@ export default function HomePage() {
 
   useEffect(() => {
     fetchItems(1);
-  }, [query, category, source]);
+  }, [category, source]);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -162,15 +162,22 @@ export default function HomePage() {
           </div>
 
           {/* Search */}
-          <div className="relative">
+          <div className="relative flex gap-2">
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') fetchItems(1); }}
               placeholder="输入片名、类型、分类搜索..."
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-3 pl-12 text-white placeholder-white/30 focus:outline-none focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/20 transition"
+              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-5 py-3 pl-12 text-white placeholder-white/30 focus:outline-none focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/20 transition"
             />
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30">🔍</span>
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none">🔍</span>
+            <button
+              onClick={() => fetchItems(1)}
+              className="px-5 py-3 bg-violet-600 hover:bg-violet-500 rounded-xl text-white font-medium transition shrink-0"
+            >
+              搜索
+            </button>
           </div>
 
           {/* Filters */}
