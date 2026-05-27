@@ -197,12 +197,11 @@ export async function GET(req: Request) {
     const rows = await sql`
       SELECT id, name, link, category, source
       FROM xx_resources
-      WHERE tmdb_id IS NULL
+      WHERE (tmdb_id IS NULL OR tmdb_id NOT IN ('GARBLED', 'NOMATCH'))
         AND status = 'active'
         AND name IS NOT NULL
         AND LENGTH(name) > 2
         AND category NOT IN ('学习资料', '音乐', '纪录片', '其他', '演唱会', '体育赛事', '少儿频道', '合集')
-        AND tmdb_id NOT IN ('GARBLED', 'NOMATCH')
       ORDER BY id
       LIMIT ${batchSize}
       FOR UPDATE SKIP LOCKED
