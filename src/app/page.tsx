@@ -93,21 +93,15 @@ export default function HomePage() {
       return;
     }
     try {
-      const res = await fetch(`/api/download?id=${resourceId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await fetch('/api/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ resourceId }),
       });
       const data = await res.json();
       if (data.success && data.url) {
-        addToast('success', '下载链接已就绪，正在跳转...');
-        setTimeout(() => window.open(data.url, '_blank'), 800);
-      } else if (data.error === 'cooldown') {
-        addToast('cooldown', data.message);
-      } else if (data.error === 'limit_reached') {
-        addToast('limit', `今日次数已用完（${data.usedToday}/${data.limit}）`);
-      } else if (data.error === 'banned') {
-        addToast('banned', data.message);
-      } else if (data.error === 'no_permission') {
-        addToast('error', '免费用户无法使用下载功能，请升级会员');
+        addToast('success', '正在跳转...');
+        setTimeout(() => window.open(data.url, '_blank'), 500);
       } else {
         addToast('error', data.message || '下载失败');
       }
