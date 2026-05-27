@@ -1,0 +1,8 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "NEXT_TELEMETRY_DISABLED=1 npx next build",
+  "installCommand": "npm install",
+  "github": {
+    "autoJobCancelInProgress": true
+  }
+}

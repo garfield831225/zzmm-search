@@ -1,0 +1,16 @@
+services:
+  zzmm-search:
+    image: node:20-alpine
+    container_name: zzmm-search
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data:ro
+    working_dir: /app
+    command: ["node", "server.js"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/meta"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
