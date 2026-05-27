@@ -52,6 +52,13 @@ export async function GET(req: Request) {
       recentUnmatched: (recent || []).map((r: any) => ({
         id: (r as any).id, name: (r as any).name, category: (r as any).category, source: (r as any).source, created_at: (r as any).created_at
       })),
+      // 下载统计
+      downloadStats: {
+        todayDownloads: parseInt((await sql`SELECT COUNT(*) as cnt FROM xx_download_logs WHERE DATE(created_at) = CURRENT_DATE` as any[])[0]?.cnt || '0'),
+        totalDownloads: parseInt((await sql`SELECT COUNT(*) as cnt FROM xx_download_logs` as any[])[0]?.cnt || '0'),
+        totalUsers: parseInt((await sql`SELECT COUNT(*) as cnt FROM xx_users` as any[])[0]?.cnt || '0'),
+        activeUsers: parseInt((await sql`SELECT COUNT(DISTINCT user_id) as cnt FROM xx_download_logs WHERE DATE(created_at) = CURRENT_DATE` as any[])[0]?.cnt || '0'),
+      },
       message: 'stats ok - all routes verified',
     });
   } catch (e: any) {

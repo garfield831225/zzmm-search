@@ -132,28 +132,66 @@ export default function AdminPage() {
 
         {/* Stats */}
         {tab === 'stats' && stats && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-[#12121a] rounded-xl p-4">
-              <div className="text-3xl font-bold text-violet-400">{stats.totalResources?.toLocaleString()}</div>
-              <div className="text-sm text-white/40 mt-1">总资源数</div>
-            </div>
-            <div className="bg-[#12121a] rounded-xl p-4">
-              <div className="text-3xl font-bold text-green-400">{stats.matchedResources?.toLocaleString()}</div>
-              <div className="text-sm text-white/40 mt-1">已匹配</div>
-            </div>
-            <div className="bg-[#12121a] rounded-xl p-4">
-              <div className="text-3xl font-bold text-pink-400">
-                {stats.totalResources && stats.matchedResources ? Math.round(stats.matchedResources / stats.totalResources * 100) : 0}%
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+              <div className="bg-[#12121a] rounded-xl p-4">
+                <div className="text-3xl font-bold text-violet-400">{stats.totalResources?.toLocaleString()}</div>
+                <div className="text-sm text-white/40 mt-1">总资源数</div>
               </div>
-              <div className="text-sm text-white/40 mt-1">匹配率</div>
-            </div>
-            <div className="bg-[#12121a] rounded-xl p-4">
-              <div className="text-3xl font-bold text-yellow-400">
-                {stats.pendingByCategory?.reduce((a: number, c: any) => a + c.count, 0) || 0}
+              <div className="bg-[#12121a] rounded-xl p-4">
+                <div className="text-3xl font-bold text-green-400">{stats.matchedResources?.toLocaleString()}</div>
+                <div className="text-sm text-white/40 mt-1">已匹配</div>
               </div>
-              <div className="text-sm text-white/40 mt-1">待匹配</div>
+              <div className="bg-[#12121a] rounded-xl p-4">
+                <div className="text-3xl font-bold text-pink-400">
+                  {stats.totalResources && stats.matchedResources ? Math.round(stats.matchedResources / stats.totalResources * 100) : 0}%
+                </div>
+                <div className="text-sm text-white/40 mt-1">匹配率</div>
+              </div>
+              <div className="bg-[#12121a] rounded-xl p-4">
+                <div className="text-3xl font-bold text-yellow-400">
+                  {stats.pendingByCategory?.reduce((a: number, c: any) => a + c.count, 0) || 0}
+                </div>
+                <div className="text-sm text-white/40 mt-1">待匹配</div>
+              </div>
             </div>
-          </div>
+
+            {/* Download + User stats */}
+            {stats.downloadStats && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-[#12121a] rounded-xl p-4">
+                  <div className="text-2xl font-bold text-cyan-400">{stats.downloadStats.todayDownloads}</div>
+                  <div className="text-sm text-white/40 mt-1">今日下载</div>
+                </div>
+                <div className="bg-[#12121a] rounded-xl p-4">
+                  <div className="text-2xl font-bold text-cyan-400">{stats.downloadStats.totalDownloads}</div>
+                  <div className="text-sm text-white/40 mt-1">总下载次数</div>
+                </div>
+                <div className="bg-[#12121a] rounded-xl p-4">
+                  <div className="text-2xl font-bold text-orange-400">{stats.downloadStats.totalUsers}</div>
+                  <div className="text-sm text-white/40 mt-1">注册用户</div>
+                </div>
+                <div className="bg-[#12121a] rounded-xl p-4">
+                  <div className="text-2xl font-bold text-orange-400">{stats.downloadStats.activeUsers}</div>
+                  <div className="text-sm text-white/40 mt-1">今日活跃</div>
+                </div>
+              </div>
+            )}
+
+            {/* Category breakdown */}
+            {stats.pendingByCategory?.length > 0 && (
+              <div className="bg-[#12121a] rounded-xl p-4 mt-4">
+                <h3 className="text-sm font-semibold text-white/60 mb-3">各分类待匹配</h3>
+                <div className="flex flex-wrap gap-2">
+                  {stats.pendingByCategory.map((c: any) => (
+                    <span key={c.category} className="px-3 py-1 bg-white/5 rounded-lg text-sm">
+                      {c.category} <span className="text-yellow-400">{c.count}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {/* Users */}
