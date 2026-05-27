@@ -47,6 +47,7 @@ interface ResourceItem {
   tmdbId: string;
   viewCount: number;
   tmdb: TmdbInfo | null;
+  isCurrent?: boolean;
 }
 
 interface SearchResponse {
@@ -69,6 +70,8 @@ export default function HomePage() {
   const [selectedItem, setSelectedItem] = useState<ResourceItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [relatedItems, setRelatedItems] = useState<ResourceItem[]>([]);
+  const [tmdbType, setTmdbType] = useState<string>('movie');
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
   const [mounted, setMounted] = useState(false);
   const [downloadToasts, setDownloadToasts] = useState<DownloadToast[]>([]);
@@ -174,12 +177,14 @@ export default function HomePage() {
 
   const handleItemClick = async (item: ResourceItem) => {
     setSelectedItem(item);
+    setHistoryExpanded(false);
     if (item.tmdbId) {
       setDetailLoading(true);
       try {
         const res = await fetch(`/api/resource/${item.id}/related`);
         const data = await res.json();
         setRelatedItems(data.items || []);
+        setTmdbType(data.tmdbType || 'movie');
       } catch {}
       setDetailLoading(false);
     }
@@ -503,7 +508,87 @@ export default function HomePage() {
                     </div>
 
                     {/* Related Links (same TMDB ID) */}
-                    {relatedItems.length > 0 && (
+                    {relatedItems.length > 0 && tmdbType === 'tv' ? (
+                      <div className="space-y-2">
+                        {(() => {
+                          const current = relatedItems.filter(r => r.isCurrent !== false);
+                          return (
+                            <>
+                              <div className="text-xs text-white/40 mb-1">📌 当前版本（共 {current.length} 个）</div>
+                              {current.map((rel) => (
+                                <div key={rel.id}>
+                                  {isMagnetOrEd2k(rel.link) ? (
+                                    <button
+                                      onClick={(e) => { e.preventDefault(); handleCopyLink(rel.link, e); }}
+                                      className="w-full flex items-center justify-between p-3 bg-violet-600/10 hover:bg-violet-600/20 rounded-lg transition text-left"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="px-2 py-0.5 bg-violet-600/30 rounded text-xs shrink-0">{rel.source}</span>
+                                        <span className="text-sm truncate">{rel.name}</span>
+                                      </div>
+                                      <span className="text-cyan-400 text-xs shrink-0 ml-2">📋 复制</span>
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={(e) => { e.preventDefault(); handleDownload(rel.id, e); }}
+                                      className="w-full flex items-center justify-between p-3 bg-violet-600/10 hover:bg-violet-600/20 rounded-lg transition text-left"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="px-2 py-0.5 bg-violet-600/30 rounded text-xs shrink-0">{rel.source}</span>
+                                        <span className="text-sm truncate">{rel.name}</span>
+                                      </div>
+                                      <span className="text-white/40 text-xs shrink-0 ml-2">{rel.size || ''}</span>
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </>
+                          );
+                        })()}
+                        {(() => {
+                          const history = relatedItems.filter(r => r.isCurrent === false);
+                          if (history.length === 0) return null;
+                          return (
+                            <>
+                              <button
+                                onClick={() => setHistoryExpanded(!historyExpanded)}
+                                className="w-full flex items-center justify-between p-2 text-xs text-white/40 hover:text-white/60 transition"
+                              >
+                                <span>📦 历史版本（共 {history.length} 个）</span>
+                                <span>{historyExpanded ? '▲ 收起' : '▼ 展开'}</span>
+                              </button>
+                              {historyExpanded && history.map((rel) => (
+                                <div key={rel.id} className="opacity-60">
+                                  {isMagnetOrEd2k(rel.link) ? (
+                                    <button
+                                      onClick={(e) => { e.preventDefault(); handleCopyLink(rel.link, e); }}
+                                      className="w-full flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 rounded-lg transition text-left"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="px-2 py-0.5 bg-white/20 rounded text-xs shrink-0">{rel.source}</span>
+                                        <span className="text-sm truncate line-through">{rel.name}</span>
+                                      </div>
+                                      <span className="text-white/40 text-xs shrink-0 ml-2">📋 复制</span>
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={(e) => { e.preventDefault(); handleDownload(rel.id, e); }}
+                                      className="w-full flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 rounded-lg transition text-left"
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="px-2 py-0.5 bg-white/20 rounded text-xs shrink-0">{rel.source}</span>
+                                        <span className="text-sm truncate line-through">{rel.name}</span>
+                                      </div>
+                                      <span className="text-white/40 text-xs shrink-0 ml-2">{rel.size || ''}</span>
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </>
+                          );
+                        })()}
+                      </div>
+                    ) : relatedItems.length > 0 ? (
                       <div className="space-y-2">
                         <div className="text-xs text-white/40 mb-1">📦 其他版本（共 {relatedItems.length} 个）</div>
                         {relatedItems.map((rel) => (
@@ -517,9 +602,7 @@ export default function HomePage() {
                                 <span className="px-2 py-0.5 bg-cyan-600/30 rounded text-xs shrink-0">{rel.source}</span>
                                 <span className="text-sm truncate">{rel.name}</span>
                               </div>
-                              <span className="text-cyan-400 text-xs shrink-0 ml-2 flex items-center gap-1">
-                                📋 复制
-                              </span>
+                              <span className="text-cyan-400 text-xs shrink-0 ml-2">📋 复制</span>
                             </button>
                           ) : (
                             <button
@@ -536,7 +619,7 @@ export default function HomePage() {
                           )
                         ))}
                       </div>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* Tags */}
