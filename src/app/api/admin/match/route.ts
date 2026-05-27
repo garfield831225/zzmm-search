@@ -244,12 +244,12 @@ export async function GET(req: Request) {
           }
           const result = await matchOne(item.name);
           if (result === 'GARBLED') {
-            await sql`UPDATE xx_resources SET tmdb_id = 'GARBLED', updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
-            return { id: item.id, tmdb_id: 'GARBLED' };
+            const r = await sql`UPDATE xx_resources SET tmdb_id = 'GARBLED', updated_at = NOW() WHERE id = ${item.id} RETURNING id`;
+            return { id: item.id, tmdb_id: r.length ? 'GARBLED' : null, updateFailed: !r.length };
           }
           if (result === 'NOMATCH') {
-            await sql`UPDATE xx_resources SET tmdb_id = 'NOMATCH', updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
-            return { id: item.id, tmdb_id: 'NOMATCH' };
+            const r = await sql`UPDATE xx_resources SET tmdb_id = 'NOMATCH', updated_at = NOW() WHERE id = ${item.id} RETURNING id`;
+            return { id: item.id, tmdb_id: r.length ? 'NOMATCH' : null, updateFailed: !r.length };
           }
           if (result) {
             const updResult = await sql`UPDATE xx_resources SET tmdb_id = ${result.id}, updated_at = NOW() WHERE id = ${item.id} RETURNING id`;
