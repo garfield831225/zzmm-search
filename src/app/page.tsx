@@ -85,6 +85,13 @@ export default function HomePage() {
     setTimeout(() => setDownloadToasts(prev => prev.filter(t => t.id !== id)), 4000);
   }, []);
 
+  // 直接打开链接（不走限流，直接跳转）
+  const handleDirectOpen = useCallback((link: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (link) window.open(link, '_blank');
+    else addToast('error', '链接无效');
+  }, [addToast]);
+
   const handleDownload = useCallback(async (resourceId: number, e?: React.MouseEvent) => {
     e?.stopPropagation();
     const token = localStorage.getItem('token');
@@ -355,10 +362,10 @@ export default function HomePage() {
                   </button>
                 ) : (
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleDownload(item.id, e); }}
+                    onClick={(e) => { e.stopPropagation(); handleDirectOpen(item.link, e); }}
                     className="absolute bottom-2 left-2 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs font-medium opacity-0 group-hover:opacity-100 transition flex items-center gap-1"
                   >
-                    ⬇ 下载
+                    🔗 打开
                   </button>
                 )}
               </div>
@@ -490,7 +497,7 @@ export default function HomePage() {
                         </button>
                       ) : (
                         <button
-                          onClick={(e) => { e.preventDefault(); handleDownload(selectedItem.id, e); }}
+                          onClick={(e) => { e.preventDefault(); handleDirectOpen(selectedItem.link, e); }}
                           className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left"
                         >
                           <div className="flex items-center gap-3">
@@ -503,7 +510,7 @@ export default function HomePage() {
                             </div>
                           </div>
                           <span className="px-3 py-1 bg-violet-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">
-                            ⬇ 下载
+                            🔗 打开
                           </span>
                         </button>
                       )}
@@ -532,14 +539,14 @@ export default function HomePage() {
                                     </button>
                                   ) : (
                                     <button
-                                      onClick={(e) => { e.preventDefault(); handleDownload(rel.id, e); }}
+                                      onClick={(e) => { e.preventDefault(); handleDirectOpen(rel.link, e); }}
                                       className="w-full flex items-center justify-between p-3 bg-violet-600/10 hover:bg-violet-600/20 rounded-lg transition text-left"
                                     >
                                       <div className="flex items-center gap-2 min-w-0">
                                         <span className="px-2 py-0.5 bg-violet-600/30 rounded text-xs shrink-0">{rel.source}</span>
                                         <span className="text-sm truncate">{rel.name}</span>
                                       </div>
-                                      <span className="text-white/40 text-xs shrink-0 ml-2">{rel.size || ''}</span>
+                                      <span className="text-violet-400 text-xs shrink-0 ml-2">🔗 打开</span>
                                     </button>
                                   )}
                                 </div>
@@ -574,14 +581,14 @@ export default function HomePage() {
                                     </button>
                                   ) : (
                                     <button
-                                      onClick={(e) => { e.preventDefault(); handleDownload(rel.id, e); }}
+                                      onClick={(e) => { e.preventDefault(); handleDirectOpen(rel.link, e); }}
                                       className="w-full flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 rounded-lg transition text-left"
                                     >
                                       <div className="flex items-center gap-2 min-w-0">
                                         <span className="px-2 py-0.5 bg-white/20 rounded text-xs shrink-0">{rel.source}</span>
                                         <span className="text-sm truncate line-through">{rel.name}</span>
                                       </div>
-                                      <span className="text-white/40 text-xs shrink-0 ml-2">{rel.size || ''}</span>
+                                      <span className="text-white/60 text-xs shrink-0 ml-2">🔗 打开</span>
                                     </button>
                                   )}
                                 </div>
@@ -609,14 +616,14 @@ export default function HomePage() {
                           ) : (
                             <button
                               key={rel.id}
-                              onClick={(e) => { e.preventDefault(); handleDownload(rel.id, e); }}
+                              onClick={(e) => { e.preventDefault(); handleDirectOpen(rel.link, e); }}
                               className="w-full flex items-center justify-between p-3 bg-white/5 hover:bg-white/10 rounded-lg transition text-left"
                             >
                               <div className="flex items-center gap-2 min-w-0">
                                 <span className="px-2 py-0.5 bg-pink-600/30 rounded text-xs shrink-0">{rel.source}</span>
                                 <span className="text-sm truncate">{rel.name}</span>
                               </div>
-                              <span className="text-white/40 text-xs shrink-0 ml-2">{rel.size || ''}</span>
+                              <span className="text-pink-400 text-xs shrink-0 ml-2">🔗 打开</span>
                             </button>
                           )
                         ))}
