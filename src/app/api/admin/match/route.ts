@@ -126,7 +126,7 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', year?: string, lan
 }
 
 // 核心匹配函数（精简策略，3次尝试上限）
-async function matchOne(rawName: string): Promise<{ id: string; poster: string; title: string; vote: number; year: string } | 'GARBLED' | null> {
+async function matchOne(rawName: string): Promise<{ id: string; poster: string; title: string; vote: number; year: string } | 'GARBLED' | 'NOMATCH'> {
   if (isGarbled(rawName)) return 'GARBLED';
 
   const { cleanName, year, season } = cleanFolderName(rawName);
@@ -168,7 +168,7 @@ async function matchOne(rawName: string): Promise<{ id: string; poster: string; 
         }
       }
     }
-  return null;
+  return 'NOMATCH';
 }
 
 // 缓存到 xx_tmdb_cache
@@ -202,7 +202,7 @@ export async function GET(req: Request) {
         AND name IS NOT NULL
         AND LENGTH(name) > 2
         AND category NOT IN ('学习资料', '音乐', '纪录片', '其他', '演唱会', '体育赛事', '少儿频道', '合集')
-        AND (tmdb_id IS NULL OR tmdb_id != 'GARBLED')
+        AND tmdb_id NOT IN ('GARBLED', 'NOMATCH')
       ORDER BY id
       LIMIT ${batchSize}
       FOR UPDATE SKIP LOCKED
@@ -222,7 +222,7 @@ export async function GET(req: Request) {
         WHERE link = ANY(${links})
           AND tmdb_id IS NOT NULL
           AND tmdb_id != ''
-          AND tmdb_id != 'GARBLED'
+          AND tmdb_id NOT IN ('GARBLED', 'NOMATCH')
       ` as any[];
       for (const r of existing) {
         if (r.link && r.tmdb_id) linkMap[r.link] = r.tmdb_id;
@@ -248,6 +248,10 @@ export async function GET(req: Request) {
             await sql`UPDATE xx_resources SET tmdb_id = 'GARBLED', updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
             return { id: item.id, tmdb_id: 'GARBLED' };
           }
+          if (result === 'NOMATCH') {
+            await sql`UPDATE xx_resources SET tmdb_id = 'NOMATCH', updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
+            return { id: item.id, tmdb_id: 'NOMATCH' };
+          }
           if (result) {
             const updResult = await sql`UPDATE xx_resources SET tmdb_id = ${result.id}, updated_at = NOW() WHERE id = ${item.id} RETURNING id`;
             if (!updResult.length) {
@@ -265,14 +269,15 @@ export async function GET(req: Request) {
       if (i + CONCURRENCY < rows.length) await new Promise(r => setTimeout(r, 100));
     }
 
-    const matched = results.filter(r => r.tmdb_id && r.tmdb_id !== 'GARBLED' && !(r as any).updateFailed).length;
+    const matched = results.filter(r => r.tmdb_id && r.tmdb_id !== 'GARBLED' && r.tmdb_id !== 'NOMATCH' && !(r as any).updateFailed).length;
     const updateFailed = results.filter(r => (r as any).updateFailed).length;
     const garbledMarked = results.filter(r => r.tmdb_id === 'GARBLED').length;
+    const nomatchMarked = results.filter(r => r.tmdb_id === 'NOMATCH').length;
     const reused = results.filter(r => r.reused).length;
     return NextResponse.json({
       processed: rows.length,
       matched,
-      nomatch: rows.length - matched - garbledMarked,
+      nomatch: nomatchMarked,
       garbled: garbledMarked,
       reused,
       updateFailed,
