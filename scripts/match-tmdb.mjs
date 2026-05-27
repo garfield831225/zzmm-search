@@ -1,3 +1,14 @@
+/**
+ * TMDB 批量匹配脚本 - GitHub Actions 版本
+ * 用法: node scripts/match-tmdb.mjs
+ * 环境变量:
+ *   DATABASE_URL      - Neon 连接串
+ *   TMDB_API_KEY_1    - TMDB API Key 1
+ *   TMDB_API_KEY_2    - TMDB API Key 2
+ *   BATCH_SIZE        - 每批处理数量 (默认500)
+ *   DRY_RUN           - true=只测试不写入 (默认false)
+ */
+
 import { neon } from '@neondatabase/serverless';
 
 const TMDB_KEYS = [
@@ -11,10 +22,11 @@ const DRY_RUN = process.env.DRY_RUN === 'true';
 
 console.log(`[match] Starting batch=${BATCH_SIZE} dry_run=${DRY_RUN}`);
 
+// ─── 速率限制器 ──────────────────────────────────────────────────────────────
 class RateLimiter {
   constructor() {
     this.lastCalls = TMDB_KEYS.map(() => 0);
-    this.minInterval = 50;
+    this.minInterval = 50; // 20 calls/sec per key
   }
   async wait(keyIndex) {
     const now = Date.now();
@@ -24,6 +36,7 @@ class RateLimiter {
   }
 }
 
+// ─── 辅助函数 ─────────────────────────────────────────────────────────────────
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 function chineseToNumber(str) {
@@ -56,12 +69,14 @@ function isGarbled(name) {
 function cleanFolderName(folderName) {
   const yearMatch = folderName.match(/[.\s](20\d{2})[.\s]/);
   const extractedYear = yearMatch ? yearMatch[1] : '';
+
   let season = null;
   const seasonPatterns = [/第([一二三四五六七八九十\d]+)季/i, /Season\s*(\d+)/i, /S(\d{1,2})E\d+/i];
   for (const pat of seasonPatterns) {
     const m = folderName.match(pat);
     if (m) { season = chineseToNumber(m[1]); break; }
   }
+
   let cleanName = folderName
     .replace(/第[一二三四五六七八九十\d]+季/gi, '')
     .replace(/Season\s*\d+/gi, '')
@@ -71,6 +86,7 @@ function cleanFolderName(folderName) {
     .replace(/（([^）]+)）/g, '')
     .replace(/\(([^)]+)\)/g, '')
     .replace(/\[([^\]]+)\]/g, '');
+
   const noisePatterns = [
     /2160p|1080p|720p|480p/gi, /WEB-DL|BluRay|BDRip|HDTV|WEBRip|REMUX|Blu-ray|BDMV/gi,
     /H265|H264|HEVC|AVC|x264|x265/gi,
@@ -83,9 +99,11 @@ function cleanFolderName(folderName) {
     /Athena@|CHDBits@|HDSky@|HDHome@|ltzww@/gi,
   ];
   for (const pat of noisePatterns) cleanName = cleanName.replace(pat, ' ');
+
   cleanName = cleanName.replace(/[.\s]?\d{4}.*$/g, '');
   cleanName = cleanName.replace(/\.(mkv|mp4|avi|ts|m2ts|wmv|flv)$/gi, '');
   cleanName = cleanName.replace(/\./g, ' ').replace(/\?/g, '').replace(/\s+/g, ' ').trim();
+
   return { cleanName, year: extractedYear, season };
 }
 
@@ -95,6 +113,7 @@ async function searchTmdb(name, type, year, lang, keyIndex) {
   const yearParam = type === 'tv' ? 'first_air_date_year' : 'year';
   let url = `${TMDB_BASE}${endpoint}?query=${encodeURIComponent(name)}&api_key=${TMDB_KEYS[keyIndex]}&language=${lang}&page=1&include_adult=false`;
   if (year) url += `&${yearParam}=${year}`;
+
   try {
     const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) return null;
@@ -106,13 +125,17 @@ async function searchTmdb(name, type, year, lang, keyIndex) {
 
 async function matchOne(rawName) {
   if (isGarbled(rawName)) return 'GARBLED';
+
   const { cleanName, year, season } = cleanFolderName(rawName);
   if (cleanName.length < 2) return 'NOMATCH';
+
   const isEng = isEnglishName(cleanName);
   const strategies = isEng
     ? [{ lang: 'en-US', useYear: true }, { lang: 'en-US', useYear: false }, { lang: 'zh-CN', useYear: true }]
     : [{ lang: 'zh-CN', useYear: true }, { lang: 'zh-CN', useYear: false }, { lang: 'en-US', useYear: true }];
+
   const typeOrder = season !== null ? ['tv'] : ['tv', 'movie'];
+
   let keyIdx = 0;
   for (const s of strategies) {
     for (const type of typeOrder) {
@@ -146,6 +169,7 @@ async function cacheIt(r, sql) {
   }
 }
 
+// ─── 主流程 ───────────────────────────────────────────────────────────────────
 const tmdbLimiter = new RateLimiter();
 
 async function main() {
@@ -153,7 +177,9 @@ async function main() {
     console.error('[match] ERROR: DATABASE_URL not set');
     process.exit(1);
   }
+
   const sql = neon(process.env.DATABASE_URL);
+
   const rows = await sql`
     SELECT id, name, link, category, source
     FROM xx_resources
@@ -165,11 +191,14 @@ async function main() {
     ORDER BY id
     LIMIT ${BATCH_SIZE}
   `;
+
   if (!rows.length) {
     console.log('[match] DONE: no unmatched records');
     process.exit(0);
   }
+
   console.log(`[match] Fetched ${rows.length} records, processing...`);
+
   const links = rows.filter(r => r.link).map(r => r.link);
   let linkMap = {};
   if (links.length > 0) {
@@ -179,23 +208,38 @@ async function main() {
     `;
     for (const r of existing) linkMap[r.link] = r.tmdb_id;
   }
+
   const CONCURRENCY = 20;
-  let totalMatched = 0, totalNomatch = 0, totalGarbled = 0, totalReused = 0;
+  const results = [];
+  let totalMatched = 0;
+  let totalNomatch = 0;
+  let totalGarbled = 0;
+  let totalReused = 0;
+  let totalFailed = 0;
+
   for (let i = 0; i < rows.length; i += CONCURRENCY) {
     const chunk = rows.slice(i, i + CONCURRENCY);
     const chunkResults = await Promise.all(
       chunk.map(async (item) => {
         if (item.link && linkMap[item.link]) {
-          if (!DRY_RUN) await sql`UPDATE xx_resources SET tmdb_id = ${linkMap[item.link]}, updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
+          if (!DRY_RUN) {
+            await sql`UPDATE xx_resources SET tmdb_id = ${linkMap[item.link]}, updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
+          }
           return { id: item.id, tmdb_id: linkMap[item.link], reused: true };
         }
+
         const result = await matchOne(item.name);
+
         if (result === 'GARBLED') {
-          if (!DRY_RUN) await sql`UPDATE xx_resources SET tmdb_id = 'GARBLED', updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
+          if (!DRY_RUN) {
+            await sql`UPDATE xx_resources SET tmdb_id = 'GARBLED', updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
+          }
           return { id: item.id, tmdb_id: 'GARBLED' };
         }
         if (result === 'NOMATCH') {
-          if (!DRY_RUN) await sql`UPDATE xx_resources SET tmdb_id = 'NOMATCH', updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
+          if (!DRY_RUN) {
+            await sql`UPDATE xx_resources SET tmdb_id = 'NOMATCH', updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
+          }
           return { id: item.id, tmdb_id: 'NOMATCH' };
         }
         if (result) {
@@ -208,16 +252,29 @@ async function main() {
         return { id: item.id, tmdb_id: null };
       })
     );
+
+    results.push(...chunkResults);
+
     const chunkMatched = chunkResults.filter(r => r.tmdb_id && r.tmdb_id !== 'GARBLED' && r.tmdb_id !== 'NOMATCH').length;
     const chunkNomatch = chunkResults.filter(r => r.tmdb_id === 'NOMATCH').length;
     const chunkGarbled = chunkResults.filter(r => r.tmdb_id === 'GARBLED').length;
     const chunkReused = chunkResults.filter(r => r.reused).length;
-    totalMatched += chunkMatched; totalNomatch += chunkNomatch; totalGarbled += chunkGarbled; totalReused += chunkReused;
+
+    totalMatched += chunkMatched;
+    totalNomatch += chunkNomatch;
+    totalGarbled += chunkGarbled;
+    totalReused += chunkReused;
+
     console.log(`[match] chunk ${i}-${i + chunk.length}: matched=${chunkMatched} nomatch=${chunkNomatch} garbled=${chunkGarbled} reused=${chunkReused}`);
+
     if (i + CONCURRENCY < rows.length) await sleep(100);
   }
+
   console.log(`[match] BATCH DONE: processed=${rows.length} matched=${totalMatched} nomatch=${totalNomatch} garbled=${totalGarbled} reused=${totalReused}`);
   process.exit(0);
 }
 
-main().catch(e => { console.error('[match] FATAL:', e.message); process.exit(1); });
+main().catch(e => {
+  console.error('[match] FATAL:', e.message);
+  process.exit(1);
+});
