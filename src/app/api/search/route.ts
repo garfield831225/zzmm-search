@@ -4,7 +4,14 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 
-const SOURCE_MAP: Record<string, string> = {
+// source display name → db value 映射（前端传"115网盘" → 查"115"）
+const SOURCE_KEY_MAP: Record<string, string> = {
+  '115网盘': '115', '百度网盘': 'baidu', '阿里云盘': 'aliyun',
+  '夸克网盘': 'quark', '123网盘': '123', '天翼云盘': 'tianyi',
+  '磁力链接': 'magnet', 'ed2k链接': 'ed2k', '迅雷链接': 'thunder',
+};
+// db value → display name 映射
+const SOURCE_DISPLAY_MAP: Record<string, string> = {
   '115': '115网盘', 'baidu': '百度网盘', 'quark': '夸克网盘',
   'aliyun': '阿里云盘', '123': '123网盘', 'tianyi': '天翼云盘',
   'magnet': '磁力链接', 'ed2k': 'ed2k链接', 'thunder': '迅雷链接',
@@ -31,8 +38,9 @@ export async function GET(request: NextRequest) {
       params.push(category);
     }
     if (source !== '全部') {
+      const dbSource = SOURCE_KEY_MAP[source] || source;
       conditions.push(`source = $${idx++}`);
-      params.push(source);
+      params.push(dbSource);
     }
     if (q.trim()) {
       conditions.push(`(name ILIKE $${idx} OR category ILIKE $${idx})`);
@@ -82,7 +90,7 @@ export async function GET(request: NextRequest) {
         name: item?.name,
         link: item?.link,
         linkCode: item?.link_code,
-        source: SOURCE_MAP[item?.source] || item?.source,
+        source: SOURCE_DISPLAY_MAP[item?.source] || item?.source,
         sourceKey: item?.source,
         category: item?.category,
         size: item?.size,
@@ -93,7 +101,7 @@ export async function GET(request: NextRequest) {
         tmdb: item?.tmdb_id ? tmdbMap.get(item.tmdb_id) : null,
       })),
       categories: CATEGORIES,
-      sources: ['全部', ...Object.values(SOURCE_MAP)],
+      sources: ['全部', ...Object.values(SOURCE_DISPLAY_MAP)],
     });
   } catch (error: any) {
     console.error('Search error:', error.message);
