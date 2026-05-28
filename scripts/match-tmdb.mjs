@@ -107,6 +107,79 @@ function cleanFolderName(folderName) {
   return { cleanName, year: extractedYear, season };
 }
 
+// ─── 置信度评分 ────────────────────────────────────────────────────────────────
+/**
+ * 计算片名相似度（Jaccard on normalized character bigrams）
+ * 适合中英文混合场景
+ */
+function titleSimilarity(a, b) {
+  if (!a || !b) return 0;
+  const norm = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '').trim();
+  const a0 = norm(a), b0 = norm(b);
+  if (!a0 || !b0) return 0;
+  if (a0 === b0) return 1;
+
+  // Bigram Jaccard
+  const bigrams = (s) => {
+    const cs = [...s];
+    const bg = new Set();
+    for (let i = 0; i < cs.length - 1; i++) bg.add(cs[i] + cs[i + 1]);
+    if (cs.length === 1) bg.add(cs[0]); // 单字也加进去
+    return bg;
+  };
+  const setA = bigrams(a0), setB = bigrams(b0);
+  let inter = 0;
+  for (const v of setA) if (setB.has(v)) inter++;
+  const union = setA.size + setB.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+/**
+ * 综合置信度评分
+ * 检查：片名相似度 + 语言一致性 + 年份一致性（可选）
+ */
+function confidenceScore(cleanName, tmdbResult, searchLang, searchYear) {
+  const zhNames = [tmdbResult.title, tmdbResult.original_title, tmdbResult.name].filter(Boolean);
+  const enName = tmdbResult.title?.match(/[a-zA-Z]/) ? tmdbResult.title : '';
+
+  // 检查各种片名组合的 substring 命中（翻译片名跨语言匹配）
+  const norm = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const cleanNorm = norm(cleanName);
+  const allTitles = [...zhNames, enName].map(norm);
+  let substringHit = false;
+  for (const t of allTitles) {
+    if (t.length >= 2 && (t.includes(cleanNorm) || cleanNorm.includes(t))) {
+      substringHit = true;
+      break;
+    }
+  }
+
+  // 最高相似度
+  const zhScore = Math.max(...zhNames.map(zn => titleSimilarity(cleanName, zn)));
+  const enScore = enName ? titleSimilarity(cleanName, enName) : 0;
+  const bestScore = Math.max(zhScore, enScore);
+
+  // 直接 substring 命中 = 满分
+  if (substringHit) return 1.0;
+
+  // 语言一致性奖励：中文片名搜中文结果，英文搜英文
+  let langBonus = 0;
+  if (searchLang === 'zh-CN' && zhScore > enScore) langBonus = 0.1;
+  if (searchLang === 'en-US' && enScore > zhScore) langBonus = 0.1;
+
+  // 年份一致性奖励（误差 ±2 年）
+  let yearBonus = 0;
+  const resultYear = (tmdbResult.release_date || tmdbResult.first_air_date || '').slice(0, 4);
+  if (searchYear && resultYear && Math.abs(parseInt(resultYear) - parseInt(searchYear)) <= 2) {
+    yearBonus = 0.15;
+  }
+
+  return bestScore + langBonus + yearBonus;
+}
+
+// 最低接受阈值（片名相似度 + 加分项综合）
+const MIN_CONFIDENCE = 0.32;
+
 async function searchTmdb(name, type, year, lang, keyIndex) {
   await tmdbLimiter.wait(keyIndex);
   const endpoint = type === 'tv' ? '/search/tv' : '/search/movie';
@@ -119,7 +192,7 @@ async function searchTmdb(name, type, year, lang, keyIndex) {
     if (!res.ok) return null;
     const data = await res.json();
     if (!data.results?.length) return null;
-    return data.results[0];
+    return data.results.slice(0, 5); // 返回 top5 用于置信度筛选
   } catch { return null; }
 }
 
@@ -139,18 +212,25 @@ async function matchOne(rawName) {
   let keyIdx = 0;
   for (const s of strategies) {
     for (const type of typeOrder) {
-      const result = await searchTmdb(cleanName, type, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length);
+      const results = await searchTmdb(cleanName, type, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length);
       keyIdx++;
-      if (result) {
-        return {
-          id: String(result.id),
-          tmdb_type: type,
-          poster: result.poster_path ? `${TMDB_IMG}${result.poster_path}` : '',
-          title: result.title || result.name || cleanName,
-          vote: result.vote_average || 0,
-          year: (result.release_date || result.first_air_date || '').slice(0, 4) || year,
-        };
+      if (!results?.length) continue;
+
+      // 遍历 top5，找到第一个满足置信度阈值的
+      for (const result of results) {
+        const score = confidenceScore(cleanName, result, s.lang, s.useYear ? year : undefined);
+        if (score >= MIN_CONFIDENCE) {
+          return {
+            id: String(result.id),
+            tmdb_type: type,
+            poster: result.poster_path ? `${TMDB_IMG}${result.poster_path}` : '',
+            title: result.title || result.name || cleanName,
+            vote: result.vote_average || 0,
+            year: (result.release_date || result.first_air_date || '').slice(0, 4) || year,
+          };
+        }
       }
+      // 有结果但全部置信度不足，继续试下一个策略
     }
   }
   return 'NOMATCH';
