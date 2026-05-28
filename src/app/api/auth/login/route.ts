@@ -50,6 +50,16 @@ export async function POST(req: NextRequest) {
       { expiresIn: '30d' }
     );
 
+    // 设置 HTTP-only cookie（供 middleware 读取）
+    const cookieStore = await cookies();
+    cookieStore.set('zzmm_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 30 * 24 * 60 * 60,
+      path: '/',
+    });
+
     return NextResponse.json({
       token,
       user: {
