@@ -54,6 +54,22 @@ export async function POST(req: NextRequest) {
       else results.push('xx_activation_codes error: ' + e.message.slice(0, 80));
     }
 
+    // 创建音乐封面缓存表
+    try {
+      await sql`CREATE TABLE xx_music_cache (
+        resource_id INTEGER PRIMARY KEY,
+        mb_release_id VARCHAR(50),
+        artist VARCHAR(255),
+        album VARCHAR(255),
+        cover_url TEXT,
+        cached_at TIMESTAMP DEFAULT NOW()
+      )`;
+      results.push('xx_music_cache created');
+    } catch (e: any) {
+      if (e.message?.includes('already exists') || e.message?.includes('duplicate')) results.push('xx_music_cache already exists');
+      else results.push('xx_music_cache error: ' + e.message.slice(0, 80));
+    }
+
     // 检查 admin
     const adminCheck = await sql`SELECT id FROM xx_users WHERE username = 'admin'`;
     if ((adminCheck as any[]).length === 0) {

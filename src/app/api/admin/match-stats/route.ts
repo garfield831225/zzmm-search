@@ -8,8 +8,8 @@ export async function GET() {
   try {
     // Total active
     const total = (await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active'`)) as any[];
-    // Matched
-    const matched = (await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND tmdb_id IS NOT NULL AND tmdb_id != ''`)) as any[];
+    // Matched (排除 tmdb_id=0, NOMATCH, GARBLED 等无效值)
+    const matched = (await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND tmdb_id IS NOT NULL AND tmdb_id != '' AND tmdb_id NOT IN ('0', 'NOMATCH', 'GARBLED')`)) as any[];
     // Unmatched (no tmdb_id)
     const unmatched = (await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND (tmdb_id IS NULL OR tmdb_id = '')`)) as any[];
     // Unmatched with valid names (longer than 3 chars)

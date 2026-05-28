@@ -81,6 +81,15 @@ export async function GET(request: NextRequest) {
       tmdbMap = new Map((tmdbRows || []).map((info: any) => [info?.tmdb_id, info]));
     }
 
+    // 批量获取音乐封面信息
+    const resourceIds = itemsArr.map((item: any) => item?.id).filter(Boolean);
+    let musicCoverMap = new Map<number, any>();
+    if (resourceIds.length > 0) {
+      const placeholders = resourceIds.map((_: any, i: number) => `$${i + 1}`).join(',');
+      const musicRows = await sql(`SELECT resource_id, artist, album, cover_url FROM xx_music_cache WHERE resource_id IN (${placeholders})`, resourceIds);
+      musicCoverMap = new Map((musicRows || []).map((r: any) => [r?.resource_id, r]));
+    }
+
     return NextResponse.json({
       total,
       page,
@@ -99,6 +108,7 @@ export async function GET(request: NextRequest) {
         tmdbId: item?.tmdb_id,
         viewCount: item?.view_count,
         tmdb: item?.tmdb_id ? tmdbMap.get(item.tmdb_id) : null,
+        musicCover: item?.category === '音乐' ? musicCoverMap.get(item.id) || null : null,
       })),
       categories: CATEGORIES,
       sources: ['全部', ...Object.values(SOURCE_DISPLAY_MAP)],

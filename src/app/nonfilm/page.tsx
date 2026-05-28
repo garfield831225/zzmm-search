@@ -36,6 +36,7 @@ interface ResourceItem {
   size: string;
   tags: string[];
   formatTags: string[];
+  musicCover: { artist: string; album: string; cover_url: string } | null;
 }
 
 // 从文件名提取格式标签
@@ -116,6 +117,7 @@ export default function NonFilmPage() {
       const mapped = (data.items || []).map((item: any) => ({
         ...item,
         formatTags: extractFormatTags(item.name),
+        musicCover: item.musicCover || null,
       }));
       setItems(p === 1 ? mapped : [...items, ...mapped]);
       setTotal(data.total);
@@ -213,8 +215,14 @@ export default function NonFilmPage() {
               onClick={() => setSelectedItem(item)}
             >
               {/* Poster / Icon */}
-              <div className="relative aspect-square bg-gradient-to-br from-cyan-100 to-blue-100 flex items-center justify-center">
-                <span className="text-5xl">🎵</span>
+              <div className="relative aspect-square bg-gradient-to-br from-cyan-100 to-blue-100 flex items-center justify-center overflow-hidden">
+                {item.musicCover?.cover_url ? (
+                  <img src={item.musicCover.cover_url} alt={item.musicCover.album}
+                    className="w-full h-full object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display='none'; }} />
+                ) : (
+                  <span className="text-5xl">🎵</span>
+                )}
                 <div className="absolute top-2 right-2">
                   <span className="px-2 py-0.5 bg-cyan-600 text-white text-xs rounded">{item.source}</span>
                 </div>

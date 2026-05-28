@@ -177,8 +177,10 @@ function confidenceScore(cleanName, tmdbResult, searchLang, searchYear) {
   return bestScore + langBonus + yearBonus;
 }
 
-// 最低接受阈值（片名相似度 + 加分项综合）
-const MIN_CONFIDENCE = 0.32;
+// 最低接受阈值
+const MIN_CONFIDENCE = 0.22;
+// 如果 top1 结果有年份匹配，降级接受阈值
+const YEAR_MATCH_THRESHOLD = 0.15;
 
 async function searchTmdb(name, type, year, lang, keyIndex) {
   await tmdbLimiter.wait(keyIndex);
@@ -217,9 +219,18 @@ async function matchOne(rawName) {
       if (!results?.length) continue;
 
       // 遍历 top5，找到第一个满足置信度阈值的
-      for (const result of results) {
+      let top1YearMatch = false;
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i];
         const score = confidenceScore(cleanName, result, s.lang, s.useYear ? year : undefined);
-        if (score >= MIN_CONFIDENCE) {
+        // top1 有年份匹配，降级接受（处理 TMDB 无中文翻译名的中文片）
+        if (i === 0 && s.useYear && year) {
+          const resultYear = (result.release_date || result.first_air_date || '').slice(0, 4);
+          if (resultYear && Math.abs(parseInt(resultYear) - parseInt(year)) <= 1) {
+            top1YearMatch = true;
+          }
+        }
+        if (score >= MIN_CONFIDENCE || (i === 0 && top1YearMatch)) {
           return {
             id: String(result.id),
             tmdb_type: type,
