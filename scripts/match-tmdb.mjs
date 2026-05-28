@@ -17,7 +17,7 @@ const TMDB_KEYS = [
 ];
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
-const BATCH_SIZE = parseInt(process.env.BATCH_SIZE || '500');
+const BATCH_SIZE = parseInt(process.env.BATCH_SIZE || '3000');
 const DRY_RUN = process.env.DRY_RUN === 'true';
 
 console.log(`[match] Starting batch=${BATCH_SIZE} dry_run=${DRY_RUN}`);
