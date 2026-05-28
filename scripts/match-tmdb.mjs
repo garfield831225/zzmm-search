@@ -112,36 +112,6 @@ function cleanFolderName(folderName) {
   return { cleanName, year: extractedYear, season };
 }
 
-  let cleanName = folderName
-    .replace(/第[一二三四五六七八九十\d]+季/gi, '')
-    .replace(/Season\s*\d+/gi, '')
-    .replace(/S\d{1,2}E\d+/gi, '')
-    .replace(/【([^】]+)】/g, '')
-    .replace(/《([^》]+)》/g, '')
-    .replace(/（([^）]+)）/g, '')
-    .replace(/\(([^)]+)\)/g, '')
-    .replace(/\[([^\]]+)\]/g, '');
-
-  const noisePatterns = [
-    /2160p|1080p|720p|480p/gi, /WEB-DL|BluRay|BDRip|HDTV|WEBRip|REMUX|Blu-ray|BDMV/gi,
-    /H265|H264|HEVC|AVC|x264|x265/gi,
-    /杜比视界|杜比全景声|DV|HDR10\+|HDR10|HDR|ATMOS|DDP5\.1|DDP|DTS-HD|DTS|AAC5\.1|AAC|TrueHD|EAC3/gi,
-    /国语中字|中英双字|中英字幕|双语字幕|外挂字幕|国语配音|中文字幕|中字|字幕|粤语|台配|配音/gi,
-    /导演剪辑版|导演剪辑|加长版|完整版|未删减版|剧场版|REMUX/gi,
-    /IMAX|SDR|AC3/gi, /蓝光原盘|蓝光|蓝光remux|HD|内嵌|封包|封装/gi,
-    /DIY|次时代|官译|特效字幕|双语|简繁|繁简/gi,
-    /CEE|美版|日版|港版|韩版|欧版|台版/gi,
-    /Athena@|CHDBits@|HDSky@|HDHome@|ltzww@/gi,
-  ];
-  for (const pat of noisePatterns) cleanName = cleanName.replace(pat, ' ');
-
-  cleanName = cleanName.replace(/[.\s]?\d{4}.*$/g, '');
-  cleanName = cleanName.replace(/\.(mkv|mp4|avi|ts|m2ts|wmv|flv)$/gi, '');
-  cleanName = cleanName.replace(/\./g, ' ').replace(/\?/g, '').replace(/\s+/g, ' ').trim();
-
-  return { cleanName, year: extractedYear, season };
-}
-
 // ─── 置信度评分 ────────────────────────────────────────────────────────────────
 /**
  * 计算片名相似度（Jaccard on normalized character bigrams）
