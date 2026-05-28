@@ -90,6 +90,14 @@ export async function GET(request: NextRequest) {
       musicCoverMap = new Map((musicRows || []).map((r: any) => [r?.resource_id, r]));
     }
 
+    // 批量获取通用封面（非音乐）
+    let coverCacheMap = new Map<number, any>();
+    if (resourceIds.length > 0) {
+      const placeholders = resourceIds.map((_: any, i: number) => `$${i + 1}`).join(',');
+      const coverRows = await sql(`SELECT resource_id, cover_url, source, extra_data FROM xx_cover_cache WHERE resource_id IN (${placeholders})`, resourceIds);
+      coverCacheMap = new Map((coverRows || []).map((r: any) => [r?.resource_id, r]));
+    }
+
     return NextResponse.json({
       total,
       page,
@@ -109,6 +117,7 @@ export async function GET(request: NextRequest) {
         viewCount: item?.view_count,
         tmdb: item?.tmdb_id ? tmdbMap.get(item.tmdb_id) : null,
         musicCover: item?.category === '音乐' ? musicCoverMap.get(item.id) || null : null,
+        coverCache: !item?.tmdb_id && !musicCoverMap.get(item.id) ? coverCacheMap.get(item.id) || null : null,
       })),
       categories: CATEGORIES,
       sources: ['全部', ...Object.values(SOURCE_DISPLAY_MAP)],
