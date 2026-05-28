@@ -6,10 +6,10 @@ on:
       batch_size:
         description: '每批处理数量'
         required: false
-        default: '500'
+        default: '3000'
         type: string
   schedule:
-    - cron: '*/8 * * * *'
+    - cron: '*/12 * * * *'
 
 jobs:
   match:
