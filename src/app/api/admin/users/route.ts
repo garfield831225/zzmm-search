@@ -6,7 +6,7 @@ import bcrypt from 'bcryptjs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const JWT_SECRET = process.env.JWT_SECRET || 'caoliangweizhendeshuang';
+const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
 function verifyAdmin(token: string): any {
   try {

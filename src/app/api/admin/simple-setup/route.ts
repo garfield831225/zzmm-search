@@ -3,7 +3,7 @@ import { neon } from '@neondatabase/serverless';
 
 export const dynamic = 'force-dynamic';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'caoliangweizhendeshuang';
+const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
 export async function POST(req: NextRequest) {
   try {

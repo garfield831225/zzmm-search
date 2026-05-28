@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 // POST /api/admin/cover-match
 // Body: { "categories": ["体育", "游戏", "电子书"], "limit": 50 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'caoliangweizhendeshuang';
+const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
 // 限速：每条资源最多等待 1 秒（避免压垮第三方 API）
 const delay = (ms: number) => new Promise(r => setTimeout(r, ms));

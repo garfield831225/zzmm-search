@@ -187,7 +187,7 @@ async function cacheIt(r: { id: string; tmdb_type: 'movie' | 'tv'; poster: strin
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const key = searchParams.get('key');
-  if (key !== (process.env.JWT_SECRET || 'caoliangweizhendeshuang')) {
+  if (key !== (process.env.JWT_SECRET || 'cLWhs2015')) {
     return NextResponse.json({ error: '未授权' }, { status: 401 });
   }
 
