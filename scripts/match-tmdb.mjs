@@ -185,10 +185,11 @@ function confidenceScore(cleanName, tmdbResult, searchLang, searchYear) {
 // 最低接受阈值（无年份时 bigram 相似度）
 const MIN_CONFIDENCE = 0.18;
 
-async function searchTmdb(name, type, lang, keyIndex) {
+async function searchTmdb(name, type, year, lang, keyIndex) {
   await tmdbLimiter.wait(keyIndex);
   const endpoint = type === 'tv' ? '/search/tv' : '/search/movie';
-  let url = `${TMDB_BASE}${endpoint}?query=${encodeURIComponent(name)}&api_key=${TMDB_KEYS[keyIndex]}&language=${lang}&page=1&include_adult=false`;
+  const yearParam = year ? (type === 'tv' ? `&first_air_date_year=${year}` : `&primary_release_year=${year}`) : '';
+  let url = `${TMDB_BASE}${endpoint}?query=${encodeURIComponent(name)}&api_key=${TMDB_KEYS[keyIndex]}&language=${lang}${yearParam}&page=1&include_adult=false`;
 
   try {
     const res = await fetch(url, { cache: 'no-store' });
@@ -243,7 +244,7 @@ async function matchSegment(segName) {
   let keyIdx = 0;
   for (const s of strategies) {
     for (const type of typeOrder) {
-      const results = await searchTmdb(cleanName, type, s.lang, keyIdx % TMDB_KEYS.length);
+      const results = await searchTmdb(cleanName, type, s.useYear ? year : null, s.lang, keyIdx % TMDB_KEYS.length);
       keyIdx++;
       if (!results?.length) continue;
 
