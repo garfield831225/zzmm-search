@@ -67,8 +67,13 @@ function isGarbled(name) {
 }
 
 function cleanFolderName(folderName) {
-  const yearMatch = folderName.match(/[.\s](20\d{2})[.\s]/);
-  const extractedYear = yearMatch ? yearMatch[1] : '';
+  // ★ 先抽年份，从左到右第一个有效的 4 位年
+  let extractedYear = '';
+  const yearCandidates = [...folderName.matchAll(/\b(20\d{2})\b/g)];
+  for (const m of yearCandidates) {
+    const y = parseInt(m[1]);
+    if (y >= 1900 && y <= 2030) { extractedYear = m[1]; break; }
+  }
 
   let season = null;
   const seasonPatterns = [/第([一二三四五六七八九十\d]+)季/i, /Season\s*(\d+)/i, /S(\d{1,2})E\d+/i];
@@ -76,6 +81,36 @@ function cleanFolderName(folderName) {
     const m = folderName.match(pat);
     if (m) { season = chineseToNumber(m[1]); break; }
   }
+
+  let cleanName = folderName
+    .replace(/第[一二三四五六七八九十\d]+季/gi, '')
+    .replace(/Season\s*\d+/gi, '')
+    .replace(/S\d{1,2}E\d+/gi, '')
+    .replace(/【([^】]+)】/g, '')
+    .replace(/《([^》]+)》/g, '')
+    .replace(/（([^）]+)）/g, '')
+    .replace(/\(([^)]+)\)/g, '')
+    .replace(/\[([^\]]+)\]/g, '');
+
+  const noisePatterns = [
+    /2160p|1080p|720p|480p/gi, /WEB-DL|BluRay|BDRip|HDTV|WEBRip|REMUX|Blu-ray|BDMV/gi,
+    /H265|H264|HEVC|AVC|x264|x265/gi,
+    /杜比视界|杜比全景声|DV|HDR10\+|HDR10|HDR|ATMOS|DDP5\.1|DDP|DTS-HD|DTS|AAC5\.1|AAC|TrueHD|EAC3/gi,
+    /国语中字|中英双字|中英字幕|双语字幕|外挂字幕|国语配音|中文字幕|中字|字幕|粤语|台配|配音/gi,
+    /导演剪辑版|导演剪辑|加长版|完整版|未删减版|剧场版|REMUX/gi,
+    /IMAX|SDR|AC3/gi, /蓝光原盘|蓝光|蓝光remux|HD|内嵌|封包|封装/gi,
+    /DIY|次时代|官译|特效字幕|双语|简繁|繁简/gi,
+    /CEE|美版|日版|港版|韩版|欧版|台版/gi,
+    /Athena@|CHDBits@|HDSky@|HDHome@|ltzww@/gi,
+  ];
+  for (const pat of noisePatterns) cleanName = cleanName.replace(pat, ' ');
+
+  cleanName = cleanName.replace(/20\d{2}/g, ' ');  // 去掉残余年份数字
+  cleanName = cleanName.replace(/\.(mkv|mp4|avi|ts|m2ts|wmv|flv)$/gi, '');
+  cleanName = cleanName.replace(/\./g, ' ').replace(/\?/g, '').replace(/\s+/g, ' ').trim();
+
+  return { cleanName, year: extractedYear, season };
+}
 
   let cleanName = folderName
     .replace(/第[一二三四五六七八九十\d]+季/gi, '')
@@ -197,8 +232,36 @@ async function searchTmdb(name, type, lang, keyIndex) {
 async function matchOne(rawName) {
   if (isGarbled(rawName)) return 'GARBLED';
 
-  const { cleanName, year, season } = cleanFolderName(rawName);
-  if (cleanName.length < 2) return 'NOMATCH';
+  // ★ 方案：按 [] 拆成多段，每段单独搜 TMDB，取最佳结果
+  const segments = rawName.split(/[\[\]]/).filter(s => s.trim().length >= 2);
+  if (segments.length === 0) return 'NOMATCH';
+
+  let bestResult = null;
+  let bestScore = -1;
+
+  for (const seg of segments) {
+    const segResult = await matchSegment(seg.trim());
+    if (segResult && typeof segResult === 'object' && segResult.score > bestScore) {
+      bestScore = segResult.score;
+      bestResult = {
+        id: segResult.id,
+        tmdb_type: segResult.tmdb_type,
+        poster: segResult.poster,
+        title: segResult.title,
+        vote: segResult.vote,
+        year: segResult.year,
+      };
+    }
+  }
+
+  if (bestResult) return bestResult;
+  return 'NOMATCH';
+}
+
+// 对单个片段进行匹配
+async function matchSegment(segName) {
+  const { cleanName, year, season } = cleanFolderName(segName);
+  if (cleanName.length < 2) return null;
 
   const isEng = isEnglishName(cleanName);
   const strategies = isEng
@@ -214,11 +277,11 @@ async function matchOne(rawName) {
       keyIdx++;
       if (!results?.length) continue;
 
-      // 遍历 top5，找到第一个满足置信度阈值的
-      // top1 有年份匹配（±2年）：直接接受，不管片名相似度
+      // top1 年份匹配（±2年）：直接接受
       if (results[0] && s.useYear && year) {
         const top1Year = (results[0].release_date || results[0].first_air_date || '').slice(0, 4);
         if (top1Year && Math.abs(parseInt(top1Year) - parseInt(year)) <= 2) {
+          const score = confidenceScore(cleanName, results[0], s.lang, year);
           return {
             id: String(results[0].id),
             tmdb_type: type,
@@ -226,10 +289,11 @@ async function matchOne(rawName) {
             title: results[0].title || results[0].name || cleanName,
             vote: results[0].vote_average || 0,
             year: top1Year || year,
+            score,
           };
         }
       }
-      // 无年份匹配：用置信度筛选
+      // 置信度筛选
       for (const result of results) {
         const score = confidenceScore(cleanName, result, s.lang, s.useYear ? year : undefined);
         if (score >= MIN_CONFIDENCE) {
@@ -240,13 +304,13 @@ async function matchOne(rawName) {
             title: result.title || result.name || cleanName,
             vote: result.vote_average || 0,
             year: (result.release_date || result.first_air_date || '').slice(0, 4) || year,
+            score,
           };
         }
       }
-      // 有结果但全部置信度不足，继续试下一个策略
     }
   }
-  return 'NOMATCH';
+  return null;
 }
 
 async function cacheIt(r, sql) {
