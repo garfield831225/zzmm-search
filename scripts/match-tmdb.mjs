@@ -243,7 +243,7 @@ async function matchSegment(segName) {
   let keyIdx = 0;
   for (const s of strategies) {
     for (const type of typeOrder) {
-      const results = await searchTmdb(cleanName, type, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length);
+      const results = await searchTmdb(cleanName, type, s.lang, keyIdx % TMDB_KEYS.length);
       keyIdx++;
       if (!results?.length) continue;
 
