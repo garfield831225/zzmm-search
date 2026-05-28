@@ -40,6 +40,8 @@ export default function LoginPage() {
 
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
+      // 同步设置 adminToken，让管理后台能自动读取
+      localStorage.setItem('adminToken', data.token);
       router.push('/');
     } catch {
       setError('网络错误，请重试');

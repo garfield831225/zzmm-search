@@ -15,10 +15,12 @@ export default function AdminPage() {
   const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
-    // 先从 localStorage 尝试获取 token
+    // 优先读 cookie（登录成功后后端设置的 zzmm_token）
+    const cookieToken = document.cookie.split('; ').find(r => r.startsWith('zzmm_token='))?.split('=')[1];
+    // fallback：旧 localStorage adminToken（兼容旧会话）
     const saved = localStorage.getItem('adminToken');
-    if (saved) {
-      setToken(saved);
+    if (cookieToken || saved) {
+      setToken(cookieToken || saved || '');
       setAuthed(true);
     }
   }, []);
