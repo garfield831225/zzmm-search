@@ -85,17 +85,25 @@ export async function GET(request: NextRequest) {
     const resourceIds = itemsArr.map((item: any) => item?.id).filter(Boolean);
     let musicCoverMap = new Map<number, any>();
     if (resourceIds.length > 0) {
-      const placeholders = resourceIds.map((_: any, i: number) => `$${i + 1}`).join(',');
-      const musicRows = await sql(`SELECT resource_id, artist, album, cover_url FROM xx_music_cache WHERE resource_id IN (${placeholders})`, resourceIds);
-      musicCoverMap = new Map((musicRows || []).map((r: any) => [r?.resource_id, r]));
+      try {
+        const placeholders = resourceIds.map((_: any, i: number) => `$${i + 1}`).join(',');
+        const musicRows = await sql(`SELECT resource_id, artist, album, cover_url FROM xx_music_cache WHERE resource_id IN (${placeholders})`, resourceIds);
+        musicCoverMap = new Map((musicRows || []).map((r: any) => [r?.resource_id, r]));
+      } catch {
+        musicCoverMap = new Map(); // 表不存在就忽略
+      }
     }
 
-    // 批量获取通用封面（非音乐）
+    // 批量获取通用封面（非影视，无 TMDB 时显示）
     let coverCacheMap = new Map<number, any>();
     if (resourceIds.length > 0) {
-      const placeholders = resourceIds.map((_: any, i: number) => `$${i + 1}`).join(',');
-      const coverRows = await sql(`SELECT resource_id, cover_url, source, extra_data FROM xx_cover_cache WHERE resource_id IN (${placeholders})`, resourceIds);
-      coverCacheMap = new Map((coverRows || []).map((r: any) => [r?.resource_id, r]));
+      try {
+        const placeholders = resourceIds.map((_: any, i: number) => `$${i + 1}`).join(',');
+        const coverRows = await sql(`SELECT resource_id, cover_url, source, extra_data FROM xx_cover_cache WHERE resource_id IN (${placeholders})`, resourceIds);
+        coverCacheMap = new Map((coverRows || []).map((r: any) => [r?.resource_id, r]));
+      } catch {
+        coverCacheMap = new Map(); // 表不存在就忽略，不影响搜索
+      }
     }
 
     return NextResponse.json({
