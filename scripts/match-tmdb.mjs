@@ -177,17 +177,13 @@ function confidenceScore(cleanName, tmdbResult, searchLang, searchYear) {
   return bestScore + langBonus + yearBonus;
 }
 
-// 最低接受阈值
-const MIN_CONFIDENCE = 0.22;
-// 如果 top1 结果有年份匹配，降级接受阈值
-const YEAR_MATCH_THRESHOLD = 0.15;
+// 最低接受阈值（无年份时 bigram 相似度）
+const MIN_CONFIDENCE = 0.18;
 
-async function searchTmdb(name, type, year, lang, keyIndex) {
+async function searchTmdb(name, type, lang, keyIndex) {
   await tmdbLimiter.wait(keyIndex);
   const endpoint = type === 'tv' ? '/search/tv' : '/search/movie';
-  const yearParam = type === 'tv' ? 'first_air_date_year' : 'year';
   let url = `${TMDB_BASE}${endpoint}?query=${encodeURIComponent(name)}&api_key=${TMDB_KEYS[keyIndex]}&language=${lang}&page=1&include_adult=false`;
-  if (year) url += `&${yearParam}=${year}`;
 
   try {
     const res = await fetch(url, { cache: 'no-store' });
@@ -219,18 +215,24 @@ async function matchOne(rawName) {
       if (!results?.length) continue;
 
       // 遍历 top5，找到第一个满足置信度阈值的
-      let top1YearMatch = false;
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i];
-        const score = confidenceScore(cleanName, result, s.lang, s.useYear ? year : undefined);
-        // top1 有年份匹配，降级接受（处理 TMDB 无中文翻译名的中文片）
-        if (i === 0 && s.useYear && year) {
-          const resultYear = (result.release_date || result.first_air_date || '').slice(0, 4);
-          if (resultYear && Math.abs(parseInt(resultYear) - parseInt(year)) <= 1) {
-            top1YearMatch = true;
-          }
+      // top1 有年份匹配（±2年）：直接接受，不管片名相似度
+      if (results[0] && s.useYear && year) {
+        const top1Year = (results[0].release_date || results[0].first_air_date || '').slice(0, 4);
+        if (top1Year && Math.abs(parseInt(top1Year) - parseInt(year)) <= 2) {
+          return {
+            id: String(results[0].id),
+            tmdb_type: type,
+            poster: results[0].poster_path ? `${TMDB_IMG}${results[0].poster_path}` : '',
+            title: results[0].title || results[0].name || cleanName,
+            vote: results[0].vote_average || 0,
+            year: top1Year || year,
+          };
         }
-        if (score >= MIN_CONFIDENCE || (i === 0 && top1YearMatch)) {
+      }
+      // 无年份匹配：用置信度筛选
+      for (const result of results) {
+        const score = confidenceScore(cleanName, result, s.lang, s.useYear ? year : undefined);
+        if (score >= MIN_CONFIDENCE) {
           return {
             id: String(result.id),
             tmdb_type: type,
