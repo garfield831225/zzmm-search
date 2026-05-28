@@ -263,7 +263,7 @@ async function main() {
   const rows = await sql`
     SELECT id, name, link, category, source
     FROM xx_resources
-    WHERE tmdb_id IS NULL
+    WHERE (tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id = 'NOMATCH' OR tmdb_id = 'GARBLED')
       AND status = 'active'
       AND name IS NOT NULL
       AND LENGTH(name) > 2
