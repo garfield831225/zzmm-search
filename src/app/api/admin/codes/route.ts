@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
-const JWT_SECRET = process.env.JWT_SECRET || '5ef64fef249935a70a9fd9ae4bf34a3790aacb260618af3e3b49381ea14a4606';
+const JWT_SECRET = process.env.JWT_SECRET || 'caoliangweizhendeshuang';
 
 function genCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

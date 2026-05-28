@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 
 export const dynamic = 'force-dynamic';
 
-const JWT_SECRET = process.env.JWT_SECRET || '5ef64fef249935a70a9fd9ae4bf34a3790aacb260618af3e3b49381ea14a4606';
+const JWT_SECRET = process.env.JWT_SECRET || 'caoliangweizhendeshuang';
 
 export async function POST(req: NextRequest) {
   try {
