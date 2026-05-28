@@ -10,7 +10,8 @@ const PUBLIC_PATHS = [
   '/api/auth/register',
   '/api/auth/me',
   '/api/captcha',
-  '/api/search',       // 搜索结果需要登录才能看，但 API 本身放行
+  '/api/search',
+  '/api/admin/match-stats',
 ];
 
 export function middleware(request: NextRequest) {
