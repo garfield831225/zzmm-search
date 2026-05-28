@@ -38,6 +38,8 @@ class RateLimiter {
 
 // ─── 辅助函数 ─────────────────────────────────────────────────────────────────
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+let _debugItem = 0;
+const _logOnce = () => _debugItem++;
 
 function chineseToNumber(str) {
   const map = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10 };
@@ -196,8 +198,9 @@ async function searchTmdb(name, type, year, lang, keyIndex) {
     if (!res.ok) return null;
     const data = await res.json();
     if (!data.results?.length) return null;
+    if (_logOnce() <= 5) console.log(`[TMDB] query="${name}" type=${type} lang=${lang} results=${data.results.length} top="${data.results[0].title || data.results[0].name}"`);
     return data.results.slice(0, 5); // 返回 top5 用于置信度筛选
-  } catch { return null; }
+  } catch (e) { if (_logOnce() <= 5) console.log(`[TMDB] ERROR: ${e.message}`); return null; }
 }
 
 async function matchOne(rawName) {
@@ -234,6 +237,8 @@ async function matchSegment(segName) {
   const { cleanName, year, season } = cleanFolderName(segName);
   if (cleanName.length < 2) return null;
 
+  if (_logOnce() <= 5) console.log(`[DEBUG] raw="${segName}" clean="${cleanName}" year=${year} season=${season}`);
+
   const isEng = isEnglishName(cleanName);
   const strategies = isEng
     ? [{ lang: 'en-US', useYear: true }, { lang: 'en-US', useYear: false }, { lang: 'zh-CN', useYear: true }]
@@ -267,6 +272,7 @@ async function matchSegment(segName) {
       // 置信度筛选
       for (const result of results) {
         const score = confidenceScore(cleanName, result, s.lang, s.useYear ? year : undefined);
+        if (_logOnce() <= 10) console.log(`[SCORE] clean="${cleanName}" result="${result.title||result.name}" score=${score.toFixed(3)} min=${MIN_CONFIDENCE}`);
         if (score >= MIN_CONFIDENCE) {
           return {
             id: String(result.id),
