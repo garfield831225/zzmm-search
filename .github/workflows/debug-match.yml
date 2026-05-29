@@ -1,0 +1,23 @@
+name: Debug Match
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Run debug match
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TMDB_API_KEY_1: ${{ secrets.TMDB_API_KEY_1 }}
+          DRY_RUN: "true"
+          DEBUG: "true"
+        run: node scripts/debug-match.mjs 2>&1 | head -300
