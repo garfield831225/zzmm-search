@@ -3,9 +3,14 @@ name: Deploy to Vercel
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'next.config.*'
+      - 'tsconfig.json'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 jobs:
