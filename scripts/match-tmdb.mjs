@@ -1,15 +1,23 @@
 /**
- * TMDB 批量匹配脚本 - GitHub Actions 版本
- * 用法: node scripts/match-tmdb.mjs
+ * TMDB 批量匹配脚本
+ * 本地运行: DATABASE_URL=xxx TMDB_API_KEY_1=xxx TMDB_API_KEY_2=xxx DRY_RUN=true DEBUG=true node scripts/match-tmdb.mjs
+ * GitHub Actions: 自动从 secrets 读取环境变量
+ *
  * 环境变量:
  *   DATABASE_URL      - Neon 连接串
- *   TMDB_API_KEY_1    - TMDB API Key 1
- *   TMDB_API_KEY_2    - TMDB API Key 2
- *   BATCH_SIZE        - 每批处理数量 (默认500)
+ *   TMDB_API_KEY_1   - TMDB API Key 1
+ *   TMDB_API_KEY_2   - TMDB API Key 2
+ *   BATCH_SIZE        - 每批处理数量 (默认3000，DRY_RUN时默认20)
  *   DRY_RUN           - true=只测试不写入 (默认false)
+ *   DEBUG             - true=打印每条记录的匹配过程 (DRY_RUN时自动开启)
  */
 
 import { neon } from '@neondatabase/serverless';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const CURL = 'C:/Windows/System32/curl.exe';
+const execFileAsync = promisify(execFile);
 
 const TMDB_KEYS = [
   process.env.TMDB_API_KEY_1 || '7985342d5961e9ee3d5ef6d969c1b8dd',
@@ -17,10 +25,36 @@ const TMDB_KEYS = [
 ];
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
-const BATCH_SIZE = parseInt(process.env.BATCH_SIZE || '3000');
-const DRY_RUN = process.env.DRY_RUN === 'true';
 
-console.log(`[match] Starting batch=${BATCH_SIZE} dry_run=${DRY_RUN}`);
+// HTTP proxy (Clash Verge mixed-port 7897) - curl 能走，Node fetch 不行
+const HTTP_PROXY = process.env.HTTP_PROXY || 'http://127.0.0.1:7897';
+const USE_PROXY = !!HTTP_PROXY;
+
+// curl 替代 fetch（Node fetch 对 HttpsProxyAgent 兼容性问题）
+async function curlFetch(url) {
+  const args = USE_PROXY ? ['-x', HTTP_PROXY, '-s', '--connect-timeout', '10'] : ['-s', '--connect-timeout', '10'];
+  try {
+    const { stdout, stderr } = await execFileAsync(CURL, [...args, url]);
+    if (!stdout || stdout.length < 10) return {};
+    return JSON.parse(stdout);
+  } catch (e) {
+    // execFileAsync 在 stderr 有内容时也会 reject，但实际数据在 stdout
+    // fallback: 重试不用 proxy
+    if (USE_PROXY) {
+      try {
+        const { stdout } = await execFileAsync(CURL, ['-s', '--connect-timeout', '10', url]);
+        return JSON.parse(stdout || '{}');
+      } catch { return {}; }
+    }
+    return {};
+  }
+}
+
+const DRY_RUN = process.env.DRY_RUN === 'true';
+const DEBUG = process.env.DEBUG === 'true' || DRY_RUN;
+const BATCH_SIZE = DRY_RUN ? 20 : (parseInt(process.env.BATCH_SIZE) || 3000);
+
+console.log(`[match] Starting batch=${BATCH_SIZE} dry_run=${DRY_RUN} debug=${DEBUG}`);
 
 // ─── 速率限制器 ──────────────────────────────────────────────────────────────
 class RateLimiter {
@@ -76,7 +110,7 @@ function cleanFolderName(folderName) {
   }
 
   let season = null;
-  const seasonPatterns = [/第([一二三四五六七八九十\d]+)季/i, /Season\s*(\d+)/i, /S(\d{1,2})E\d+/i];
+  const seasonPatterns = [/第([一二三四五六七八九十\d]+)季/i, /Season\s*(\d+)/i, /S(\d{1,2})E\d+/i, /S(\d{1,2})$/i];
   for (const pat of seasonPatterns) {
     const m = folderName.match(pat);
     if (m) { season = chineseToNumber(m[1]); break; }
@@ -86,6 +120,7 @@ function cleanFolderName(folderName) {
     .replace(/第[一二三四五六七八九十\d]+季/gi, '')
     .replace(/Season\s*\d+/gi, '')
     .replace(/S\d{1,2}E\d+/gi, '')
+    .replace(/S\d{1,2}$/gi, '')
     .replace(/【([^】]+)】/g, '')
     .replace(/《([^》]+)》/g, '')
     .replace(/（([^）]+)）/g, '')
@@ -193,16 +228,22 @@ async function searchTmdb(name, type, year, lang, keyIndex) {
   let url = `${TMDB_BASE}${endpoint}?query=${encodeURIComponent(name)}&api_key=${TMDB_KEYS[keyIndex]}&language=${lang}${yearParam}&page=1&include_adult=false`;
 
   try {
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data.results?.length) return null;
-    return data.results.slice(0, 5); // 返回 top5 用于置信度筛选
-  } catch { return null; }
+    // 用 curl 替代 fetch（代理兼容性更好）
+    const data = await curlFetch(url);
+    const top5 = data.results?.slice(0, 5) || [];
+    if (DEBUG) {
+      const entries = top5.map(r => `"${(r.title||r.name||'').slice(0,20)}"(${r.release_date||r.first_air_date||'?'})`).join(' | ');
+      console.log(`[TMDB] query="${name}" type=${type} lang=${lang} year=${year||'none'} → ${top5.length}: ${entries||'(empty)'}`);
+    }
+    return top5;
+  } catch (e) {
+    if (DEBUG) console.log(`[TMDB-ERR] query="${name}" error=${e.message}`);
+    return null;
+  }
 }
 
 async function matchOne(rawName) {
-  if (isGarbled(rawName)) return 'GARBLED';
+  if (isGarbled(rawName)) { if (DEBUG) console.log(`[DEBUG] GARBLED raw="${rawName}"`); return 'GARBLED'; }
 
   // ★ 方案：按 [] 拆成多段，每段单独搜 TMDB，取最佳结果
   const segments = rawName.split(/[\[\]]/).filter(s => s.trim().length >= 2);
@@ -226,7 +267,11 @@ async function matchOne(rawName) {
     }
   }
 
-  if (bestResult) return bestResult;
+  if (bestResult) {
+    if (DEBUG) console.log(`[DEBUG] MATCHED raw="${rawName}" → "${bestResult.title}" (tmdb_id=${bestResult.id} score=${bestResult.score.toFixed(3)})`);
+    return bestResult;
+  }
+  if (DEBUG) console.log(`[DEBUG] NOMATCH raw="${rawName}"`);
   return 'NOMATCH';
 }
 
