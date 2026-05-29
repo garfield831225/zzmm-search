@@ -11,10 +11,13 @@ jobs:
         with:
           fetch-depth: 0
       - name: Create empty commit to trigger deploy
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.email "garfield@users.noreply.github.com"
           git config user.name "Garfield"
+          git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/garfield831225/zzmm-search.git
           git commit --allow-empty -m "ci: trigger deploy $(date +%s)"
-          git push origin HEAD:main
+          git push origin main
       - name: Wait for deployment
         run: sleep 30
