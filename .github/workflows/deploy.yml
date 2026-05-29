@@ -3,16 +3,20 @@ name: Deploy to Vercel
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
   workflow_dispatch:
 
 jobs:
   deploy:
+    if: "!contains(github.event.head_commit.message, 'ci: trigger deploy')"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Create empty commit to trigger deploy
+      - name: Create empty commit to trigger Vercel
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -21,5 +25,5 @@ jobs:
           git remote set-url origin https://x-access-token:${GH_TOKEN}@github.com/garfield831225/zzmm-search.git
           git commit --allow-empty -m "ci: trigger deploy $(date +%s)"
           git push origin main
-      - name: Wait for deployment
+      - name: Wait for Vercel deployment
         run: sleep 30
