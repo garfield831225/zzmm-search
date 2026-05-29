@@ -19,6 +19,8 @@ const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
 const BATCH_SIZE = parseInt(process.env.BATCH_SIZE || '3000');
 const DRY_RUN = process.env.DRY_RUN === 'true';
+let _nomatchLogCount = 0;
+const _logNomatch = (name) => { if (_nomatchLogCount < 5) { console.log(`[NOMATCH-SAMPLE] "${name}"`); _nomatchLogCount++; } };
 
 console.log(`[match] Starting batch=${BATCH_SIZE} dry_run=${DRY_RUN}`);
 
@@ -188,7 +190,7 @@ function confidenceScore(cleanName, tmdbResult, searchLang, searchYear) {
 }
 
 // 最低接受阈值（无年份时 bigram 相似度）
-const MIN_CONFIDENCE = 0.18;
+const MIN_CONFIDENCE = 0.12;
 
 async function searchTmdb(name, type, year, lang, keyIndex) {
   await tmdbLimiter.wait(keyIndex);
@@ -201,7 +203,7 @@ async function searchTmdb(name, type, year, lang, keyIndex) {
     if (!res.ok) return null;
     const data = await res.json();
     if (!data.results?.length) return null;
-    return data.results.slice(0, 5);
+    return data.results.slice(0, 5); // 返回 top5 用于置信度筛选
   } catch { return null; }
 }
 
@@ -368,7 +370,7 @@ async function main() {
           }
           return { id: item.id, tmdb_id: 'GARBLED' };
         }
-        if (result === 'NOMATCH') {
+        if (result === 'NOMATCH') { _logNomatch(item.name);
           if (!DRY_RUN) {
             await sql`UPDATE xx_resources SET tmdb_id = 'NOMATCH', updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
           }
