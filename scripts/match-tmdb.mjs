@@ -375,7 +375,7 @@ async function main() {
   const rows = await sql`
     SELECT id, name, link, category, source
     FROM xx_resources
-    WHERE (tmdb_id IS NULL OR tmdb_id IN ('NOMATCH', 'GARBLED', '') OR (COALESCE(NULLIF(CAST(tmdb_id AS TEXT), ''), '0') = '0' AND tmdb_id ~ '^[0-9]*$'))
+    WHERE tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id IN ('NOMATCH', 'GARBLED')
       AND status = 'active'
       AND name IS NOT NULL
       AND LENGTH(name) > 2
