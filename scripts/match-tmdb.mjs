@@ -347,49 +347,26 @@ async function searchTmdb(name, type, year, lang, keyIndex) {
 async function matchOne(rawName) {
   if (isGarbled(rawName)) { if (DEBUG) console.log(`[DEBUG] GARBLED raw="${rawName}"`); return 0; }
 
-  // ★ Bug fix 5: PT站格式支持 - 先尝试提取中文名
-  let searchName = rawName;
-  const ptMatch = rawName.match(/^\[([^\]]+)\]/);
-  if (ptMatch) {
-    const parts = ptMatch[1].split('_');
-    const chinesePart = parts.find(p => /[\u4e00-\u9fff]/.test(p));
-    if (chinesePart) searchName = chinesePart;
+  // 使用新的 cleanFolderName 直接提取片名，不再手动切分 []
+  const { cleanName, year, season } = cleanFolderName(rawName);
+  if (cleanName.length < 2) {
+    if (DEBUG) console.log(`[DEBUG] NOMATCH (too short) raw="${rawName}"`);
+    return 0;
   }
 
-  // 按 [] 拆成多段，每段单独搜 TMDB，取最佳结果
-  const segments = searchName.split(/[\[\]]/).filter(s => s.trim().length >= 2);
-  if (segments.length === 0) return 0;
-
-  let bestResult = null;
-  let bestScore = -1;
-
-  for (const seg of segments) {
-    const segResult = await matchSegment(seg.trim());
-    if (segResult && typeof segResult === 'object' && segResult.score > bestScore) {
-      bestScore = segResult.score;
-      bestResult = {
-        id: segResult.id,
-        tmdb_type: segResult.tmdb_type,
-        poster: segResult.poster,
-        title: segResult.title,
-        vote: segResult.vote,
-        year: segResult.year,
-      };
-    }
+  // 直接用提取出的 cleanName 搜索 TMDB
+  const result = await matchSegmentWithClean(cleanName, year, season, rawName);
+  if (result) {
+    if (DEBUG) console.log(`[DEBUG] MATCHED raw="${rawName}" → "${result.title}" (tmdb_id=${result.id} score=${result.score.toFixed(3)})`);
+    return result;
   }
-
-  if (bestResult) {
-    if (DEBUG) console.log(`[DEBUG] MATCHED raw="${rawName}" → "${bestResult.title}" (tmdb_id=${bestResult.id} score=${bestResult.score.toFixed(3)})`);
-    return bestResult;
-  }
-  if (DEBUG) console.log(`[DEBUG] NOMATCH raw="${rawName}"`);
+  if (DEBUG) console.log(`[DEBUG] NOMATCH raw="${rawName}" clean="${cleanName}"`);
   return 0;
 }
 
-// 对单个片段进行匹配
+// 对单个片段进行匹配（接收已提取的 cleanName）
 // Bug fix 7: 简化搜索顺序 + movie↔tv 互搜
-async function matchSegment(segName) {
-  const { cleanName, year, season } = cleanFolderName(segName);
+async function matchSegmentWithClean(cleanName, year, season, rawName) {
   if (cleanName.length < 2) return null;
 
   const isEng = isEnglishName(cleanName);
@@ -426,6 +403,12 @@ async function matchSegment(segName) {
     }
   }
   return null;
+}
+
+// 兼容旧调用（内部会再次调用 cleanFolderName，但避免双重拆分问题）
+async function matchSegment(segName) {
+  const { cleanName, year, season } = cleanFolderName(segName);
+  return matchSegmentWithClean(cleanName, year, season, segName);
 }
 
 async function cacheIt(r, sql) {
