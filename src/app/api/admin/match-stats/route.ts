@@ -6,22 +6,20 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   const sql = neon(process.env.DATABASE_URL || '');
   try {
-    // Total active
-    const total = (await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active'`)) as any[];
-    // Matched: tmdb_id > 0 (integer, 0 = unmatched)
-    const matched = (await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND tmdb_id IS NOT NULL AND CAST(tmdb_id AS INTEGER) > 0`)) as any[];
-    // Unmatched: tmdb_id IS NULL or tmdb_id = 0 or tmdb_id is a string like NOMATCH/GARBLED
-    const unmatched = (await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND (tmdb_id IS NULL OR CAST(tmdb_id AS INTEGER) = 0 OR CAST(tmdb_id AS TEXT) IN ('NOMATCH', 'GARBLED', ''))`)) as any[];
-    // Unmatched with valid names (longer than 3 chars)
-    const unmatchedValid = (await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND (tmdb_id IS NULL OR CAST(tmdb_id AS INTEGER) = 0 OR CAST(tmdb_id AS TEXT) IN ('NOMATCH', 'GARBLED', '')) AND LENGTH(name) > 3`)) as any[];
+    const total = await sql`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active'`;
+    const matched = await sql`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND tmdb_id ~ '^[0-9]+$' AND (tmdb_id::bigint) > 0`;
+    const nomatch = await sql`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND (tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id = 'NOMATCH' OR tmdb_id = 'GARBLED')`;
+    const others = await sql`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND tmdb_id IS NOT NULL AND tmdb_id != '' AND tmdb_id NOT IN ('NOMATCH', 'GARBLED') AND tmdb_id !~ '^[0-9]+$'`;
+    const otherSamples = await sql`SELECT tmdb_id, COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND tmdb_id IS NOT NULL AND tmdb_id != '' AND tmdb_id NOT IN ('NOMATCH', 'GARBLED') AND tmdb_id !~ '^[0-9]+$' GROUP BY tmdb_id ORDER BY cnt DESC LIMIT 20`;
 
     return NextResponse.json({
       total: parseInt(total[0]?.cnt ?? '0'),
       matched: parseInt(matched[0]?.cnt ?? '0'),
-      unmatched: parseInt(unmatched[0]?.cnt ?? '0'),
-      unmatchedValid: parseInt(unmatchedValid[0]?.cnt ?? '0'),
+      nomatch: parseInt(nomatch[0]?.cnt ?? '0'),
+      others: parseInt(others[0]?.cnt ?? '0'),
+      otherSamples: otherSamples,
     });
-  } catch (e: any) {
+  } catch (e) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
