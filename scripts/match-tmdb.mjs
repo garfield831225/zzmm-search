@@ -375,7 +375,7 @@ async function main() {
   const rows = await sql`
     SELECT id, name, link, category, source
     FROM xx_resources
-    WHERE (tmdb_id IS NULL OR tmdb_id = 0 OR CAST(tmdb_id AS TEXT) IN ('NOMATCH', 'GARBLED', ''))
+    WHERE (tmdb_id IS NULL OR CAST(tmdb_id AS INTEGER) = 0 OR CAST(tmdb_id AS TEXT) IN ('NOMATCH', 'GARBLED', ''))
       AND status = 'active'
       AND name IS NOT NULL
       AND LENGTH(name) > 2
@@ -396,7 +396,7 @@ async function main() {
   if (links.length > 0) {
     const existing = await sql`
       SELECT link, tmdb_id FROM xx_resources
-      WHERE link = ANY(${links}) AND tmdb_id IS NOT NULL AND CAST(tmdb_id AS TEXT) NOT IN ('GARBLED', 'NOMATCH', '')
+      WHERE link = ANY(${links}) AND tmdb_id IS NOT NULL AND CAST(tmdb_id AS TEXT) NOT IN ('GARBLED', 'NOMATCH', '') AND CAST(tmdb_id AS INTEGER) > 0
     `;
     for (const r of existing) linkMap[r.link] = r.tmdb_id;
   }
