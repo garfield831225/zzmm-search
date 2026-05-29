@@ -100,61 +100,141 @@ function isGarbled(name) {
   return garbageLen / name.length > 0.4;
 }
 
-function cleanFolderName(folderName) {
-  // ★ Bug fix 5: PT站格式优先提取中文部分
-  // 格式: [中文名_英文名_年份]Season → 先取方括号内中文部分作搜索词
-  let searchTitle = folderName;
-  const ptMatch = folderName.match(/^\[([^\]]+)\]/);
-  if (ptMatch) {
-    const parts = ptMatch[1].split('_');
-    const chinesePart = parts.find(p => /[\u4e00-\u9fff]/.test(p));
-    if (chinesePart) searchTitle = chinesePart;
+// ─── cleanFolderName (重写 v2) ─────────────────────────────────────────────────
+// 重写版 cleanFolderName，处理所有已知格式
+function cleanFolderName(raw) {
+  let title = raw;
+
+  // 提取年份
+  let year = '';
+  const yearMatch = raw.match(/\b(19\d{2}|20\d{2})\b/);
+  if (yearMatch) {
+    const y = parseInt(yearMatch[1]);
+    if (y >= 1900 && y <= 2030) year = String(y);
   }
 
-  // ★ Bug fix 6: 年份只作搜索参数，不从标题删除
-  let extractedYear = '';
-  const yearCandidates = [...searchTitle.matchAll(/\b(20\d{2})\b/g)];
-  for (const m of yearCandidates) {
-    const y = parseInt(m[1]);
-    if (y >= 1900 && y <= 2030) { extractedYear = m[1]; break; }
-  }
-
+  // 提取季数
   let season = null;
-  const seasonPatterns = [/第([一二三四五六七八九十\d]+)季/i, /Season\s*(\d+)/i, /S(\d{1,2})E\d+/i, /S(\d{1,2})$/i];
-  for (const pat of seasonPatterns) {
-    const m = searchTitle.match(pat);
-    if (m) { season = chineseToNumber(m[1]); break; }
+  const seasonMatch = raw.match(/第([一二三四五六七八九十\d]+)季|S(\d{1,2})/i);
+  if (seasonMatch) {
+    season = seasonMatch[1] ? chineseToNumber(seasonMatch[1]) : parseInt(seasonMatch[2]);
   }
 
-  let cleanName = searchTitle
-    .replace(/第[一二三四五六七八九十\d]+季/gi, '')
-    .replace(/Season\s*\d+/gi, '')
-    .replace(/S\d{1,2}E\d+/gi, '')
-    .replace(/S\d{1,2}$/gi, '')
-    .replace(/【([^】]+)】/g, '')
-    .replace(/《([^》]+)》/g, '')
-    .replace(/（([^）]+)）/g, '')
-    .replace(/\(([^)]+)\)/g, '')
-    .replace(/\[([^\]]+)\]/g, '');
+  // A1: 片名在开头，点后接规格（不是年份） 片名.规格 → 取点号前的中文
+  const firstDot = raw.indexOf('.');
+  if (firstDot > 0 && firstDot < 20) {
+    const beforeDot = raw.slice(0, firstDot).trim();
+    const afterDot = raw.slice(firstDot + 1);
+    // 排除短中文片名+年份组合（让A2处理 [片名.年份]）
+    if (beforeDot.length >= 2 && beforeDot.length <= 5 && /[\u4e00-\u9fff]/.test(beforeDot) && /^(19\d{2}|20\d{2})$/i.test(afterDot)) {
+      // 跳过
+    } else if (beforeDot.length >= 2 && /[\u4e00-\u9fff]/.test(beforeDot)) {
+      title = beforeDot;
+      return { cleanName: title, year, season };
+    }
+  }
 
-  const noisePatterns = [
-    /2160p|1080p|720p|480p/gi, /WEB-DL|BluRay|BDRip|HDTV|WEBRip|REMUX|Blu-ray|BDMV/gi,
-    /H265|H264|HEVC|AVC|x264|x265/gi,
-    /杜比视界|杜比全景声|DV|HDR10\+|HDR10|HDR|ATMOS|DDP5\.1|DDP|DTS-HD|DTS|AAC5\.1|AAC|TrueHD|EAC3/gi,
-    /国语中字|中英双字|中英字幕|双语字幕|外挂字幕|国语配音|中文字幕|中字|字幕|粤语|台配|配音/gi,
-    /导演剪辑版|导演剪辑|加长版|完整版|未删减版|剧场版|REMUX/gi,
-    /IMAX|SDR|AC3/gi, /蓝光原盘|蓝光|蓝光remux|HD|内嵌|封包|封装/gi,
-    /DIY|次时代|官译|特效字幕|双语|简繁|繁简/gi,
-    /CEE|美版|日版|港版|韩版|欧版|台版/gi,
-    /Athena@|CHDBits@|HDSky@|HDHome@|ltzww@/gi,
-  ];
-  for (const pat of noisePatterns) cleanName = cleanName.replace(pat, ' ');
+  // A2: PT格式 [中文名_英文名_年份] 或 [片名.年份] → 取中文部分
+  const ptMatch = raw.match(/^\[([^\]]+)\]/);
+  if (ptMatch) {
+    // 下划线分割
+    const parts = ptMatch[1].split('_');
+    const chinese = parts.find(p => /[\u4e00-\u9fff]/.test(p));
+    if (chinese) {
+      title = chinese.replace(/第\d+季/i, '').replace(/\s*\d{4}$/, '').trim();
+      if (title) return { cleanName: title, year, season };
+    }
+    // [片名.年份] 格式
+    const dotInBrackets = ptMatch[1].match(/^([^_\.]+)/);
+    if (dotInBrackets) {
+      let t = dotInBrackets[1].trim();
+      if (t.endsWith('.')) t = t.slice(0, -1);
+      if (t.length >= 2 && /[\u4e00-\u9fff]/.test(t)) {
+        title = t;
+        return { cleanName: title, year, season };
+      }
+    }
+  }
 
-  // Bug fix 6: 不再强制删除年份数字，只去掉扩展名
-  cleanName = cleanName.replace(/\.(mkv|mp4|avi|ts|m2ts|wmv|flv)$/gi, '');
-  cleanName = cleanName.replace(/\./g, ' ').replace(/\?/g, '').replace(/\s+/g, ' ').trim();
+  // B: 多段括号 [片名][规格] → 找含中文且较长的第一段
+  const multiBrackets = [...raw.matchAll(/\[([^\]]+)\]/g)];
+  for (const m of multiBrackets) {
+    const content = m[1].trim();
+    if (content.length >= 2 && /[\u4e00-\u9fff]/.test(content)) {
+      const lower = content.toLowerCase();
+      // 排除纯标签
+      if (/^(4k|8k|2160p|1080p|720p|480p|blu-?ray|bluray|bdmv|remux|web-?dl|hdtv|diy|cee|美版|日版|港版|欧版|韩版|台版|hdr10|hdr|dolby|dts|atmos|truehd|aac|dts-?hd|ac3|imax|sdr|国语|英语|粤语|中字|字幕|配音|特效|简繁|双语)$/i.test(content)) continue;
+      if (/^(4k|8k|2160p|1080p|720p|480p|blu-?ray|bluray|bdmv|remux|web-?dl|hdtv)\s/i.test(content)) continue;
+      if (/^(19\d{2}|20\d{2})\s*$/i.test(content)) continue;
+      title = content.replace(/\d{1,2}\.\d+G$/, '').trim();
+      if (title && title.length >= 2) return { cleanName: title, year, season };
+    }
+  }
 
-  return { cleanName, year: extractedYear, season };
+  // C: 点分隔 片名.年份.规格 → 取第一个含中文的段
+  const dotParts = raw.split('.');
+  for (const part of dotParts) {
+    const p = part.trim();
+    if (p.length >= 2 && /[\u4e00-\u9fff]/.test(p)) {
+      if (!/^(19\d{2}|20\d{2}|4K|8K|蓝光原盘|蓝光remux|HDTV|WEBRip|BluRay|DIY)$/i.test(p)) {
+        title = p;
+        return { cleanName: title, year, season };
+      }
+    }
+  }
+
+  // D: 《片名》年份 → 取书名号内内容
+  const bookMatch = raw.match(/《([^》]+)》/);
+  if (bookMatch) {
+    const content = bookMatch[1].trim();
+    if (content.length >= 2) {
+      title = content.replace(/\s*(19\d{2}|20\d{2})\s*/g, ' ').replace(/\s*(4K|蓝光原盘|蓝光|HDTV|WEBRip)\s*/gi, ' ').trim();
+      if (title) return { cleanName: title, year, season };
+    }
+  }
+
+  // E: 括号分隔 （片名）→ 取括号内内容
+  const parenMatch = raw.match(/[（(]([^）)]+)[)）]/);
+  if (parenMatch) {
+    const content = parenMatch[1].trim();
+    if (content.length >= 2 && /[\u4e00-\u9fff]/.test(content)) {
+      title = content;
+      return { cleanName: title, year, season };
+    }
+  }
+
+  // F: 提取最长的中文连续片段
+  const chineseFragments = raw.match(/[\u4e00-\u9fff][^\[\]（）【】《》\s]{0,30}/g);
+  if (chineseFragments && chineseFragments.length > 0) {
+    let best = '';
+    for (const frag of chineseFragments) {
+      if (frag.length > best.length && frag.length >= 2) best = frag.trim();
+    }
+    if (best) return { cleanName: best, year, season };
+  }
+
+  // G: 纯英文文件名（英文电影）
+  const trimmed = raw.replace(/^[\[\]（）【】《》\s]+|[\[\]（）【】《》\s]+$/g, '').trim();
+  if (trimmed.length >= 2 && !/[\u4e00-\u9fff]/.test(trimmed)) {
+    title = trimmed;
+    return { cleanName: title, year, season };
+  }
+
+  // 最终兜底
+  title = raw
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/[（(][^）)]*[)）]/g, ' ')
+    .replace(/《[^》]*》/g, ' ')
+    .replace(/【[^】]*】/g, ' ')
+    .replace(/\d{1,2}\.\d+G$/, '')
+    .replace(/\b(19\d{2}|20\d{2})\b/g, ' ')
+    .replace(/\b(4K|8K|1080p|2160p|720p|480p)\b/gi, ' ')
+    .replace(/\b(Bluray|BluRay|BDMV|WEB-DL|REMUX|DIY|CEE|美版|日版|港版|欧版|韩版|台版)\b/gi, ' ')
+    .replace(/\./g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (title.length < 2) title = raw;
+  return { cleanName: title, year, season };
 }
 
 // ─── 置信度评分 ────────────────────────────────────────────────────────────────
