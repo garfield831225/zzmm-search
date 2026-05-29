@@ -141,49 +141,50 @@ function titleSimilarity(a, b) {
 
 /**
  * 综合置信度评分
- * 检查：片名相似度 + 语言一致性 + 年份一致性（可选）
+ * 只用 bigram 相似度，不接受无意义匹配
  */
 function confidenceScore(cleanName, tmdbResult, searchLang, searchYear) {
-  const zhNames = [tmdbResult.title, tmdbResult.original_title, tmdbResult.name].filter(Boolean);
-  const enName = tmdbResult.title?.match(/[a-zA-Z]/) ? tmdbResult.title : '';
+  // 清理后太短的不匹配（避免随机字符产生虚假相似度）
+  const cleanLen = cleanName.replace(/\s/g, '').length;
+  if (cleanLen < 3) return 0;
 
-  // 检查各种片名组合的 substring 命中（翻译片名跨语言匹配）
+  const zhNames = [tmdbResult.title, tmdbResult.original_title, tmdbResult.name].filter(Boolean);
+  const enName = (tmdbResult.title?.match(/[a-zA-Z]/) ? tmdbResult.title : '') || '';
+
   const norm = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
   const cleanNorm = norm(cleanName);
-  const allTitles = [...zhNames, enName].map(norm);
+  const allTitles = [...zhNames, enName].map(t => ({ raw: t, norm: norm(t) }));
+
+  // 必须 title 包含搜索词（或搜索词包含在 title 中）才算 substring hit
   let substringHit = false;
   for (const t of allTitles) {
-    if (t.length >= 2 && (t.includes(cleanNorm) || cleanNorm.includes(t))) {
+    if (t.norm.length >= 2 && (t.norm.includes(cleanNorm) || cleanNorm.includes(t.norm))) {
       substringHit = true;
       break;
     }
   }
 
-  // 最高相似度
+  // bigram 相似度（只用这个）
   const zhScore = Math.max(...zhNames.map(zn => titleSimilarity(cleanName, zn)));
   const enScore = enName ? titleSimilarity(cleanName, enName) : 0;
   const bestScore = Math.max(zhScore, enScore);
 
-  // 直接 substring 命中 = 满分
-  if (substringHit) return 1.0;
-
-  // 语言一致性奖励：中文片名搜中文结果，英文搜英文
-  let langBonus = 0;
-  if (searchLang === 'zh-CN' && zhScore > enScore) langBonus = 0.1;
-  if (searchLang === 'en-US' && enScore > zhScore) langBonus = 0.1;
+  // 只有 substring 命中 + bigram ≥ 0.3 才接受
+  if (!substringHit) return 0;
+  if (bestScore < 0.3) return 0;
 
   // 年份一致性奖励（误差 ±2 年）
   let yearBonus = 0;
   const resultYear = (tmdbResult.release_date || tmdbResult.first_air_date || '').slice(0, 4);
   if (searchYear && resultYear && Math.abs(parseInt(resultYear) - parseInt(searchYear)) <= 2) {
-    yearBonus = 0.15;
+    yearBonus = 0.1;
   }
 
-  return bestScore + langBonus + yearBonus;
+  return bestScore + yearBonus;
 }
 
-// 最低接受阈值（无年份时 bigram 相似度）
-const MIN_CONFIDENCE = 0.18;
+// 最低接受阈值（必须 substring hit + bigram ≥ 0.3）
+const MIN_CONFIDENCE = 0.3;
 
 async function searchTmdb(name, type, year, lang, keyIndex) {
   await tmdbLimiter.wait(keyIndex);
