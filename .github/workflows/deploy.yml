@@ -1,0 +1,20 @@
+name: Deploy to Vercel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create empty commit to trigger deploy
+        run: |
+          git config user.email "garfield@users.noreply.github.com"
+          git config user.name "Garfield"
+          git commit --allow-empty -m "ci: trigger deploy $(date +%s)"
+          git push origin HEAD:main
+      - name: Wait for deployment
+        run: sleep 30
