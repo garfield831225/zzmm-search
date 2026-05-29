@@ -19,8 +19,6 @@ const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
 const BATCH_SIZE = parseInt(process.env.BATCH_SIZE || '3000');
 const DRY_RUN = process.env.DRY_RUN === 'true';
-let _nomatchLogCount = 0;
-const _logNomatch = (name) => { if (_nomatchLogCount < 5) { console.log(`[NOMATCH-SAMPLE] "${name}"`); _nomatchLogCount++; } };
 
 console.log(`[match] Starting batch=${BATCH_SIZE} dry_run=${DRY_RUN}`);
 
@@ -55,22 +53,17 @@ function isEnglishName(name) {
 }
 
 function isGarbled(name) {
-  // U+FFFD (�) 是编码错误替换符，一定是乱码
-  if (name.includes('\ufffd')) return true;
-  // 三连以上 ? 是乱码标志（编码错误时 ? 替换原始字节）
-  if (/\?{3,}/.test(name)) return true;
-
   let garbageLen = 0;
   for (let i = 0; i < name.length; i++) {
     const cp = name.codePointAt(i);
     if (cp === 0xfffd) { garbageLen++; continue; }
-    if (cp === 0x3f) { garbageLen++; continue; } // 额外的 ? 也算
+    if (cp === 0x3f) { garbageLen++; continue; }
     const inAscii = cp >= 0x20 && cp <= 0x7e;
     const inCJK = (cp >= 0x4e00 && cp <= 0x9fff) || (cp >= 0x3040 && cp <= 0x30ff) || (cp >= 0xac00 && cp <= 0xd7af);
     const inPunct = [0x2e, 0x3001, 0x3002, 0x2018, 0x2019, 0xff08, 0xff09, 0x300a, 0x300b, 0x5b, 0x5d, 0x28, 0x29, 0x2d].includes(cp);
     if (!inAscii && !inCJK && !inPunct) garbageLen++;
   }
-  return garbageLen / name.length > 0.3;
+  return garbageLen / name.length > 0.4;
 }
 
 function cleanFolderName(folderName) {
@@ -190,7 +183,7 @@ function confidenceScore(cleanName, tmdbResult, searchLang, searchYear) {
 }
 
 // 最低接受阈值（无年份时 bigram 相似度）
-const MIN_CONFIDENCE = 0.12;
+const MIN_CONFIDENCE = 0.18;
 
 async function searchTmdb(name, type, year, lang, keyIndex) {
   await tmdbLimiter.wait(keyIndex);
@@ -240,6 +233,7 @@ async function matchOne(rawName) {
 async function matchSegment(segName) {
   const { cleanName, year, season } = cleanFolderName(segName);
   if (cleanName.length < 2) return null;
+
   const isEng = isEnglishName(cleanName);
   const strategies = isEng
     ? [{ lang: 'en-US', useYear: true }, { lang: 'en-US', useYear: false }, { lang: 'zh-CN', useYear: true }]
@@ -250,7 +244,7 @@ async function matchSegment(segName) {
   let keyIdx = 0;
   for (const s of strategies) {
     for (const type of typeOrder) {
-      const results = await searchTmdb(cleanName, type, s.useYear ? year : null, s.lang, keyIdx % TMDB_KEYS.length);
+      const results = await searchTmdb(cleanName, type, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length);
       keyIdx++;
       if (!results?.length) continue;
 
@@ -370,7 +364,7 @@ async function main() {
           }
           return { id: item.id, tmdb_id: 'GARBLED' };
         }
-        if (result === 'NOMATCH') { _logNomatch(item.name);
+        if (result === 'NOMATCH') {
           if (!DRY_RUN) {
             await sql`UPDATE xx_resources SET tmdb_id = 'NOMATCH', updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
           }
