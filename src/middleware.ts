@@ -12,6 +12,7 @@ const PUBLIC_PATHS = [
   '/api/captcha',
   '/api/search',
   '/api/admin/match-stats',
+  '/api/stats2',
 ];
 
 export function middleware(request: NextRequest) {
