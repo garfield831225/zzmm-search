@@ -100,18 +100,161 @@ function isGarbled(name) {
   return garbageLen / name.length > 0.4;
 }
 
-// ─── cleanFolderName (重写 v2) ─────────────────────────────────────────────────
-// 重写版 cleanFolderName，处理所有已知格式
+// ─── cleanFolderName（文档规则 + ISO文件名优化） ──────────────────────────────
+// 关键优化：ISO文件优先从第一个方括号提取，年份只删本身不删后面内容
 function cleanFolderName(raw) {
-  let title = raw;
-
-  // 提取年份
-  let year = '';
-  const yearMatch = raw.match(/\b(19\d{2}|20\d{2})\b/);
-  if (yearMatch) {
-    const y = parseInt(yearMatch[1]);
-    if (y >= 1900 && y <= 2030) year = String(y);
+  // Step 0: ISO文件名优先从第一个方括号提取
+  if (raw.endsWith('.iso')) {
+    const firstBracket = raw.match(/^\[([^\]]+)\]/);
+    if (firstBracket) {
+      let extracted = firstBracket[1];
+      if (!/[\u4e00-\u9fff]/.test(extracted)) {
+        const allBrackets = [...raw.matchAll(/\[([^\]]+)\]/g)];
+        if (allBrackets.length >= 2) extracted = allBrackets[1][1];
+      }
+      // 去掉年份（只删年份本身，不删后面内容）
+      extracted = extracted.replace(/\s*\d{4}(?=\W|$)/, '').trim();
+      // 去掉纯标签尾缀
+      extracted = extracted.replace(/^(4K|8K|2160p|1080p|720p|DIY|CEE|美版|日版|港版|欧版|韩版|台版|DV|HDR|Dolby|Atmos|DTS|HEVC|LPCM)\s*/i, '');
+      if (extracted.length >= 2) return { cleanName: extracted, year: '', season: null };
+    }
   }
+
+  // Step 1: 普通文件名去掉年份及后面所有内容
+  raw = raw.replace(/\s*\d{4}.*$/, '').trim();
+
+  // Step 2: 提取季数
+  let season = null;
+  const seasonMatch = raw.match(/第([一二三四五六七八九十\d]+)季|S(\d{1,2})/i);
+  if (seasonMatch) season = seasonMatch[1] ? chineseToNumber(seasonMatch[1]) : parseInt(seasonMatch[2]);
+
+  // Step 3: PT格式 [中文名_英文名_年份]
+  const ptMatch = raw.match(/^\[([^\]]+)\]/);
+  if (ptMatch) {
+    const parts = ptMatch[1].split('_');
+    const chinese = parts.find(p => /[\u4e00-\u9fff]/.test(p));
+    if (chinese) { let t = chinese.replace(/第\d+季/i, '').trim(); if (t) return { cleanName: t, year: '', season }; }
+    const dotInBrackets = ptMatch[1].match(/^([^_\.]+)/);
+    if (dotInBrackets) { let t = dotInBrackets[1].trim(); if (t.endsWith('.')) t = t.slice(0, -1); if (t.length >= 2 && /[\u4e00-\u9fff]/.test(t)) return { cleanName: t, year: '', season }; }
+  }
+
+  // Step 4: 方括号取第一个含中文段
+  const multiBrackets = [...raw.matchAll(/\[([^\]]+)\]/g)];
+  for (const m of multiBrackets) {
+    const content = m[1].trim();
+    if (content.length >= 2 && /[\u4e00-\u9fff]/.test(content)) {
+      if (/^(4k|8k|2160p|1080p|720p|480p|blu-?ray|bluray|bdmv|remux|web-?dl|hdtv|diy|美版|日版|港版|欧版|韩版|台版|hdr10|hdr|dolby|dts|atmos|truehd|aac|国语|英语|粤语|中字|字幕|配音|特效|简繁|双语)$/i.test(content)) continue;
+      let t = content.replace(/\d{1,2}\.\d+G$/, '').trim();
+      if (t.length >= 2) return { cleanName: t, year: '', season };
+    }
+  }
+
+  // Step 5: 点分隔
+  const dotParts = raw.split('.');
+  for (const p of dotParts) {
+    const t = p.trim();
+    if (t.length >= 2 && /[\u4e00-\u9fff]/.test(t)) {
+      if (!/^(4K|8K|蓝光原盘|蓝光remux|HDTV|WEBRip|BluRay|DIY)$/i.test(t)) return { cleanName: t, year: '', season };
+    }
+  }
+
+  // Step 6: 书名号
+  const bookMatch = raw.match(/《([^》]+)》/);
+  if (bookMatch) { const t = bookMatch[1].trim(); if (t.length >= 2) return { cleanName: t, year: '', season }; }
+
+  // Step 7: 最长中文片段
+  const frags = raw.match(/[\u4e00-\u9fff][^\[\]（）【】《》\s]{0,30}/g);
+  if (frags && frags.length > 0) { let best = ''; for (const f of frags) { const ft = f.trim(); if (ft.length > best.length && ft.length >= 2) best = ft; } if (best) return { cleanName: best, year: '', season }; }
+
+  // Step 8: 纯英文
+  const trimmed = raw.replace(/^[\[\]（）【】《》\s]+|[\[\]（）【】《》\s]+$/g, '').trim();
+  if (trimmed.length >= 2 && !/[\u4e00-\u9fff]/.test(trimmed)) return { cleanName: trimmed, year: '', season };
+
+  // Step 9: 兜底
+  let title = raw.replace(/\[[^\]]*\]/g,' ').replace(/[（(][^）)]*[)）]/g,' ').replace(/《[^》]*》/g,' ').replace(/【[^】]*】/g,' ').replace(/\d{1,2}\.\d+G$/,'').replace(/\s+/g,' ').trim();
+  if (title.length < 2) title = raw;
+  return { cleanName: title, year: '', season };
+}
+
+  // Step 3: PT格式 [中文名_英文名_年份] → 取中文部分
+  const ptMatch = raw.match(/^\[([^\]]+)\]/);
+  if (ptMatch) {
+    const parts = ptMatch[1].split('_');
+    const chinese = parts.find(p => /[\u4e00-\u9fff]/.test(p));
+    if (chinese) {
+      let title = chinese.replace(/第\d+季/i, '').trim();
+      if (title) return { cleanName: title, year: '', season };
+    }
+    // [片名.年份]
+    const dotInBrackets = ptMatch[1].match(/^([^_\.]+)/);
+    if (dotInBrackets) {
+      let t = dotInBrackets[1].trim();
+      if (t.endsWith('.')) t = t.slice(0, -1);
+      if (t.length >= 2 && /[\u4e00-\u9fff]/.test(t)) {
+        return { cleanName: t, year: '', season };
+      }
+    }
+  }
+
+  // Step 4: 多个方括号 [片名][规格] → 取第一个含中文的段
+  const multiBrackets = [...raw.matchAll(/\[([^\]]+)\]/g)];
+  for (const m of multiBrackets) {
+    const content = m[1].trim();
+    if (content.length >= 2 && /[\u4e00-\u9fff]/.test(content)) {
+      if (/^(4k|8k|2160p|1080p|720p|480p|blu-?ray|bluray|bdmv|remux|web-?dl|hdtv|diy|美版|日版|港版|欧版|韩版|台版|hdr10|hdr|dolby|dts|atmos|truehd|aac|国语|英语|粤语|中字|字幕|配音|特效|简繁|双语)$/i.test(content)) continue;
+      let title = content.replace(/\d{1,2}\.\d+G$/, '').trim();
+      if (title.length >= 2) return { cleanName: title, year: '', season };
+    }
+  }
+
+  // Step 5: 点分隔 片名.规格 → 取第一个含中文的段
+  const dotParts = raw.split('.');
+  for (const part of dotParts) {
+    const p = part.trim();
+    if (p.length >= 2 && /[\u4e00-\u9fff]/.test(p)) {
+      if (!/^(4K|8K|蓝光原盘|蓝光remux|HDTV|WEBRip|BluRay|DIY)$/i.test(p)) {
+        return { cleanName: p, year: '', season };
+      }
+    }
+  }
+
+  // Step 6: 书名号《片名》
+  const bookMatch = raw.match(/《([^》]+)》/);
+  if (bookMatch) {
+    const content = bookMatch[1].trim();
+    if (content.length >= 2) {
+      return { cleanName: content, year: '', season };
+    }
+  }
+
+  // Step 7: 提取最长的中文连续片段
+  const chineseFragments = raw.match(/[\u4e00-\u9fff][^\[\]（）【】《》\s]{0,30}/g);
+  if (chineseFragments && chineseFragments.length > 0) {
+    let best = '';
+    for (const frag of chineseFragments) {
+      if (frag.length > best.length && frag.length >= 2) best = frag.trim();
+    }
+    if (best) return { cleanName: best, year: '', season };
+  }
+
+  // Step 8: 纯英文文件名
+  const trimmed = raw.replace(/^[\[\]（）【】《》\s]+|[\[\]（）【】《》\s]+$/g, '').trim();
+  if (trimmed.length >= 2 && !/[\u4e00-\u9fff]/.test(trimmed)) {
+    return { cleanName: trimmed, year: '', season };
+  }
+
+  // Step 9: 兜底（不去年份，年份可能是片名一部分如"2012"）
+  let title = raw
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/[（(][^）)]*[)）]/g, ' ')
+    .replace(/《[^》]*》/g, ' ')
+    .replace(/【[^】]*】/g, ' ')
+    .replace(/\d{1,2}\.\d+G$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (title.length < 2) title = raw;
+  return { cleanName: title, year: '', season };
+}
 
   // 提取季数
   let season = null;
@@ -365,18 +508,17 @@ async function matchOne(rawName) {
 }
 
 // 对单个片段进行匹配（接收已提取的 cleanName）
-// Bug fix 7: 简化搜索顺序 + movie↔tv 互搜
+// 文档规则：先搜判断出来的类型，没结果再换类型互搜
 async function matchSegmentWithClean(cleanName, year, season, rawName) {
   if (cleanName.length < 2) return null;
 
   const isEng = isEnglishName(cleanName);
-  // 简化：先主语言，再备语言搜
   const strategies = isEng
     ? [{ lang: 'en-US', useYear: true }, { lang: 'en-US', useYear: false }, { lang: 'zh-CN', useYear: false }]
     : [{ lang: 'zh-CN', useYear: true }, { lang: 'zh-CN', useYear: false }, { lang: 'en-US', useYear: false }];
 
-  // Bug fix 7: 初始类型由 season 决定，有结果就返回；没结果再互搜
-  const typeOrder = season !== null ? ['tv'] : ['movie', 'tv'];
+  // 有季数 → 只搜 TV；否则 → TV优先，无结果再搜 Movie
+  const typeOrder = season !== null ? ['tv'] : ['tv', 'movie'];
 
   let keyIdx = 0;
   for (const s of strategies) {
@@ -385,7 +527,7 @@ async function matchSegmentWithClean(cleanName, year, season, rawName) {
       keyIdx++;
       if (!results?.length) continue;
 
-      // 置信度筛选
+      // 文档：batch 阶段置信度 ≥ 0.5 才接受
       for (const result of results) {
         const score = confidenceScore(cleanName, result, s.lang, s.useYear ? year : undefined);
         if (score >= MIN_CONFIDENCE) {
