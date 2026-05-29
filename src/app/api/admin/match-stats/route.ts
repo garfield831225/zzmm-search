@@ -8,12 +8,12 @@ export async function GET() {
   try {
     // Total active
     const total = (await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active'`)) as any[];
-    // Matched (排除 tmdb_id=0, NOMATCH, GARBLED 等无效值)
-    const matched = (await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND tmdb_id IS NOT NULL AND tmdb_id != '' AND tmdb_id NOT IN ('0', 'NOMATCH', 'GARBLED')`)) as any[];
-    // Unmatched (no tmdb_id)
-    const unmatched = (await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND (tmdb_id IS NULL OR tmdb_id = '')`)) as any[];
+    // Matched: tmdb_id > 0 (integer, 0 = unmatched)
+    const matched = (await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND tmdb_id IS NOT NULL AND CAST(tmdb_id AS INTEGER) > 0`)) as any[];
+    // Unmatched: tmdb_id IS NULL or tmdb_id = 0 or tmdb_id is a string like NOMATCH/GARBLED
+    const unmatched = (await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND (tmdb_id IS NULL OR CAST(tmdb_id AS INTEGER) = 0 OR CAST(tmdb_id AS TEXT) IN ('NOMATCH', 'GARBLED', ''))`)) as any[];
     // Unmatched with valid names (longer than 3 chars)
-    const unmatchedValid = (await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND (tmdb_id IS NULL OR tmdb_id = '') AND LENGTH(name) > 3`)) as any[];
+    const unmatchedValid = (await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND (tmdb_id IS NULL OR CAST(tmdb_id AS INTEGER) = 0 OR CAST(tmdb_id AS TEXT) IN ('NOMATCH', 'GARBLED', '')) AND LENGTH(name) > 3`)) as any[];
 
     return NextResponse.json({
       total: parseInt(total[0]?.cnt ?? '0'),

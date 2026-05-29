@@ -101,9 +101,19 @@ function isGarbled(name) {
 }
 
 function cleanFolderName(folderName) {
-  // ★ 先抽年份，从左到右第一个有效的 4 位年
+  // ★ Bug fix 5: PT站格式优先提取中文部分
+  // 格式: [中文名_英文名_年份]Season → 先取方括号内中文部分作搜索词
+  let searchTitle = folderName;
+  const ptMatch = folderName.match(/^\[([^\]]+)\]/);
+  if (ptMatch) {
+    const parts = ptMatch[1].split('_');
+    const chinesePart = parts.find(p => /[\u4e00-\u9fff]/.test(p));
+    if (chinesePart) searchTitle = chinesePart;
+  }
+
+  // ★ Bug fix 6: 年份只作搜索参数，不从标题删除
   let extractedYear = '';
-  const yearCandidates = [...folderName.matchAll(/\b(20\d{2})\b/g)];
+  const yearCandidates = [...searchTitle.matchAll(/\b(20\d{2})\b/g)];
   for (const m of yearCandidates) {
     const y = parseInt(m[1]);
     if (y >= 1900 && y <= 2030) { extractedYear = m[1]; break; }
@@ -112,11 +122,11 @@ function cleanFolderName(folderName) {
   let season = null;
   const seasonPatterns = [/第([一二三四五六七八九十\d]+)季/i, /Season\s*(\d+)/i, /S(\d{1,2})E\d+/i, /S(\d{1,2})$/i];
   for (const pat of seasonPatterns) {
-    const m = folderName.match(pat);
+    const m = searchTitle.match(pat);
     if (m) { season = chineseToNumber(m[1]); break; }
   }
 
-  let cleanName = folderName
+  let cleanName = searchTitle
     .replace(/第[一二三四五六七八九十\d]+季/gi, '')
     .replace(/Season\s*\d+/gi, '')
     .replace(/S\d{1,2}E\d+/gi, '')
@@ -140,7 +150,7 @@ function cleanFolderName(folderName) {
   ];
   for (const pat of noisePatterns) cleanName = cleanName.replace(pat, ' ');
 
-  cleanName = cleanName.replace(/20\d{2}/g, ' ');  // 去掉残余年份数字
+  // Bug fix 6: 不再强制删除年份数字，只去掉扩展名
   cleanName = cleanName.replace(/\.(mkv|mp4|avi|ts|m2ts|wmv|flv)$/gi, '');
   cleanName = cleanName.replace(/\./g, ' ').replace(/\?/g, '').replace(/\s+/g, ' ').trim();
 
@@ -176,7 +186,7 @@ function titleSimilarity(a, b) {
 
 /**
  * 综合置信度评分
- * 只用 bigram 相似度，不接受无意义匹配
+ * Bug fix: 1) 砍掉快速通道 2) 阈值 0.3→0.5 3) substring hit 改为加分项
  */
 function confidenceScore(cleanName, tmdbResult, searchLang, searchYear) {
   // 清理后太短的不匹配（避免随机字符产生虚假相似度）
@@ -190,24 +200,36 @@ function confidenceScore(cleanName, tmdbResult, searchLang, searchYear) {
   const cleanNorm = norm(cleanName);
   const allTitles = [...zhNames, enName].map(t => ({ raw: t, norm: norm(t) }));
 
-  // 必须 title 包含搜索词（或搜索词包含在 title 中）才算 substring hit
-  let substringHit = false;
+  // bigram 相似度
+  const zhScore = Math.max(...zhNames.map(zn => titleSimilarity(cleanName, zn)));
+  const enScore = enName ? titleSimilarity(cleanName, enName) : 0;
+  let bestScore = Math.max(zhScore, enScore);
+
+  // ★ Bug fix 3: substring hit 改为加分项，不是必要条件
+  let substringBonus = 0;
   for (const t of allTitles) {
     if (t.norm.length >= 2 && (t.norm.includes(cleanNorm) || cleanNorm.includes(t.norm))) {
-      substringHit = true;
+      substringBonus = 0.1;
       break;
     }
   }
 
-  // bigram 相似度（只用这个）
-  const zhScore = Math.max(...zhNames.map(zn => titleSimilarity(cleanName, zn)));
-  const enScore = enName ? titleSimilarity(cleanName, enName) : 0;
-  const bestScore = Math.max(zhScore, enScore);
+  // ★ Bug fix 2: 阈值 0.3→0.5，精确匹配加分
+  // 精确匹配：cleanName === title → 1.0，cleanName 包含于 title → 0.85
+  let exactBonus = 0;
+  for (const t of allTitles) {
+    if (t.raw === cleanName) { exactBonus = 1.0; break; }
+  }
+  if (exactBonus === 0) {
+    for (const t of allTitles) {
+      if (t.norm.includes(cleanNorm) || cleanNorm.includes(t.norm)) { exactBonus = 0.85; break; }
+    }
+  }
 
-  // 只有 substring 命中 + bigram ≥ 0.3 才接受
-  if (!substringHit) return 0;
-  if (bestScore < 0.3) return 0;
+  // 应用精确匹配加成
+  if (exactBonus > 0) bestScore = Math.max(bestScore, exactBonus);
 
+  // ★ Bug fix 1: 所有结果都必须过置信度，无快速通道
   // 年份一致性奖励（误差 ±2 年）
   let yearBonus = 0;
   const resultYear = (tmdbResult.release_date || tmdbResult.first_air_date || '').slice(0, 4);
@@ -215,11 +237,11 @@ function confidenceScore(cleanName, tmdbResult, searchLang, searchYear) {
     yearBonus = 0.1;
   }
 
-  return bestScore + yearBonus;
+  return bestScore + substringBonus + yearBonus;
 }
 
-// 最低接受阈值（必须 substring hit + bigram ≥ 0.3）
-const MIN_CONFIDENCE = 0.3;
+// 最低接受阈值（bigram ≥ 0.5）
+const MIN_CONFIDENCE = 0.5;
 
 async function searchTmdb(name, type, year, lang, keyIndex) {
   await tmdbLimiter.wait(keyIndex);
@@ -243,11 +265,20 @@ async function searchTmdb(name, type, year, lang, keyIndex) {
 }
 
 async function matchOne(rawName) {
-  if (isGarbled(rawName)) { if (DEBUG) console.log(`[DEBUG] GARBLED raw="${rawName}"`); return 'GARBLED'; }
+  if (isGarbled(rawName)) { if (DEBUG) console.log(`[DEBUG] GARBLED raw="${rawName}"`); return 0; }
 
-  // ★ 方案：按 [] 拆成多段，每段单独搜 TMDB，取最佳结果
-  const segments = rawName.split(/[\[\]]/).filter(s => s.trim().length >= 2);
-  if (segments.length === 0) return 'NOMATCH';
+  // ★ Bug fix 5: PT站格式支持 - 先尝试提取中文名
+  let searchName = rawName;
+  const ptMatch = rawName.match(/^\[([^\]]+)\]/);
+  if (ptMatch) {
+    const parts = ptMatch[1].split('_');
+    const chinesePart = parts.find(p => /[\u4e00-\u9fff]/.test(p));
+    if (chinesePart) searchName = chinesePart;
+  }
+
+  // 按 [] 拆成多段，每段单独搜 TMDB，取最佳结果
+  const segments = searchName.split(/[\[\]]/).filter(s => s.trim().length >= 2);
+  if (segments.length === 0) return 0;
 
   let bestResult = null;
   let bestScore = -1;
@@ -272,20 +303,23 @@ async function matchOne(rawName) {
     return bestResult;
   }
   if (DEBUG) console.log(`[DEBUG] NOMATCH raw="${rawName}"`);
-  return 'NOMATCH';
+  return 0;
 }
 
 // 对单个片段进行匹配
+// Bug fix 7: 简化搜索顺序 + movie↔tv 互搜
 async function matchSegment(segName) {
   const { cleanName, year, season } = cleanFolderName(segName);
   if (cleanName.length < 2) return null;
 
   const isEng = isEnglishName(cleanName);
+  // 简化：先主语言，再备语言搜
   const strategies = isEng
-    ? [{ lang: 'en-US', useYear: true }, { lang: 'en-US', useYear: false }, { lang: 'zh-CN', useYear: true }]
-    : [{ lang: 'zh-CN', useYear: true }, { lang: 'zh-CN', useYear: false }, { lang: 'en-US', useYear: true }];
+    ? [{ lang: 'en-US', useYear: true }, { lang: 'en-US', useYear: false }, { lang: 'zh-CN', useYear: false }]
+    : [{ lang: 'zh-CN', useYear: true }, { lang: 'zh-CN', useYear: false }, { lang: 'en-US', useYear: false }];
 
-  const typeOrder = season !== null ? ['tv'] : ['tv', 'movie'];
+  // Bug fix 7: 初始类型由 season 决定，有结果就返回；没结果再互搜
+  const typeOrder = season !== null ? ['tv'] : ['movie', 'tv'];
 
   let keyIdx = 0;
   for (const s of strategies) {
@@ -294,22 +328,6 @@ async function matchSegment(segName) {
       keyIdx++;
       if (!results?.length) continue;
 
-      // top1 年份匹配（±2年）：直接接受
-      if (results[0] && s.useYear && year) {
-        const top1Year = (results[0].release_date || results[0].first_air_date || '').slice(0, 4);
-        if (top1Year && Math.abs(parseInt(top1Year) - parseInt(year)) <= 2) {
-          const score = confidenceScore(cleanName, results[0], s.lang, year);
-          return {
-            id: String(results[0].id),
-            tmdb_type: type,
-            poster: results[0].poster_path ? `${TMDB_IMG}${results[0].poster_path}` : '',
-            title: results[0].title || results[0].name || cleanName,
-            vote: results[0].vote_average || 0,
-            year: top1Year || year,
-            score,
-          };
-        }
-      }
       // 置信度筛选
       for (const result of results) {
         const score = confidenceScore(cleanName, result, s.lang, s.useYear ? year : undefined);
@@ -357,7 +375,7 @@ async function main() {
   const rows = await sql`
     SELECT id, name, link, category, source
     FROM xx_resources
-    WHERE (tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id = 'NOMATCH' OR tmdb_id = 'GARBLED')
+    WHERE (tmdb_id IS NULL OR tmdb_id IN ('NOMATCH', 'GARBLED', '') OR (COALESCE(NULLIF(CAST(tmdb_id AS TEXT), ''), '0') = '0' AND tmdb_id ~ '^[0-9]*$'))
       AND status = 'active'
       AND name IS NOT NULL
       AND LENGTH(name) > 2
@@ -378,7 +396,7 @@ async function main() {
   if (links.length > 0) {
     const existing = await sql`
       SELECT link, tmdb_id FROM xx_resources
-      WHERE link = ANY(${links}) AND tmdb_id IS NOT NULL AND tmdb_id != '' AND tmdb_id NOT IN ('GARBLED', 'NOMATCH')
+      WHERE link = ANY(${links}) AND tmdb_id IS NOT NULL AND tmdb_id != '' AND tmdb_id NOT IN ('GARBLED', 'NOMATCH') AND tmdb_id ~ '^[0-9]+$'
     `;
     for (const r of existing) linkMap[r.link] = r.tmdb_id;
   }
@@ -404,17 +422,11 @@ async function main() {
 
         const result = await matchOne(item.name);
 
-        if (result === 'GARBLED') {
+        if (result === 0) {
           if (!DRY_RUN) {
-            await sql`UPDATE xx_resources SET tmdb_id = 'GARBLED', updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
+            await sql`UPDATE xx_resources SET tmdb_id = 0, updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
           }
-          return { id: item.id, tmdb_id: 'GARBLED' };
-        }
-        if (result === 'NOMATCH') {
-          if (!DRY_RUN) {
-            await sql`UPDATE xx_resources SET tmdb_id = 'NOMATCH', updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
-          }
-          return { id: item.id, tmdb_id: 'NOMATCH' };
+          return { id: item.id, tmdb_id: 0 };
         }
         if (result) {
           if (!DRY_RUN) {
@@ -429,22 +441,18 @@ async function main() {
 
     results.push(...chunkResults);
 
-    const chunkMatched = chunkResults.filter(r => r.tmdb_id && r.tmdb_id !== 'GARBLED' && r.tmdb_id !== 'NOMATCH').length;
-    const chunkNomatch = chunkResults.filter(r => r.tmdb_id === 'NOMATCH').length;
-    const chunkGarbled = chunkResults.filter(r => r.tmdb_id === 'GARBLED').length;
+    const chunkMatched = chunkResults.filter(r => r.tmdb_id && r.tmdb_id !== 0).length;
     const chunkReused = chunkResults.filter(r => r.reused).length;
 
     totalMatched += chunkMatched;
-    totalNomatch += chunkNomatch;
-    totalGarbled += chunkGarbled;
     totalReused += chunkReused;
 
-    console.log(`[match] chunk ${i}-${i + chunk.length}: matched=${chunkMatched} nomatch=${chunkNomatch} garbled=${chunkGarbled} reused=${chunkReused}`);
+    console.log(`[match] chunk ${i}-${i + chunk.length}: matched=${chunkMatched} nomatch=${chunkResults.filter(r => r.tmdb_id === 0).length} reused=${chunkReused}`);
 
     if (i + CONCURRENCY < rows.length) await sleep(100);
   }
 
-  console.log(`[match] BATCH DONE: processed=${rows.length} matched=${totalMatched} nomatch=${totalNomatch} garbled=${totalGarbled} reused=${totalReused}`);
+  console.log(`[match] BATCH DONE: processed=${rows.length} matched=${totalMatched} nomatch=${rows.length - totalMatched - totalReused} reused=${totalReused}`);
   process.exit(0);
 }
 
