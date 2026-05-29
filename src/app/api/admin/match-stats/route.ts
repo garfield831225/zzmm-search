@@ -3,11 +3,9 @@ import { neon } from '@neondatabase/serverless';
 
 export const dynamic = 'force-dynamic';
 
-// Debug route: check tmdb_id formats and overall stats
 export async function GET() {
   const sql = neon(process.env.DATABASE_URL || '');
   try {
-    // All tmdb_id values grouped by type
     const samples = await sql`
       SELECT 
         CASE 
@@ -18,8 +16,7 @@ export async function GET() {
           WHEN tmdb_id ~ '^[0-9]+$' AND (tmdb_id::bigint) = 0 THEN 'INTEGER_ZERO'
           ELSE 'OTHER'
         END as bucket,
-        COUNT(*) as cnt,
-        array_agg(DISTINCT tmdb_id ORDER BY tmdb_id LIMIT 5) as examples
+        COUNT(*) as cnt
       FROM xx_resources 
       WHERE status = 'active'
       GROUP BY bucket
