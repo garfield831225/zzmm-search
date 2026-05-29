@@ -3,23 +3,31 @@ import { neon } from '@neondatabase/serverless';
 
 export const dynamic = 'force-dynamic';
 
+// Debug route: check tmdb_id formats and overall stats
 export async function GET() {
   const sql = neon(process.env.DATABASE_URL || '');
   try {
-    const total = (await sql`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active'` as any[])[0]?.cnt ?? '0';
-    const matched = (await sql`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND tmdb_id ~ '^[0-9]+$' AND (tmdb_id::bigint) > 0` as any[])[0]?.cnt ?? '0';
-    const nomatch = (await sql`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND (tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id = 'NOMATCH' OR tmdb_id = 'GARBLED')` as any[])[0]?.cnt ?? '0';
-    const others = (await sql`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND tmdb_id IS NOT NULL AND tmdb_id != '' AND tmdb_id NOT IN ('NOMATCH', 'GARBLED') AND tmdb_id !~ '^[0-9]+$'` as any[])[0]?.cnt ?? '0';
-    const otherSamples = await sql`SELECT tmdb_id, COUNT(*) as cnt FROM xx_resources WHERE status = 'active' AND tmdb_id IS NOT NULL AND tmdb_id != '' AND tmdb_id NOT IN ('NOMATCH', 'GARBLED') AND tmdb_id !~ '^[0-9]+$' GROUP BY tmdb_id ORDER BY cnt DESC LIMIT 20`;
+    // All tmdb_id values grouped by type
+    const samples = await sql`
+      SELECT 
+        CASE 
+          WHEN tmdb_id IS NULL THEN 'NULL'
+          WHEN tmdb_id = '' THEN 'EMPTY'
+          WHEN tmdb_id IN ('NOMATCH', 'GARBLED') THEN tmdb_id
+          WHEN tmdb_id ~ '^[0-9]+$' AND (tmdb_id::bigint) > 0 THEN 'INTEGER_OK'
+          WHEN tmdb_id ~ '^[0-9]+$' AND (tmdb_id::bigint) = 0 THEN 'INTEGER_ZERO'
+          ELSE 'OTHER'
+        END as bucket,
+        COUNT(*) as cnt,
+        array_agg(DISTINCT tmdb_id ORDER BY tmdb_id LIMIT 5) as examples
+      FROM xx_resources 
+      WHERE status = 'active'
+      GROUP BY bucket
+      ORDER BY cnt DESC
+    `;
 
-    return NextResponse.json({
-      total: parseInt(total as string),
-      matched: parseInt(matched as string),
-      nomatch: parseInt(nomatch as string),
-      others: parseInt(others as string),
-      otherSamples: otherSamples,
-    });
-  } catch (e) {
+    return NextResponse.json({ buckets: samples }, { status: 200 });
+  } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
