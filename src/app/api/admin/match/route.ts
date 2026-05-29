@@ -61,6 +61,24 @@ function isGarbled(name: string): boolean {
 
 // 重写版 cleanFolderName (多策略提取)
 function cleanFolderName(raw: string): { cleanName: string; year: string; season: number | null } {
+  // Step 0: ISO文件名优先从第一个方括号提取
+  if (raw.endsWith('.iso')) {
+    const firstBracket = raw.match(/^\[([^\]]+)\]/);
+    if (firstBracket) {
+      let extracted = firstBracket[1];
+      if (!/[\u4e00-\u9fff]/.test(extracted)) {
+        const allBrackets = Array.from(raw.matchAll(/\[([^\]]+)\]/g));
+        if (allBrackets.length >= 2) extracted = allBrackets[1][1];
+      }
+      extracted = extracted.replace(/\s*\d{4}(?=\W|$)/, '').trim();
+      extracted = extracted.replace(/^(4K|8K|2160p|1080p|720p|DIY|CEE|美版|日版|港版|欧版|韩版|台版|DV|HDR|Dolby|Atmos|DTS|HEVC|LPCM)\s*/i, '');
+      if (extracted.length >= 2) return { cleanName: extracted, year: '', season: null };
+    }
+  }
+
+  // 先去掉尾部 (年份) 或 （年份）后缀
+  raw = raw.replace(/\s*\( ?\d{4} ?\)\s*$/, '').replace(/\s*（ ?\d{4} ?）\s*$/, '').trim();
+  let title = raw;
   let year = '';
   const yearMatch = raw.match(/\b(19\d{2}|20\d{2})\b/);
   if (yearMatch) {
@@ -92,8 +110,8 @@ function cleanFolderName(raw: string): { cleanName: string; year: string; season
     const parts = ptMatch[1].split('_');
     const chinese = parts.find(p => /[\u4e00-\u9fff]/.test(p));
     if (chinese) {
-      const title = chinese.replace(/第\d+季/i, '').replace(/\s*\d{4}$/, '').trim();
-      if (title) return { cleanName: title, year, season };
+      let t = chinese.replace(/第\d+季/i, '').replace(/\s*\d{4}$/, '').trim();
+      if (t) return { cleanName: t, year, season };
     }
     const dotInBrackets = ptMatch[1].match(/^([^_\.]+)/);
     if (dotInBrackets) {
@@ -114,8 +132,8 @@ function cleanFolderName(raw: string): { cleanName: string; year: string; season
       if (/^(4k|8k|2160p|1080p|720p|480p|blu-?ray|bluray|bdmv|remux|web-?dl|hdtv|diy|cee|美版|日版|港版|欧版|韩版|台版|hdr10|hdr|dolby|dts|atmos|truehd|aac|dts-?hd|ac3|imax|sdr|国语|英语|粤语|中字|字幕|配音|特效|简繁|双语)$/i.test(content)) continue;
       if (/^(4k|8k|2160p|1080p|720p|480p|blu-?ray|bluray|bdmv|remux|web-?dl|hdtv)\s/i.test(content)) continue;
       if (/^(19\d{2}|20\d{2})\s*$/i.test(content)) continue;
-      const title = content.replace(/\d{1,2}\.\d+G$/, '').trim();
-      if (title && title.length >= 2) return { cleanName: title, year, season };
+      let t = content.replace(/\d{1,2}\.\d+G$/, '').trim();
+      if (t && t.length >= 2) return { cleanName: t, year, season };
     }
   }
 
@@ -134,10 +152,10 @@ function cleanFolderName(raw: string): { cleanName: string; year: string; season
   const bookMatch = raw.match(/《([^》]+)》/);
   if (bookMatch) {
     const content = bookMatch[1].trim();
-    if (content.length >= 2) {
-      const title = content.replace(/\s*(19\d{2}|20\d{2})\s*/g, ' ').replace(/\s*(4K|蓝光原盘|蓝光|HDTV|WEBRip)\s*/gi, ' ').trim();
-      if (title) return { cleanName: title, year, season };
-    }
+      if (content.length >= 2) {
+        let t = content.replace(/\s*(19\d{2}|20\d{2})\s*/g, ' ').replace(/\s*(4K|蓝光原盘|蓝光|HDTV|WEBRip)\s*/gi, ' ').trim();
+        if (t) return { cleanName: t, year, season };
+      }
   }
 
   // E: 括号
@@ -165,16 +183,20 @@ function cleanFolderName(raw: string): { cleanName: string; year: string; season
     return { cleanName: trimmed, year, season };
   }
 
+  // H: 去掉尾部 (年份) 后缀
+  const afterStrip = raw.replace(/\s*\(\d{4}\)\s*$/, '').trim();
+  if (afterStrip.length >= 2 && /[\u4e00-\u9fff]/.test(afterStrip)) return { cleanName: afterStrip, year, season };
+
   // 兜底
-  let title = raw
+  let t = raw
     .replace(/\[[^\]]*\]/g, ' ').replace(/[（(][^）)]*[)）]/g, ' ')
     .replace(/《[^》]*》/g, ' ').replace(/【[^】]*】/g, ' ')
     .replace(/\d{1,2}\.\d+G$/, '').replace(/\b(19\d{2}|20\d{2})\b/g, ' ')
     .replace(/\b(4K|8K|1080p|2160p|720p|480p)\b/gi, ' ')
     .replace(/\b(Bluray|BluRay|BDMV|WEB-DL|REMUX|DIY|CEE|美版|日版|港版|欧版|韩版|台版)\b/gi, ' ')
     .replace(/\./g, ' ').replace(/\s+/g, ' ').trim();
-  if (title.length < 2) title = raw;
-  return { cleanName: title, year, season };
+  if (t.length < 2) t = raw;
+  return { cleanName: t, year, season };
 }
 
 // 搜索单个片名
