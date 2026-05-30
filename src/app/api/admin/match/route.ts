@@ -217,7 +217,7 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', year?: string, lan
 }
 
 // 核心匹配函数（精简策略，3次尝试上限）
-async function matchOne(rawName: string): Promise<{ id: string; tmdb_type: 'movie' | 'tv'; poster: string; title: string; vote: number; year: string } | 'GARBLED' | 'NOMATCH'> {
+async function matchOne(rawName: string, category: string): Promise<{ id: string; tmdb_type: 'movie' | 'tv'; poster: string; title: string; vote: number; year: string } | 'GARBLED' | 'NOMATCH'> {
   if (isGarbled(rawName)) return 'GARBLED';
 
   const { cleanName, year, season } = cleanFolderName(rawName);
@@ -226,9 +226,6 @@ async function matchOne(rawName: string): Promise<{ id: string; tmdb_type: 'movi
   const isEng = isEnglishName(cleanName);
 
   // 精简策略：最多3次
-  // 1. 最可能成功的策略（有年份+合适语言）
-  // 2. 同一语言无年份
-  // 3. 跨语言有年份（最终兜底）
   const strategies = isEng
     ? [
         { lang: 'en-US', useYear: true },
@@ -241,7 +238,18 @@ async function matchOne(rawName: string): Promise<{ id: string; tmdb_type: 'movi
         { lang: 'en-US', useYear: true },
       ];
 
-  const typeOrder: ('tv' | 'movie')[] = season !== null ? ['tv'] : ['tv', 'movie'];
+  // 根据分类决定 TMDB 搜索顺序
+  // 演唱会 → 只搜 movie（TMDB官方归类）；纪录片 → 先tv后movie；其他 → 先tv后movie
+  let typeOrder: ('tv' | 'movie')[];
+  if (category === '演唱会') {
+    typeOrder = ['movie'];
+  } else if (category === '纪录片') {
+    typeOrder = ['tv', 'movie'];
+  } else if (season !== null) {
+    typeOrder = ['tv'];
+  } else {
+    typeOrder = ['tv', 'movie'];
+  }
 
     let keyIdx = 0;
     for (const s of strategies) {
@@ -293,7 +301,7 @@ export async function GET(req: Request) {
         AND status = 'active'
         AND name IS NOT NULL
         AND LENGTH(name) > 2
-        AND category NOT IN ('学习资料', '音乐', '纪录片', '其他', '演唱会', '体育赛事', '少儿频道', '合集')
+        AND category NOT IN ('音乐', '体育', '合集', '学习资料', '其他', '游戏', '电子书', '精品课', '文档')
       ORDER BY id
       LIMIT ${batchSize}
       FOR UPDATE SKIP LOCKED
@@ -334,7 +342,7 @@ export async function GET(req: Request) {
             await sql`UPDATE xx_resources SET tmdb_id = ${reusedId}, updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
             return { id: item.id, tmdb_id: reusedId, reused: true };
           }
-          const result = await matchOne(item.name);
+          const result = await matchOne(item.name, item.category);
           if (result === 'GARBLED') {
             const r = await sql`UPDATE xx_resources SET tmdb_id = 'GARBLED', updated_at = NOW() WHERE id = ${item.id} RETURNING id`;
             return { id: item.id, tmdb_id: r.length ? 'GARBLED' : null, updateFailed: !r.length };

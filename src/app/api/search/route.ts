@@ -16,7 +16,10 @@ const SOURCE_DISPLAY_MAP: Record<string, string> = {
   'aliyun': '阿里云盘', '123': '123网盘', 'tianyi': '天翼云盘',
   'magnet': '磁力链接', 'ed2k': 'ed2k链接', 'thunder': '迅雷链接',
 };
-const CATEGORIES = ['全部', '电影', '剧集', '动漫', '综艺', '演唱会', '纪录片', '学习资料', '其他'];
+const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频道', '综艺', '演唱会', '纪录片', '原盘', 'REMUX', '系列电影'];
+const NONFILM_CATEGORIES = ['全部', '音乐', '体育', '游戏', '电子书', '精品课', '文档'];
+// 影视区"全部"排除的分类（非影视区专用）
+const NONFILM_CATS = ['音乐', '体育', '游戏', '电子书', '精品课', '文档'];
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,12 +30,25 @@ export async function GET(request: NextRequest) {
     const source = searchParams.get('source') || '全部';
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '30')));
+    const zone = searchParams.get('zone') || 'film'; // 'film' | 'nonfilm'
 
     // 构建参数化查询条件
     const conditions: string[] = [`status = 'active'`];
     const params: any[] = [];
     let idx = 1;
 
+    // 影视区"全部"：排除非影视分类
+    if (category === '全部' && zone === 'film') {
+      for (const cat of NONFILM_CATS) {
+        conditions.push(`category != $${idx++}`);
+        params.push(cat);
+      }
+    }
+    // 非影视区"全部"：只包含非影视分类
+    if (category === '全部' && zone === 'nonfilm') {
+      conditions.push(`category = ANY($${idx++})`);
+      params.push(NONFILM_CATS);
+    }
     if (category !== '全部') {
       conditions.push(`category = $${idx++}`);
       params.push(category);
@@ -132,7 +148,7 @@ export async function GET(request: NextRequest) {
         musicCover: item?.category === '音乐' ? musicCoverMap.get(item.id) || null : null,
         coverCache: !item?.tmdb_id && !musicCoverMap.get(item.id) ? coverCacheMap.get(item.id) || null : null,
       })),
-      categories: CATEGORIES,
+      categories: zone === 'film' ? CATEGORIES : NONFILM_CATEGORIES,
       sources: ['全部', ...Object.values(SOURCE_DISPLAY_MAP)],
     });
   } catch (error: any) {

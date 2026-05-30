@@ -7,7 +7,7 @@ import Link from 'next/link';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
 
-const NONFILM_CATEGORIES = ['全部', '音乐', '体育', '文档', '其他'];
+const NONFILM_CATEGORIES = ['全部', '音乐', '体育', '游戏', '电子书', '精品课', '文档'];
 const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '磁力链接', 'ed2k链接'];
 
 const SOURCE_KEY_MAP: Record<string, string> = {
@@ -108,7 +108,7 @@ export default function NonFilmPage() {
   const fetchItems = useCallback(async (p = 1) => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page: p.toString(), pageSize: '30', category });
+      const params = new URLSearchParams({ page: p.toString(), pageSize: '30', category, zone: 'nonfilm' });
       if (query) params.set('q', query);
       if (source !== '全部') params.set('source', source);
 

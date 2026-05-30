@@ -39,14 +39,22 @@ export default function ImportPanel() {
 
   const mapCategory = (cat: string): string => {
     const c = (cat || '').toLowerCase();
+    if (c.includes('音乐')) return '音乐';
+    if (c.includes('体育')) return '体育';
+    if (c.includes('学习') || c.includes('教程')) return '学习资料';
+    if (c.includes('合集')) return '合集';
+    if (c.includes('系列电影')) return '系列电影';
     if (c.includes('电影')) return '电影';
     if (c.includes('剧集') || c.includes('电视剧')) return '剧集';
     if (c.includes('动漫') || c.includes('动画')) return '动漫';
+    if (c.includes('少儿')) return '少儿频道';
     if (c.includes('综艺')) return '综艺';
-    if (c.includes('音乐')) return '音乐';
+    if (c.includes('演唱会')) return '演唱会';
     if (c.includes('纪录片')) return '纪录片';
-    if (c.includes('学习') || c.includes('教程')) return '学习资料';
-    return '其他';
+    if (c.includes('连载') || c.includes('每日更新')) return '连载';
+    if (c.includes('原盘') || c.includes('4k') || c.includes('4K')) return '原盘';
+    if (c.includes('remux')) return 'REMUX';
+    return c || '其他';
   };
 
   // 解析 Excel
