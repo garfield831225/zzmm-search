@@ -13,15 +13,21 @@ export async function GET() {
     const withTmdb = await sql`SELECT COUNT(*) as cnt FROM xx_resources WHERE tmdb_id IS NOT NULL`.catch(() => []) as any[];
     const sample = await sql`SELECT name, category, source FROM xx_resources LIMIT 3`.catch(() => []) as any[];
 
-    // 检查 O0Il 残留
-    const o0ilPatterns = await sql`SELECT COUNT(*) as cnt FROM xx_resources WHERE link LIKE '%password=O0Il%' OR link_code = 'O0Il'`.catch(() => []) as any[];
-    const o0ilSamples = await sql`SELECT id, name, link, link_code FROM xx_resources WHERE link LIKE '%password=O0Il%' OR link_code = 'O0Il' LIMIT 5`.catch(() => []) as any[];
+    const o0ilResidues: { count: number; samples: any[] } = { count: 0, samples: [] };
+    for (const code of ['O0Il', 'OolI', 'o0Il', 'oolI']) {
+      const cnt = await sql`SELECT COUNT(*) as cnt FROM xx_resources WHERE link LIKE ${'%password=' + code + '%'} OR link_code = ${code}`.catch(() => []) as any[];
+      const smpl = await sql`SELECT id, name, link, link_code FROM xx_resources WHERE link LIKE ${'%password=' + code + '%'} OR link_code = ${code} LIMIT 5`.catch(() => []) as any[];
+      if (cnt[0]?.cnt > 0) {
+        o0ilResidues.count += Number(cnt[0].cnt);
+        o0ilResidues.samples.push(...smpl);
+      }
+    }
 
     // 查 Casper 电影（鬼马小精灵）的链接详情
     const casperRows = await sql`SELECT id, name, link, link_code, category FROM xx_resources WHERE name LIKE '%Casper%' OR name LIKE '%鬼马小精灵%' LIMIT 5`.catch(() => []) as any[];
 
-    // 查所有含 O0Il 提取码的记录（无论在 link 还是 link_code）
-    const allO0ilByCode = await sql`SELECT id, name, link, link_code FROM xx_resources WHERE link_code = 'O0Il' LIMIT 10`.catch(() => []) as any[];
+    // 查所有含 OolI 提取码的记录（无论在 link 还是 link_code）
+    const allO0ilByCode = await sql`SELECT id, name, link, link_code FROM xx_resources WHERE link_code = 'OolI' LIMIT 10`.catch(() => []) as any[];
 
     return NextResponse.json({
       categories: cats.map((r: any) => r.category),
@@ -29,10 +35,7 @@ export async function GET() {
       total: total[0]?.cnt,
       withTmdb: withTmdb[0]?.cnt,
       sample: sample,
-      o0ilResidues: {
-        count: o0ilPatterns[0]?.cnt,
-        samples: o0ilSamples,
-      },
+      o0ilResidues: o0ilResidues,
       casper: casperRows,
       allO0ilByCode,
     });
