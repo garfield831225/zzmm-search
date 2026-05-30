@@ -70,6 +70,21 @@ export async function POST(req: NextRequest) {
       else results.push('xx_music_cache error: ' + e.message.slice(0, 80));
     }
 
+    // 创建黑名单表
+    try {
+      await sql`CREATE TABLE xx_link_blacklist (
+        id SERIAL PRIMARY KEY,
+        access_code TEXT UNIQUE NOT NULL,
+        reason TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        created_by TEXT DEFAULT 'admin'
+      )`;
+      results.push('xx_link_blacklist created');
+    } catch (e: any) {
+      if (e.message?.includes('already exists')) results.push('xx_link_blacklist already exists');
+      else results.push('xx_link_blacklist error: ' + e.message.slice(0, 80));
+    }
+
     // 检查 admin
     const adminCheck = await sql`SELECT id FROM xx_users WHERE username = 'admin'`;
     if ((adminCheck as any[]).length === 0) {

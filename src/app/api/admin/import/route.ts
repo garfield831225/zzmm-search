@@ -4,6 +4,25 @@ import { neon } from '@neondatabase/serverless';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+// 加载访问码黑名单
+async function getBlacklistedCodes(sql: any): Promise<Set<string>> {
+  try {
+    const rows = await sql('SELECT access_code FROM xx_link_blacklist');
+    return new Set(rows.map((r: any) => r.access_code.toLowerCase()));
+  } catch {
+    return new Set();
+  }
+}
+
+// 检查链接的访问码是否在黑名单中
+function isBlacklisted(link: string, code: string, blacklist: Set<string>): boolean {
+  if (code && blacklist.has(code.toLowerCase())) return true;
+  // 也从 link 里提取 password 参数比对
+  const passwordMatch = link.match(/password=([^&#\s]+)/i);
+  if (passwordMatch && blacklist.has(passwordMatch[1].toLowerCase())) return true;
+  return false;
+}
+
 function detectSource(link: string): string {
   if (!link) return '115';
   if (link.includes('115.com')) return '115';
@@ -127,13 +146,31 @@ export async function POST(request: NextRequest) {
     }
 
     const sql = neon(process.env.DATABASE_URL || '');
+    const blacklist = await getBlacklistedCodes(sql);
+
+    // 过滤黑名单访问码的记录
+    const skippedCodes = new Set<string>();
+    const filteredItems = items.filter(item => {
+      const linkCode = (item.link_code || '').toString().trim();
+      const linkPassword = (item.link || '').match(/password=([^&#\s]+)/i)?.[1] || '';
+      const combinedCode = linkPassword.toLowerCase();
+      if (linkCode && blacklist.has(linkCode.toLowerCase())) {
+        skippedCodes.add(linkCode);
+        return false;
+      }
+      if (linkPassword && blacklist.has(combinedCode)) {
+        skippedCodes.add(linkPassword);
+        return false;
+      }
+      return true;
+    });
 
     const BATCH = 500;
     let totalImported = 0;
     let totalFailed = 0;
 
-    for (let i = 0; i < items.length; i += BATCH) {
-      const batch = items.slice(i, i + BATCH);
+    for (let i = 0; i < filteredItems.length; i += BATCH) {
+      const batch = filteredItems.slice(i, i + BATCH);
       const cols = 'name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at';
       const vals = batch.map((item, idx) => {
         const offset = i + idx;
@@ -161,7 +198,9 @@ export async function POST(request: NextRequest) {
       success: true,
       imported: totalImported,
       failed: totalFailed,
-      total: items.length,
+      total: filteredItems.length,
+      skipped: items.length - filteredItems.length,
+      skippedCodes: Array.from(skippedCodes),
     });
   } catch (error: any) {
     console.error('Import error:', error);
