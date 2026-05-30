@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
 
     const whereClause = conditions.join(' AND ');
     // 有 TMDB 匹配 → 按 release_date 降序；无匹配 → 按 created_at 降序
-    const orderClause = `ORDER BY (tmdb_id IS NOT NULL) DESC, COALESCE(m.release_date, '1900-01-01') DESC NULLS LAST, created_at DESC`;
+    const orderClause = `ORDER BY (tmdb_id IS NOT NULL) DESC, COALESCE(m.release_date, '1900-01-01') DESC, created_at DESC`;
     const offset = (page - 1) * pageSize;
 
     // 查询总数
