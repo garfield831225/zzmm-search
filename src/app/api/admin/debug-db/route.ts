@@ -14,14 +14,10 @@ export async function GET() {
     const sample = await sql`SELECT name, category, source FROM xx_resources LIMIT 3`.catch(() => []) as any[];
 
     const o0ilResidues: { count: number; samples: any[] } = { count: 0, samples: [] };
-    for (const code of ['O0Il', 'OolI', 'o0Il', 'oolI']) {
-      const cnt = await sql`SELECT COUNT(*) as cnt FROM xx_resources WHERE link LIKE ${'%password=' + code + '%'} OR link_code = ${code}`.catch(() => []) as any[];
-      const smpl = await sql`SELECT id, name, link, link_code FROM xx_resources WHERE link LIKE ${'%password=' + code + '%'} OR link_code = ${code} LIMIT 5`.catch(() => []) as any[];
-      if (cnt[0]?.cnt > 0) {
-        o0ilResidues.count += Number(cnt[0].cnt);
-        o0ilResidues.samples.push(...smpl);
-      }
-    }
+    // 用 sql() 绕过 Neon 模板标签的占位符限制，直接传完整字符串
+    const allResidues = await sql(`SELECT id, name, link, link_code FROM xx_resources WHERE link LIKE '%password=%' AND (link LIKE '%password=O0Il%' OR link LIKE '%password=OolI%' OR link LIKE '%password=o0Il%' OR link LIKE '%password=oolI%') LIMIT 20`).catch(() => []) as any[];
+    o0ilResidues.count = allResidues.length;
+    o0ilResidues.samples = allResidues;
 
     // 查 Casper 电影（鬼马小精灵）的链接详情
     const casperRows = await sql`SELECT id, name, link, link_code, category FROM xx_resources WHERE name LIKE '%Casper%' OR name LIKE '%鬼马小精灵%' LIMIT 5`.catch(() => []) as any[];
