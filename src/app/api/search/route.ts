@@ -49,19 +49,23 @@ export async function GET(request: NextRequest) {
     }
 
     const whereClause = conditions.join(' AND ');
+
+    // 排序：有 TMDB 匹配 → 按上映时间降序；无匹配 → 按入库时间降序
+    const orderClause = `ORDER BY (tmdb_id IS NOT NULL) DESC, COALESCE(m.release_date, '1900-01-01') DESC, created_at DESC`;
     const offset = (page - 1) * pageSize;
 
     // 查询总数
     const countRows = await sql(`SELECT COUNT(*) as count FROM xx_resources WHERE ${whereClause}`, params);
     const total = parseInt(countRows?.[0]?.count || '0');
 
-    // 分页查询
+    // 分页查询（按 TMDB 上映时间降序，有匹配优先）
     const queryParams = [...params, pageSize, offset];
     const rows = await sql(
-      `SELECT id, name, link, link_code, source, category, size, type, tags, tmdb_id, view_count
-       FROM xx_resources
+      `SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at, m.release_date
+       FROM xx_resources r
+       LEFT JOIN xx_tmdb_cache m ON r.tmdb_id = m.tmdb_id
        WHERE ${whereClause}
-       ORDER BY view_count DESC, created_at DESC
+       ${orderClause}
        LIMIT $${idx++} OFFSET $${idx++}`,
       queryParams
     );
