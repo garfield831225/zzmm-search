@@ -58,6 +58,8 @@ export async function GET(request: NextRequest) {
     const total = parseInt(countRows?.[0]?.count || '0');
 
     // 分页查询（按 TMDB 上映时间降序，有匹配优先）
+    const limitIdx = idx;
+    const offsetIdx = idx + 1;
     const queryParams = [...params, pageSize, offset];
     const rows = await sql(
       `SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at, m.release_date
@@ -65,7 +67,7 @@ export async function GET(request: NextRequest) {
        LEFT JOIN xx_tmdb_cache m ON r.tmdb_id = m.tmdb_id
        WHERE ${whereClause}
        ${orderClause}
-       LIMIT $${idx++} OFFSET $${idx++}`,
+       LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
       queryParams
     );
 
