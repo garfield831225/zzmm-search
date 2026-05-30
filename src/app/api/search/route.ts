@@ -16,7 +16,7 @@ const SOURCE_DISPLAY_MAP: Record<string, string> = {
   'aliyun': '阿里云盘', '123': '123网盘', 'tianyi': '天翼云盘',
   'magnet': '磁力链接', 'ed2k': 'ed2k链接', 'thunder': '迅雷链接',
 };
-const CATEGORIES = ['全部', '电影', '剧集', '动漫', '综艺', '音乐', '纪录片', '学习资料', '其他'];
+const CATEGORIES = ['全部', '电影', '剧集', '动漫', '综艺', '演唱会', '纪录片', '学习资料', '其他'];
 
 export async function GET(request: NextRequest) {
   try {
@@ -49,9 +49,8 @@ export async function GET(request: NextRequest) {
     }
 
     const whereClause = conditions.join(' AND ');
-
-    // 排序：有 TMDB 匹配 → 按上映时间降序；无匹配 → 按入库时间降序
-    const orderClause = `ORDER BY (tmdb_id IS NOT NULL) DESC, COALESCE(m.release_date, '1900-01-01') DESC, created_at DESC`;
+    // 有 TMDB 匹配 → 按 release_date 降序；无匹配 → 按 created_at 降序
+    const orderClause = `ORDER BY (tmdb_id IS NOT NULL) DESC, COALESCE(m.release_date, '1900-01-01') DESC NULLS LAST, created_at DESC`;
     const offset = (page - 1) * pageSize;
 
     // 查询总数

@@ -14,7 +14,7 @@ interface DownloadToast {
   message: string;
 }
 
-const CATEGORIES = ['全部', '电影', '剧集', '动漫', '综艺', '音乐', '纪录片', '学习资料', '其他'];
+const CATEGORIES = ['全部', '电影', '剧集', '动漫', '综艺', '演唱会', '纪录片', '学习资料', '其他'];
 const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '夸克网盘', '123网盘', '天翼云盘', '磁力链接', 'ed2k链接', '迅雷链接'];
 
 interface UserInfo {
