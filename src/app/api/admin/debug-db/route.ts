@@ -17,6 +17,12 @@ export async function GET() {
     const o0ilPatterns = await sql`SELECT COUNT(*) as cnt FROM xx_resources WHERE link LIKE '%password=O0Il%' OR link_code = 'O0Il'`.catch(() => []) as any[];
     const o0ilSamples = await sql`SELECT id, name, link, link_code FROM xx_resources WHERE link LIKE '%password=O0Il%' OR link_code = 'O0Il' LIMIT 5`.catch(() => []) as any[];
 
+    // 查 Casper 电影（鬼马小精灵）的链接详情
+    const casperRows = await sql`SELECT id, name, link, link_code, category FROM xx_resources WHERE name LIKE '%Casper%' OR name LIKE '%鬼马小精灵%' LIMIT 5`.catch(() => []) as any[];
+
+    // 查所有含 O0Il 提取码的记录（无论在 link 还是 link_code）
+    const allO0ilByCode = await sql`SELECT id, name, link, link_code FROM xx_resources WHERE link_code = 'O0Il' LIMIT 10`.catch(() => []) as any[];
+
     return NextResponse.json({
       categories: cats.map((r: any) => r.category),
       sources: srcs.map((r: any) => r.source),
@@ -27,6 +33,8 @@ export async function GET() {
         count: o0ilPatterns[0]?.cnt,
         samples: o0ilSamples,
       },
+      casper: casperRows,
+      allO0ilByCode,
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
