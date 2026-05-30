@@ -49,8 +49,9 @@ export async function GET(request: NextRequest) {
     }
 
     const whereClause = conditions.join(' AND ');
-    // 有 TMDB 匹配 → 按 release_date 降序；无匹配 → 按 created_at 降序
-    const orderClause = `ORDER BY (tmdb_id IS NOT NULL) DESC, COALESCE(m.release_date, '1900-01-01') DESC, created_at DESC`;
+
+    // 有 TMDB 匹配 → 有匹配优先；无匹配 → 按入库时间降序
+    const orderClause = `ORDER BY CASE WHEN tmdb_id IS NOT NULL AND tmdb_id <> '' AND length(tmdb_id) <= 10 AND tmdb_id NOT LIKE '%[^0-9]%' THEN 0 ELSE 1 END, created_at DESC`;
     const offset = (page - 1) * pageSize;
 
     // 查询总数
@@ -62,9 +63,8 @@ export async function GET(request: NextRequest) {
     const offsetIdx = idx + 1;
     const queryParams = [...params, pageSize, offset];
     const rows = await sql(
-      `SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at, m.release_date
-       FROM xx_resources r
-       LEFT JOIN xx_tmdb_cache m ON r.tmdb_id = m.tmdb_id
+      `SELECT id, name, link, link_code, source, category, size, type, tags, tmdb_id, view_count, created_at
+       FROM xx_resources
        WHERE ${whereClause}
        ${orderClause}
        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
