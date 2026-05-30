@@ -32,13 +32,29 @@ export async function POST(request: NextRequest) {
     const sql = neon(process.env.DATABASE_URL || '');
     await sql('INSERT INTO xx_link_blacklist (access_code, reason) VALUES ($1, $2) ON CONFLICT (access_code) DO UPDATE SET reason = EXCLUDED.reason, created_at = NOW()', [access_code.trim(), reason || '']);
 
-    // 立即删除数据库中已有含该访问码的记录
-    const deleted = await sql('DELETE FROM xx_resources WHERE link LIKE $1 OR link LIKE $2 OR link_code = $3 RETURNING id', [`%password=${access_code}%`, `%password=${access_code}&%`, access_code.trim()]);
+    // 删除所有大小写变体的访问码
+    const codes = [access_code.trim(), access_code.trim().toLowerCase(), access_code.trim().toUpperCase(), swapO0lI(access_code.trim())];
+    const uniqueCodes = Array.from(new Set(codes));
+    const patterns = uniqueCodes.flatMap(c => [`%password=${c}%`, `%password=${c}&%`]);
+    const codePh = uniqueCodes.map((_, i) => `$${i + 1}`).join(', ');
+    const patternPh = patterns.map((_, i) => `$${i + 1}`).join(', ');
+    const deleted = await sql(`DELETE FROM xx_resources WHERE link LIKE ANY(ARRAY[${patternPh}]) OR link_code = ANY(ARRAY[${codePh}]) RETURNING id`, [...patterns, ...uniqueCodes]).catch(() => []);
 
     return NextResponse.json({ success: true, code: access_code.trim(), deletedRows: deleted.length });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
+}
+
+// 交换 O→0, 0→O, I→l, l→I（处理视觉混淆的访问码）
+function swapO0lI(s: string): string {
+  return s.split('').map(c => {
+    if (c === 'O') return '0';
+    if (c === '0') return 'O';
+    if (c === 'I') return 'l';
+    if (c === 'l') return 'I';
+    return c;
+  }).join('');
 }
 
 // DELETE: 从黑名单移除（不解锁已删除的记录）
