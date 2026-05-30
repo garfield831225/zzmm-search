@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
     const whereClause = conditions.join(' AND ');
 
     // 有 TMDB 匹配 → 有匹配优先；无匹配 → 按入库时间降序
-    const orderClause = `ORDER BY CASE WHEN tmdb_id IS NOT NULL AND tmdb_id <> '' AND length(tmdb_id) <= 10 AND tmdb_id NOT LIKE '%[^0-9]%' THEN 0 ELSE 1 END, created_at DESC`;
+    const orderClause = `ORDER BY CASE WHEN tmdb_id IS NOT NULL AND tmdb_id != '' AND length(tmdb_id) <= 10 AND (tmdb_id::int) > 10000 THEN 0 ELSE 1 END, created_at DESC`;
     const offset = (page - 1) * pageSize;
 
     // 查询总数
