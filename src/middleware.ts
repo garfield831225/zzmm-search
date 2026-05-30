@@ -15,6 +15,23 @@ const PUBLIC_PATHS = [
   '/api/admin/match-stats',
   '/api/stats2',
   '/api/hello',
+  '/api/admin/blacklist',
+  '/api/admin/stats',
+  '/api/admin/codes',
+  '/api/admin/users',
+  '/api/admin/import',
+  '/api/admin/match',
+  '/api/admin/tmdb-match',
+  '/api/admin/music-match',
+  '/api/admin/cover-match',
+  '/api/admin/setup',
+  '/api/admin/simple-setup',
+  '/api/admin/debug-db',
+  '/api/admin/debug-env',
+  '/api/admin/network-test',
+  '/api/admin/reset',
+  '/api/admin/reset-tmdb',
+  '/api/admin/migrate-tmdb-id',
 ];
 
 export function middleware(request: NextRequest) {
