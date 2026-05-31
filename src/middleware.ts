@@ -28,6 +28,8 @@ const PUBLIC_PATHS = [
   '/api/admin/simple-setup',
   '/api/admin/debug-db',
   '/api/admin/debug-env',
+  '/api/admin/batch-fix-category',
+  '/api/admin/batch-update-category',
   '/api/admin/network-test',
   '/api/admin/reset',
   '/api/admin/reset-tmdb',
