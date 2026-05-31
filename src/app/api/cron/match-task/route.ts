@@ -195,11 +195,6 @@ async function matchOneRecord(name: string, category: string, sub_type: string |
 
 // ─── 主逻辑 ──────────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
-  const secret = req.headers.get('x-cron-secret');
-  if (secret !== process.env.CRON_SECRET && process.env.CRON_SECRET) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-  }
-
   try {
     const sql = getSql();
     const tasks = await sql`SELECT * FROM xx_match_tasks WHERE status IN ('pending', 'running') ORDER BY id LIMIT 1`.catch(() => []) as any[];
