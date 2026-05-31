@@ -18,23 +18,23 @@ const MODES: { key: ImportMode; label: string; icon: string; desc: string }[] = 
   { key: 'doc', label: '线上文档', icon: '🔗', desc: '飞书文档 URL，自动解析数据' },
 ];
 
-// 泽泽妈妈 sheet → category 映射（完整21个sheet映射）
-const ZZMM_SHEET_MAP: Record<string, string> = {
-  '电影': '电影', '外语电影': '电影', '华语电影': '电影',
+// 泽泽妈妈 sheet → category 映射
+// 导航首页 = 跳过，4K原盘+原盘资源 = 合并为原盘
+const ZZMM_SHEET_MAP: Record<string, string | null> = {
+  '导航首页': null, // 跳过，非资源分类
+  '电影': '电影', '外语电影': '电影', '华语电影': '电影', '动画电影': '电影',
   '国产剧': '剧集', '欧美剧': '剧集', '韩日剧': '剧集', '港台剧': '剧集',
-  '动画电影': '电影',
   '动漫': '动漫',
-  '少儿频道': '少儿频道',
+  '纪录片': '纪录片',
   '综艺': '综艺',
   '演唱会': '演唱会',
-  '纪录片': '纪录片',
-  '连载': '连载',
-  '每日更新': '连载',
-  '原盘资源': '原盘', '4K原盘': '原盘',
+  '原盘资源': '原盘', '4K原盘': '原盘', // 合并为原盘
   'REMUX': 'REMUX',
   '系列电影': '系列电影',
   '音乐': '音乐',
   '体育赛事': '体育',
+  '少儿频道': '少儿频道',
+  '每日更新': '连载',
   '合集': '合集',
 };
 
@@ -98,8 +98,10 @@ export default function ImportPage() {
       const codeColIdx = codeHeader?.col ?? -1;
       const sizeColIdx = sizeHeader?.col ?? -1;
 
-      // 优先用 map，其次用关键字 fallback
-      const category = ZZMM_SHEET_MAP[sheetName] || mapCategory(sheetName);
+      // 优先用 map（null=跳过），其次用关键字 fallback，null=跳过此sheet
+      const sheetCategory = ZZMM_SHEET_MAP[sheetName] ?? mapCategory(sheetName);
+      if (sheetCategory === null) return; // 跳过非资源sheet
+      const category = sheetCategory;
       addLog(`📋 Sheet[${sheetName}] → category[${category}] (${dataRows.length} rows)`);
 
       dataRows.forEach((row: any[], rowIdx: number) => {
