@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 
 export const runtime = 'nodejs';
+export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
 // 加载访问码黑名单
@@ -187,11 +188,15 @@ const BATCH = 200;
       ]);
       try {
         // 先插入新记录（忽略冲突）
-        await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) DO NOTHING`, params).catch(() => {});
+        const insertRes = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) DO NOTHING`, params);
         // 统计本批次实际入库数量（按 link 去重）
         const links = batch.map((item: any) => item.link).filter(Boolean);
-        const insertedRows = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE link = ANY(${links})`.catch(() => [{cnt: 0}]) as any[];
-        totalImported += insertedRows[0]?.cnt || 0;
+        const countRes = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE link = ANY(${links}::text[])`.catch(() => [{cnt: 0}]) as any[];
+        const inserted = countRes[0]?.cnt || 0;
+        totalImported += inserted;
+        if (inserted === 0 && batch.length > 0) {
+          console.warn(`批次 ${Math.floor(i / BATCH) + 1} 无入库，batch[0] name=${batch[0]?.name}, link=${batch[0]?.link}, category=${batch[0]?.category}`);
+        }
       } catch (err: any) {
         console.error(`批次失败 (${Math.floor(i / BATCH) + 1}):`, err.message);
         totalFailed += batch.length;
