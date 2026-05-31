@@ -25,15 +25,18 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 
     if (!tmdbId) return NextResponse.json({ items: [] });
 
-    const isSeriesCategory = ['剧集', '动漫', '综艺'].includes(category);
+    const isSeriesCategory = ['剧集', '动漫', '综艺', '连载'].includes(category);
 
     let related: any[];
     if (isSeriesCategory) {
+      // 有 TMDB → 按 release_date 降序；无 TMDB → 按 created_at 降序
       const allRelated = await sql`
-        SELECT id, name, link, link_code, source, category, size, valid_status, created_at
-        FROM xx_resources
-        WHERE tmdb_id = ${tmdbId} AND id != ${resourceId} AND status = 'active'
-        ORDER BY created_at DESC
+        SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.valid_status, r.created_at, r.tmdb_id,
+               COALESCE(c.release_date, r.created_at::text) as sort_date
+        FROM xx_resources r
+        LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
+        WHERE r.tmdb_id = ${tmdbId} AND r.id != ${resourceId} AND r.status = 'active'
+        ORDER BY sort_date DESC
       ` as any[];
 
       if (allRelated.length > 3) {
@@ -58,10 +61,12 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       }
     } else {
       const allRelated = await sql`
-        SELECT id, name, link, link_code, source, category, size, valid_status, created_at
-        FROM xx_resources
-        WHERE tmdb_id = ${tmdbId} AND id != ${resourceId} AND status = 'active'
-        ORDER BY valid_status = 'valid' DESC, created_at DESC
+        SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.valid_status, r.created_at, r.tmdb_id,
+               COALESCE(c.release_date, r.created_at::text) as sort_date
+        FROM xx_resources r
+        LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
+        WHERE r.tmdb_id = ${tmdbId} AND r.id != ${resourceId} AND r.status = 'active'
+        ORDER BY sort_date DESC
       `;
       related = (allRelated as any[]).map((r: any) => ({
         ...r,

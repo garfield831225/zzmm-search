@@ -46,7 +46,7 @@ export async function GET(req: Request) {
   const key = url.searchParams.get('key');
   const category = url.searchParams.get('category') || '';
   const batchSize = Math.min(200, Math.max(10, parseInt(url.searchParams.get('batchSize') || '100')));
-  const skipCategories = (url.searchParams.get('skipCats') || '学习资料,音乐,纪录片,其他').split(',').filter(Boolean);
+  const skipCategories = (url.searchParams.get('skipCats') || '学习资料,音乐,其他').split(',').filter(Boolean);
 
   if (key !== process.env.JWT_SECRET) {
     return NextResponse.json({ error: '未授权' }, { status: 401 });

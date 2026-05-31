@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 
-const ALL_CATEGORIES = ['全部', '电影', '剧集', '动漫', '少儿频道', '综艺', '纪录片', '学习资料', '音乐', '体育', '演唱会', '原盘', 'REMUX', '系列电影', '合集', '其他'];
+const ALL_CATEGORIES = ['全部', '电影', '剧集', '动漫', '少儿频道', '综艺', '纪录片', '音乐', '体育', '演唱会', '原盘', 'REMUX', '系列电影', '合集'];
 const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '夸克网盘', '123网盘', '天翼云盘', '磁力链接', 'ed2k链接', '迅雷链接'];
 const SOURCE_KEY_MAP: Record<string, string> = {
   '115网盘': '115', '百度网盘': 'baidu', '阿里云盘': 'aliyun',
@@ -19,8 +19,8 @@ const SOURCE_DISPLAY_MAP: Record<string, string> = {
 
 const CAT_ICONS: Record<string, string> = {
   '电影': '🎬', '剧集': '📺', '动漫': '🈴', '少儿频道': '🧒', '综艺': '🎭',
-  '纪录片': '📽️', '学习资料': '📚', '音乐': '🎵', '体育': '⚽',
-  '演唱会': '🎤', '原盘': '💿', 'REMUX': '🔧', '系列电影': '🎞️', '合集': '📦', '其他': '📁',
+  '纪录片': '📽️', '音乐': '🎵', '体育': '⚽',
+  '演唱会': '🎤', '原盘': '💿', 'REMUX': '🔧', '系列电影': '🎞️', '合集': '📦',
 };
 
 interface Toast { id: number; type: 'success' | 'copy' | 'error'; message: string; }

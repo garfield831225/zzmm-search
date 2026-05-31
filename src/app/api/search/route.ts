@@ -64,11 +64,8 @@ export async function GET(request: NextRequest) {
       idx++;
     }
 
+    // 排序：有TMDB匹配→按release_date降序；无匹配→按created_at降序
     const whereClause = conditions.join(' AND ');
-
-    // 有 TMDB 匹配 → 有匹配优先；无匹配 → 按入库时间降序
-    // 有 TMDB 匹配 → 有匹配优先（真实TMDB ID >10000）；无匹配 → 按入库时间降序
-    const orderClause = `ORDER BY CASE WHEN tmdb_id IS NOT NULL AND tmdb_id != '' AND length(tmdb_id) <= 10 AND trim(tmdb_id) ~ '^[0-9]+$' AND (trim(tmdb_id)::int) > 10000 THEN 0 ELSE 1 END, created_at DESC`;
     const offset = (page - 1) * pageSize;
 
     // 查询总数
@@ -80,10 +77,13 @@ export async function GET(request: NextRequest) {
     const offsetIdx = idx + 1;
     const queryParams = [...params, pageSize, offset];
     const rows = await sql(
-      `SELECT id, name, link, link_code, source, category, size, type, tags, tmdb_id, view_count, created_at
-       FROM xx_resources
+      `SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
+              COALESCE(c.release_date, r.created_at::text) as sort_date,
+              CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 0 ELSE 1 END as has_tmdb
+       FROM xx_resources r
+       LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
        WHERE ${whereClause}
-       ${orderClause}
+       ORDER BY has_tmdb ASC, sort_date DESC NULLS LAST, r.created_at DESC
        LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
       queryParams
     );
