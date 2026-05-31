@@ -86,13 +86,13 @@ export default function NonFilmPage() {
     }
   }, [addToast]);
 
-  const handleDownload = useCallback(async (resourceId: number) => {
-    const token = localStorage.getItem('token');
-    if (!token) { addToast('error', '请先登录'); return; }
+  const handleDownload = useCallback(async (resourceId: number, link: string) => {
+    if (!isMagnetOrEd2k(link)) {
+      window.open(link, '_blank');
+      return;
+    }
     try {
-      const res = await fetch(`/api/download?id=${resourceId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(`/api/download?id=${resourceId}`);
       const data = await res.json();
       if (data.success && data.url) {
         addToast('success', '下载链接已就绪，正在跳转...');
@@ -230,7 +230,7 @@ export default function NonFilmPage() {
                   onClick={(e) => {
                     e.stopPropagation();
                     if (isMagnetOrEd2k(item.link)) handleCopyLink(item.link);
-                    else handleDownload(item.id);
+                    else handleDownload(item.id, item.link);
                   }}
                   className="absolute bottom-2 right-2 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-xs font-medium opacity-0 group-hover:opacity-100 transition shadow text-white flex items-center gap-1"
                 >
@@ -311,7 +311,7 @@ export default function NonFilmPage() {
                 <button
                   onClick={() => {
                     if (isMagnetOrEd2k(selectedItem.link)) handleCopyLink(selectedItem.link);
-                    else handleDownload(selectedItem.id);
+                    else handleDownload(selectedItem.id, selectedItem.link);
                   }}
                   className="w-full flex items-center justify-center gap-2 p-4 bg-cyan-600 hover:bg-cyan-500 rounded-xl transition text-white font-medium shadow-sm"
                 >
