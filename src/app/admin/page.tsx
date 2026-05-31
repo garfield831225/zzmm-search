@@ -124,12 +124,25 @@ export default function AdminPage() {
 
         {/* Tabs */}
         <div className="flex gap-2 mb-6 flex-wrap">
-          {(['stats', 'users', 'codes', 'import', 'match'] as Tab[]).map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`px-4 py-2 rounded-lg text-sm ${tab === t ? 'bg-violet-600' : 'bg-white/5 hover:bg-white/10'}`}>
-              {{ stats: '📊 数据', users: '👥 用户', codes: '🎫 卡密', import: '📥 导入', match: '🔍 匹配' }[t]}
-            </button>
-          ))}
+          <button onClick={() => setTab('stats')}
+            className={`px-4 py-2 rounded-lg text-sm ${tab === 'stats' ? 'bg-violet-600' : 'bg-white/5 hover:bg-white/10'}`}>
+            📊 数据
+          </button>
+          <button onClick={() => setTab('users')}
+            className={`px-4 py-2 rounded-lg text-sm ${tab === 'users' ? 'bg-violet-600' : 'bg-white/5 hover:bg-white/10'}`}>
+            👥 用户
+          </button>
+          <button onClick={() => setTab('codes')}
+            className={`px-4 py-2 rounded-lg text-sm ${tab === 'codes' ? 'bg-violet-600' : 'bg-white/5 hover:bg-white/10'}`}>
+            🎫 卡密
+          </button>
+          <a href="/admin/import" className="px-4 py-2 rounded-lg text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+            📥 导入
+          </a>
+          <button onClick={() => setTab('match')}
+            className={`px-4 py-2 rounded-lg text-sm ${tab === 'match' ? 'bg-violet-600' : 'bg-white/5 hover:bg-white/10'}`}>
+            🔍 匹配
+          </button>
         </div>
 
         {/* Stats */}
@@ -336,18 +349,7 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* Import */}
-        {tab === 'import' && (
-          <div className="bg-[#12121a] rounded-xl p-6">
-            <h3 className="font-semibold mb-4">📥 Excel 批量导入</h3>
-            <p className="text-sm text-white/60 mb-4">通过 /api/admin/import 导入，格式：{`{items: [{name, link, link_code, category, size}]}`}</p>
-            <div className="p-4 bg-white/5 rounded-lg text-sm font-mono text-white/60">
-              POST /api/admin/import<br />
-              Header: Authorization: Bearer {"<JWT>"}<br />
-              Body: {"{ items: [...] }"}
-            </div>
-          </div>
-        )}
+
       </div>
     </div>
   );

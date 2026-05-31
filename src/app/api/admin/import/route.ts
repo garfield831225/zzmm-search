@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
+import * as XLSX from 'xlsx';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
