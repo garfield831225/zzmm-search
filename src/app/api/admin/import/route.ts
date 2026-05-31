@@ -175,7 +175,7 @@ const BATCH = 200;
       const batch = filteredItems.slice(i, i + BATCH);
       const cols = 'name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at';
       const vals = batch.map((item: any, idx: number) => {
-        const base = (i + idx) * 15;
+        const base = idx * 6;
         return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, NULL, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW())`;
       }).join(', ');
       const params: any[] = batch.flatMap((item: any) => [
@@ -188,18 +188,18 @@ const BATCH = 200;
       ]);
       try {
         // 先插入新记录（忽略冲突）
-        const insertRes = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) DO NOTHING`, params);
+        await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) DO NOTHING`, params).catch((e: any) => { throw new Error(e?.message || 'INSERT failed'); });
         // 统计本批次实际入库数量（按 link 去重）
         const links = batch.map((item: any) => item.link).filter(Boolean);
         const countRes = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE link = ANY(${links}::text[])`.catch(() => [{cnt: 0}]) as any[];
         const inserted = countRes[0]?.cnt || 0;
         totalImported += inserted;
         if (inserted === 0 && batch.length > 0) {
-          console.warn(`批次 ${Math.floor(i / BATCH) + 1} 无入库，batch[0] name=${batch[0]?.name}, link=${batch[0]?.link}, category=${batch[0]?.category}`);
+          console.warn(`批次 ${Math.floor(i / BATCH) + 1} 无入库，batch[0] name=${batch[0]?.name}, link=${batch[0]?.link}, category=${batch[0]?.category}, paramsLen=${params.length}`);
         }
       } catch (err: any) {
         console.error(`批次失败 (${Math.floor(i / BATCH) + 1}):`, err.message);
-        totalFailed += batch.length;
+        return NextResponse.json({ success: false, error: err.message, batchIdx: Math.floor(i / BATCH) + 1 }, { status: 500 });
       }
     }
 
