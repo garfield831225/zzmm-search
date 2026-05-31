@@ -3,7 +3,7 @@ import { neon } from '@neondatabase/serverless';
 
 export const dynamic = 'force-dynamic';
 
-// 批量修正分类：少儿频道/演唱会/REMUX/系列电影/连载
+// 精准批量修正分类
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -15,41 +15,24 @@ export async function POST(request: NextRequest) {
     const sql = neon(process.env.DATABASE_URL || '');
     const results: any = {};
 
-    // 少儿频道：少儿频道 sheet 的链接
-    const childLinks = await sql`SELECT DISTINCT link FROM xx_resources WHERE link LIKE ${'%swfc5a836ah%'} AND category != '少儿频道'`.catch(() => []) as any[];
-    if (childLinks.length) {
-      const links = childLinks.map((r: any) => r.link);
-      const res = await sql`UPDATE xx_resources SET category = '少儿频道', updated_at = NOW() WHERE link = ANY(${links}) RETURNING id`.catch(() => []) as any[];
-      results['少儿频道'] = res.length;
+    // 少儿频道：19条，链接含 swfc5a836ah
+    const child = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE link LIKE '%swfc5a836ah%'`.catch(() => [{cnt:0}]) as any[];
+    if (child[0].cnt > 0) {
+      const up = await sql`UPDATE xx_resources SET category = '少儿频道', updated_at = NOW() WHERE link LIKE '%swfc5a836ah%' RETURNING id`.catch(() => []) as any[];
+      results['少儿频道'] = up.length;
     }
 
-    // 演唱会
-    const concertLinks = await sql`SELECT DISTINCT link FROM xx_resources WHERE link LIKE ${'%swfuxtv36ah%'} AND category != '演唱会'`.catch(() => []) as any[];
-    if (concertLinks.length) {
-      const links = concertLinks.map((r: any) => r.link);
-      const res = await sql`UPDATE xx_resources SET category = '演唱会', updated_at = NOW() WHERE link = ANY(${links}) RETURNING id`.catch(() => []) as any[];
-      results['演唱会'] = res.length;
+    // REMUX：8条，链接含 swf92os36ah
+    const remux = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE link LIKE '%swf92os36ah%'`.catch(() => [{cnt:0}]) as any[];
+    if (remux[0].cnt > 0) {
+      const up = await sql`UPDATE xx_resources SET category = 'REMUX', updated_at = NOW() WHERE link LIKE '%swf92os36ah%' RETURNING id`.catch(() => []) as any[];
+      results['REMUX'] = up.length;
     }
 
-    // REMUX
-    const remuxLinks = await sql`SELECT DISTINCT link FROM xx_resources WHERE link LIKE ${'%swf92os36ah%'} AND category != 'REMUX'`.catch(() => []) as any[];
-    if (remuxLinks.length) {
-      const links = remuxLinks.map((r: any) => r.link);
-      const res = await sql`UPDATE xx_resources SET category = 'REMUX', updated_at = NOW() WHERE link = ANY(${links}) RETURNING id`.catch(() => []) as any[];
-      results['REMUX'] = res.length;
-    }
-
-    // 系列电影
-    const seriesRes = await sql`UPDATE xx_resources SET category = '系列电影', updated_at = NOW() WHERE name LIKE ${'%系列%'} AND category != '系列电影' RETURNING id`.catch(() => []) as any[];
-    results['系列电影'] = seriesRes.length;
-
-    // 连载
-    const dailyLinks = await sql`SELECT DISTINCT link FROM xx_resources WHERE link LIKE ${'%115.com%'} AND link LIKE ${'%sw%'} AND name NOT LIKE ${'%iso%'} AND name NOT LIKE ${'%系列%'} AND category NOT IN ('少儿频道','演唱会','REMUX','系列电影','连载','电影','剧集','动漫','综艺','纪录片','原盘','音乐','体育') LIMIT 10000`.catch(() => []) as any[];
-    if (dailyLinks.length) {
-      const links = dailyLinks.map((r: any) => r.link);
-      const res = await sql`UPDATE xx_resources SET category = '连载', updated_at = NOW() WHERE link = ANY(${links}) RETURNING id`.catch(() => []) as any[];
-      results['连载'] = res.length;
-    }
+    // 连载：从"其他"分类里找非原盘iso文件的115链接，且不在其他已知分类
+    // 策略：link含115.com，不含115cdn.com（区别于原盘），name不含iso，且category是其他
+    const dailyUp = await sql`UPDATE xx_resources SET category = '连载', updated_at = NOW() WHERE link LIKE '%115.com%' AND link NOT LIKE '%115cdn.com%' AND name NOT LIKE '%iso%' AND category = '其他' RETURNING id`.catch(() => []) as any[];
+    results['连载_从其他修正'] = dailyUp.length;
 
     // 返回各分类统计
     const cats = await sql`SELECT category, COUNT(*)::int as cnt FROM xx_resources GROUP BY category ORDER BY cnt DESC`.catch(() => []) as any[];
