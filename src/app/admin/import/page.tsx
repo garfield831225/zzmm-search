@@ -390,7 +390,7 @@ export default function ImportPage() {
           </div>
         )}
 
-        {/* Admin Key */}
+        {/* Admin Key - 已临时禁用
         {showKeyInput && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-6 bg-[#12121a] rounded-xl p-5 border border-white/5">
             <h3 className="font-medium mb-3">🔑 管理员密钥</h3>
@@ -413,6 +413,7 @@ export default function ImportPage() {
             </div>
           </motion.div>
         )}
+        */}
       </div>
     </div>
   );
