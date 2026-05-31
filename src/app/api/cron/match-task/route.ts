@@ -118,21 +118,24 @@ function titleSimilarity(a: string, b: string) {
 }
 
 function confidenceScore(cleanName: string, r: any, lang: string, searchYear: string | undefined) {
-  if (cleanName.replace(/\s/g, '').length < 3) return 0;
+  if (cleanName.replace(/\s/g, '').length < 2) return 0;
   const zhNames = [r.title, r.original_title, r.name].filter(Boolean);
   const enName = r.title?.match(/[a-zA-Z]/) ? r.title : '';
   const allTitles = [...zhNames, enName].map(t => ({ raw: t, n: normStr(t) }));
   const cn = normStr(cleanName);
+
+  // ① 精确匹配（归一化后完全相等）→ 1.0
+  for (const t of allTitles) {
+    if (t.n === cn) return 1.0;
+  }
+  // ② 包含匹配（归一化后 A包含B 或 B包含A）→ 0.9
+  for (const t of allTitles) {
+    if (t.n && (t.n.includes(cn) || cn.includes(t.n))) return 0.9;
+  }
+  // ③ bigram 相似度作为兜底
   const zhS = Math.max(0, ...zhNames.map(zn => titleSimilarity(cleanName, zn)));
   const enS = enName ? titleSimilarity(cleanName, enName) : 0;
-  let best = Math.max(zhS, enS);
-  let exactB = 0;
-  for (const t of allTitles) { if (t.raw === cleanName) { exactB = 1.0; break; } }
-  if (!exactB) { for (const t of allTitles) { if (t.n.includes(cn) || cn.includes(t.n)) { exactB = 0.85; break; } } }
-  if (exactB > 0) best = Math.max(best, exactB);
-  const rY = (r.release_date || r.first_air_date || '').slice(0, 4);
-  if (searchYear && rY && Math.abs(parseInt(rY) - parseInt(searchYear)) <= 2) best += 0.1;
-  return best;
+  return Math.max(zhS, enS);
 }
 
 const MIN_CONF = 0.5;
