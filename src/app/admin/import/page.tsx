@@ -78,39 +78,54 @@ export default function ImportPage() {
     const items: any[] = [];
     wb.SheetNames.forEach(sheetName => {
       const sheet = wb.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json<any>(sheet, { defval: '' });
-      if (!rows.length) return;
+      // 用 header:1 获取原始行数组（保持单元格地址信息）
+      const h1Rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      if (!h1Rows || h1Rows.length < 2) return;
+      const firstRow = h1Rows[0] || [];
+      const dataRows = h1Rows.slice(1);
+
       // 自动识别列名（兼容中文表头）
-      const headers = Object.keys(rows[0]);
-      // 名称列：片名/标题/title（不是链接）
-      const nameCol = headers.find(h => /名|片名|标题|title/i.test(h) && !/链接|链/i.test(h));
-      // 链接列：链接/link/url
-      const linkCol = headers.find(h => /链接|链[^列]|link|url/i.test(h));
-      const codeCol = headers.find(h => /码|password|提取|访问码/i.test(h));
-      const sizeCol = headers.find(h => /大|size/i.test(h));
+      const headers = firstRow.map((c: any, i: number) => ({ col: i, name: String(c || '').trim() }));
+      // 名称列：片名/标题（不是链接）
+      const nameHeader = headers.find((h: any) => /名|片名|标题|title/i.test(h.name) && !/链接|链/i.test(h.name));
+      // 链接列
+      const linkHeader = headers.find((h: any) => /链接|链[^列]|link|url/i.test(h.name));
+      const codeHeader = headers.find((h: any) => /码|password|提取|访问码/i.test(h.name));
+      const sizeHeader = headers.find((h: any) => /大|size/i.test(h.name));
+
+      const nameColIdx = nameHeader?.col ?? 0;
+      const linkColIdx = linkHeader?.col ?? -1;
+      const codeColIdx = codeHeader?.col ?? -1;
+      const sizeColIdx = sizeHeader?.col ?? -1;
 
       // 优先用 map，其次用关键字 fallback
       const category = ZZMM_SHEET_MAP[sheetName] || mapCategory(sheetName);
-      addLog(`📋 Sheet[${sheetName}] → category[${category}] (${rows.length} rows)`);
+      addLog(`📋 Sheet[${sheetName}] → category[${category}] (${dataRows.length} rows)`);
 
-      rows.forEach(row => {
-        const rawLink: string = (nameCol ? row[nameCol] : '') || '';
-        const linkStr: string = (linkCol ? row[linkCol] : '') || '';
-        const name = rawLink || linkStr;
-        const link = linkCol ? row[linkCol] : '';
-        let link_code = codeCol ? (row[codeCol] || '').toString() : '';
-
-        // 如果链接里已经有 password 参数，优先从 URL 提取
+      dataRows.forEach((row: any[], rowIdx: number) => {
+        const name = String(row[nameColIdx] || '').trim();
+        // 链接列：优先读原始单元格.w（超链接格式），否则读行列值
+        let link = '';
+        if (linkColIdx >= 0) {
+          link = String(row[linkColIdx] || '').trim();
+          if (!link) {
+            // 超链接格式：需要从原始sheet单元格取值
+            const colLetter = String.fromCharCode(65 + linkColIdx); // A=0,B=1...
+            const cellAddr = colLetter + (rowIdx + 2);
+            const rawCell = (sheet as any)[cellAddr];
+            if (rawCell) {
+              link = rawCell.w || rawCell.v || '';
+            }
+          }
+        }
+        let link_code = codeColIdx >= 0 ? String(row[codeColIdx] || '').trim() : '';
         if (!link_code) {
-          const m = link.match(/[?&]password=([^\s&#]+)/);
+          const m = link.match(/[?&]password=([^\s&#]+)/i);
           if (m) link_code = m[1];
         }
+        const size = sizeColIdx >= 0 ? String(row[sizeColIdx] || '').trim() : '';
 
-        const size = sizeCol ? (row[sizeCol] || '').toString() : '';
-
-        // 过滤空行
         if (!name && !link) return;
-
         items.push({ name, link, link_code, source: '', category, size });
       });
     });
