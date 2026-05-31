@@ -172,27 +172,27 @@ export async function POST(request: NextRequest) {
 
     for (let i = 0; i < filteredItems.length; i += BATCH) {
       const batch = filteredItems.slice(i, i + BATCH);
-      const cols = 'name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at';
-      const vals = batch.map((item, idx) => {
-        const offset = i + idx;
-        const base = offset * 6;
-        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, NULL, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW())`;
-      }).join(', ');
-      const params: any[] = batch.flatMap(item => [
-        item.name || '',
-        item.link || '',
-        item.link_code || '',
-        item.source || detectSource(item.link || ''),
-        item.category || '其他',
-        item.size || '',
-      ]);
-      try {
-        await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals}`, params);
-        totalImported += batch.length;
-      } catch (err: any) {
-        console.error(`批次失败 (${i / BATCH + 1}):`, err.message);
-        totalFailed += batch.length;
-      }
+        const cols = 'name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at';
+        const vals = batch.map((item, idx) => {
+          const offset = i + idx;
+          const base = offset * 6;
+          return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, NULL, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW())`;
+        }).join(', ');
+        const params: any[] = batch.flatMap(item => [
+          item.name || '',
+          item.link || '',
+          item.link_code || '',
+          item.source || detectSource(item.link || ''),
+          item.category || '其他',
+          item.size || '',
+        ]);
+        try {
+          await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) DO NOTHING`, params);
+          totalImported += batch.length;
+        } catch (err: any) {
+          console.error(`批次失败 (${i / BATCH + 1}):`, err.message);
+          totalFailed += batch.length;
+        }
     }
 
     return NextResponse.json({
