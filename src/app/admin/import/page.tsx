@@ -18,11 +18,24 @@ const MODES: { key: ImportMode; label: string; icon: string; desc: string }[] = 
   { key: 'doc', label: '线上文档', icon: '🔗', desc: '飞书文档 URL，自动解析数据' },
 ];
 
-// 泽泽妈妈 sheet → category 映射（常见映射，可扩展）
+// 泽泽妈妈 sheet → category 映射（完整21个sheet映射）
 const ZZMM_SHEET_MAP: Record<string, string> = {
-  '电影': '电影', '电视剧': '剧集', '综艺': '综艺', '动漫': '动漫',
-  '纪录片': '纪录片', '音乐': '音乐', '软件': '软件', '游戏': '游戏',
-  '电子书': '电子书', '体育': '体育',
+  '电影': '电影', '外语电影': '电影', '华语电影': '电影',
+  '国产剧': '剧集', '欧美剧': '剧集', '韩日剧': '剧集', '港台剧': '剧集',
+  '动画电影': '电影',
+  '动漫': '动漫',
+  '少儿频道': '少儿频道',
+  '综艺': '综艺',
+  '演唱会': '演唱会',
+  '纪录片': '纪录片',
+  '连载': '连载',
+  '每日更新': '连载',
+  '原盘资源': '原盘', '4K原盘': '原盘',
+  'REMUX': 'REMUX',
+  '系列电影': '系列电影',
+  '音乐': '音乐',
+  '体育赛事': '体育',
+  '合集': '合集',
 };
 
 export default function ImportPage() {
@@ -39,6 +52,28 @@ export default function ImportPage() {
 
   const addLog = useCallback((msg: string) => setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]), []);
 
+  // 关键字匹配（fallback for sheet names not in the map）
+  const mapCategory = (cat: string): string => {
+    const c = (cat || '').trim();
+    if (c.includes('系列电影')) return '系列电影';
+    if (c.includes('华语') || c.includes('外语') || c.includes('国产') || c.includes('电影')) return '电影';
+    if (c.includes('港台') || c.includes('韩日') || c.includes('欧美') || c.includes('剧集') || c.includes('电视剧')) return '剧集';
+    if (c.includes('动画电影')) return '电影';
+    if (c.includes('动漫')) return '动漫';
+    if (c.includes('少儿')) return '少儿频道';
+    if (c.includes('综艺')) return '综艺';
+    if (c.includes('演唱会')) return '演唱会';
+    if (c.includes('纪录片')) return '纪录片';
+    if (c.includes('连载') || c.includes('每日更新')) return '连载';
+    if (c.includes('原盘') || c.includes('4K')) return '原盘';
+    if (c.includes('remux') || c.includes('REMUX')) return 'REMUX';
+    if (c.includes('音乐')) return '音乐';
+    if (c.includes('体育')) return '体育';
+    if (c.includes('学习') || c.includes('教程')) return '学习资料';
+    if (c.includes('合集')) return '合集';
+    return c || '其他';
+  };
+
   const parseZZMM = (wb: XLSX.WorkBook): any[] => {
     const items: any[] = [];
     wb.SheetNames.forEach(sheetName => {
@@ -52,8 +87,8 @@ export default function ImportPage() {
       const codeCol = headers.find(h => /码|password|提取|密码/i.test(h));
       const sizeCol = headers.find(h => /大|size/i.test(h));
 
-      // 从 sheet 名映射 category
-      const category = ZZMM_SHEET_MAP[sheetName] || sheetName;
+      // 优先用 map，其次用关键字 fallback
+      const category = ZZMM_SHEET_MAP[sheetName] || mapCategory(sheetName);
 
       rows.forEach(row => {
         const rawLink: string = (nameCol ? row[nameCol] : '') || '';
