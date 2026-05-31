@@ -15,26 +15,25 @@ export async function POST(request: NextRequest) {
     const sql = neon(process.env.DATABASE_URL || '');
     const results: any = {};
 
-    // 少儿频道：19条，链接含 swfc5a836ah
-    const child = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE link LIKE '%swfc5a836ah%'`.catch(() => [{cnt:0}]) as any[];
-    if (child[0].cnt > 0) {
-      const up = await sql`UPDATE xx_resources SET category = '少儿频道', updated_at = NOW() WHERE link LIKE '%swfc5a836ah%' RETURNING id`.catch(() => []) as any[];
-      results['少儿频道'] = up.length;
-    }
+    // 少儿频道：19条
+    const childCnt = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE link LIKE ${'%swfc5a836ah%'}`.catch(() => [{cnt:0}]) as any[];
+    results['少儿频道_现有数量'] = childCnt[0].cnt;
+    const childUp = await sql`UPDATE xx_resources SET category = '少儿频道', updated_at = NOW() WHERE link LIKE ${'%swfc5a836ah%'} RETURNING id`.catch(() => []) as any[];
+    results['少儿频道_已更新'] = childUp.length;
 
-    // REMUX：8条，链接含 swf92os36ah
-    const remux = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE link LIKE '%swf92os36ah%'`.catch(() => [{cnt:0}]) as any[];
-    if (remux[0].cnt > 0) {
-      const up = await sql`UPDATE xx_resources SET category = 'REMUX', updated_at = NOW() WHERE link LIKE '%swf92os36ah%' RETURNING id`.catch(() => []) as any[];
-      results['REMUX'] = up.length;
-    }
+    // REMUX：8条
+    const remuxCnt = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE link LIKE ${'%swf92os36ah%'}`.catch(() => [{cnt:0}]) as any[];
+    results['REMUX_现有数量'] = remuxCnt[0].cnt;
+    const remuxUp = await sql`UPDATE xx_resources SET category = 'REMUX', updated_at = NOW() WHERE link LIKE ${'%swf92os36ah%'} RETURNING id`.catch(() => []) as any[];
+    results['REMUX_已更新'] = remuxUp.length;
 
-    // 连载：从"其他"分类里找非原盘iso文件的115链接，且不在其他已知分类
-    // 策略：link含115.com，不含115cdn.com（区别于原盘），name不含iso，且category是其他
-    const dailyUp = await sql`UPDATE xx_resources SET category = '连载', updated_at = NOW() WHERE link LIKE '%115.com%' AND link NOT LIKE '%115cdn.com%' AND name NOT LIKE '%iso%' AND category = '其他' RETURNING id`.catch(() => []) as any[];
-    results['连载_从其他修正'] = dailyUp.length;
+    // 连载：从"其他"分类里找 115.com 链接（非115cdn，非iso）
+    const dailyCnt = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE link LIKE ${'%115.com%'} AND link NOT LIKE ${'%115cdn.com%'} AND name NOT LIKE ${'%iso%'} AND category = ${'其他'}`.catch(() => [{cnt:0}]) as any[];
+    results['连载_待更新数量'] = dailyCnt[0].cnt;
+    const dailyUp = await sql`UPDATE xx_resources SET category = '连载', updated_at = NOW() WHERE link LIKE ${'%115.com%'} AND link NOT LIKE ${'%115cdn.com%'} AND name NOT LIKE ${'%iso%'} AND category = ${'其他'} RETURNING id`.catch(() => []) as any[];
+    results['连载_已更新'] = dailyUp.length;
 
-    // 返回各分类统计
+    // 最终分类统计（强制最新）
     const cats = await sql`SELECT category, COUNT(*)::int as cnt FROM xx_resources GROUP BY category ORDER BY cnt DESC`.catch(() => []) as any[];
     results['分类统计'] = cats;
 
