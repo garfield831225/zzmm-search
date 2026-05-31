@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
     const zone = searchParams.get('zone') || 'film'; // 'film' | 'nonfilm'
 
     // 构建参数化查询条件
-    const conditions: string[] = [`status = 'active'`];
+    const conditions: string[] = [`r.status = 'active'`];
     const params: any[] = [];
     let idx = 1;
 
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * pageSize;
 
     // 查询总数
-    const countRows = await sql(`SELECT COUNT(*) as count FROM xx_resources WHERE ${whereClause}`, params);
+    const countRows = await sql(`SELECT COUNT(*) as count FROM xx_resources r WHERE ${whereClause}`, params);
     const total = parseInt(countRows?.[0]?.count || '0');
 
     // 分页查询（按 TMDB 上映时间降序，有匹配优先）
