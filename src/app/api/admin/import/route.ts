@@ -188,7 +188,7 @@ const BATCH = 200;
       ]);
       try {
         // 先插入新记录（忽略冲突）
-        const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) DO NOTHING`, params);
+        const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals}`, params);
         // 统计本批次实际入库数量（按 link 去重）
         const links = batch.map((item: any) => item.link).filter(Boolean);
         const countRes = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE link = ANY(${links}::text[])`.catch(() => [{cnt: 0}]) as any[];
