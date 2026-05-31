@@ -154,6 +154,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('Search error:', error.message);
-    return NextResponse.json({ error: '搜索失败: ' + error.message }, { status: 500 });
+    return NextResponse.json({ error: '搜索失败: ' + error.message, detail: error.stack }, { status: 500 });
   }
 }
