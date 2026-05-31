@@ -82,13 +82,16 @@ export default function ImportPage() {
       if (!rows.length) return;
       // 自动识别列名（兼容中文表头）
       const headers = Object.keys(rows[0]);
-      const nameCol = headers.find(h => /名|片名|标题|title/i.test(h));
-      const linkCol = headers.find(h => /链|link|url/i.test(h));
-      const codeCol = headers.find(h => /码|password|提取|密码/i.test(h));
+      // 名称列：片名/标题/title（不是链接）
+      const nameCol = headers.find(h => /名|片名|标题|title/i.test(h) && !/链接|链/i.test(h));
+      // 链接列：链接/link/url
+      const linkCol = headers.find(h => /链接|链[^列]|link|url/i.test(h));
+      const codeCol = headers.find(h => /码|password|提取|访问码/i.test(h));
       const sizeCol = headers.find(h => /大|size/i.test(h));
 
       // 优先用 map，其次用关键字 fallback
       const category = ZZMM_SHEET_MAP[sheetName] || mapCategory(sheetName);
+      addLog(`📋 Sheet[${sheetName}] → category[${category}] (${rows.length} rows)`);
 
       rows.forEach(row => {
         const rawLink: string = (nameCol ? row[nameCol] : '') || '';
