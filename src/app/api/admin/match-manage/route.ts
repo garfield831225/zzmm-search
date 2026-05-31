@@ -46,7 +46,17 @@ export async function GET(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   const sql = neon(process.env.DATABASE_URL || '');
   const body = await req.json().catch(() => ({}));
-  const { id } = body;
+  const { id, action } = body;
+
+  if (action === 'clear_all') {
+    try {
+      await sql`UPDATE xx_resources SET tmdb_id = NULL WHERE tmdb_id IS NOT NULL AND tmdb_id != ''`.catch(() => {});
+      return NextResponse.json({ success: true });
+    } catch (e: any) {
+      return NextResponse.json({ error: e.message }, { status: 500 });
+    }
+  }
+
   if (!id) return NextResponse.json({ error: 'missing id' }, { status: 400 });
   try {
     await sql`UPDATE xx_resources SET tmdb_id = NULL WHERE id = ${id}`.catch(() => {});

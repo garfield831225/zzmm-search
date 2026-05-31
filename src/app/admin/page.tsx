@@ -88,7 +88,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (authed) {
-      if (tab === 'stats') fetchStats();
+      if (tab === 'stats' || tab === 'match') fetchStats();
       if (tab === 'users') fetchUsers();
       if (tab === 'codes') fetchCodes();
     }
@@ -287,18 +287,51 @@ export default function AdminPage() {
         {tab === 'match' && (
           <div className="space-y-4">
             <div className="bg-[#12121a] rounded-xl p-6">
-              <h3 className="font-semibold mb-4">🔍 TMDB 批量匹配</h3>
-              <div className="flex gap-3">
-                <button onClick={() => fetch(`/api/admin/match?key=${token}&batchSize=50`)}
-                  className="px-4 py-2 bg-violet-600 rounded-lg text-sm hover:opacity-90">
-                  匹配50条
-                </button>
-                <button onClick={() => fetch(`/api/admin/match?key=${token}&batchSize=200`)}
-                  className="px-4 py-2 bg-pink-600 rounded-lg text-sm hover:opacity-90">
-                  匹配200条
+              <h3 className="font-semibold mb-4">🔍 TMDB 匹配管理</h3>
+              {stats && (
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="bg-white/5 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-green-400">{stats.matchedResources?.toLocaleString()}</div>
+                    <div className="text-xs text-white/40">已匹配</div>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-3">
+                    <div className="text-2xl font-bold text-yellow-400">{stats.pendingByCategory?.reduce((a: number, c: any) => a + c.count, 0) || 0}</div>
+                    <div className="text-xs text-white/40">待匹配</div>
+                  </div>
+                </div>
+              )}
+              <div className="flex gap-3 flex-wrap">
+                <a href="/admin/match" className="px-4 py-2 bg-violet-600 rounded-lg text-sm hover:opacity-90 text-center no-underline">
+                  🔍 匹配管理（手动/搜索绑定）
+                </a>
+             </div>
+              <div className="mt-4 p-3 bg-white/5 rounded-lg text-sm">
+                <div className="font-semibold text-yellow-400 mb-2">⚠️ 全量匹配操作说明</div>
+                <div className="text-white/60 text-xs space-y-1">
+                  <div>1. <b>重置</b>：先点下方「清空匹配状态」，清除所有 tmdb_id</div>
+                  <div>2. <b>匹配</b>：本地执行<code className="bg-white/10 px-1 rounded">node scripts/match-parallel.mjs</code></div>
+                  <div>3. <b>查看</b>：匹配管理页查看进度和结果</div>
+               </div>
+              </div>
+              <div className="flex gap-3 mt-4">
+                <button onClick={async () => {
+                  if (!confirm('确定清空所有 tmdb_id？此操作不可恢复！')) return;
+                  setLoading(true);
+                  try {
+                    const res = await fetch('/api/admin/match-manage', {
+                      method: 'DELETE',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'clear_all' }),
+                    });
+                    const data = await res.json();
+                    alert(data.success ? '已清空所有匹配状态' : '失败: ' + data.error);
+                    fetchStats();
+                  } catch (e: any) { alert('错误: ' + e.message); }
+                  setLoading(false);
+                }} className="px-4 py-2 bg-red-600 rounded-lg text-sm hover:opacity-90">
+                  🗑️ 清空匹配状态（重置）
                 </button>
               </div>
-              <p className="text-xs text-white/40 mt-3">匹配后 TMDB ID 会写入数据库，可显示海报和评分</p>
             </div>
           </div>
         )}
