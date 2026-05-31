@@ -4,5 +4,11 @@
   "installCommand": "npm install",
   "github": {
     "autoJobCancelInProgress": true
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/match-task",
+      "schedule": "*/5 * * * *"
+    }
+  ]
 }
