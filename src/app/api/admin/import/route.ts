@@ -187,7 +187,7 @@ export async function POST(request: NextRequest) {
           item.size || '',
         ]);
         try {
-          await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) DO NOTHING`, params);
+          await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) DO UPDATE SET category = EXCLUDED.category, updated_at = NOW()`, params);
           totalImported += batch.length;
         } catch (err: any) {
           console.error(`批次失败 (${i / BATCH + 1}):`, err.message);
