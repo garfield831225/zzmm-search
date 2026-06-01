@@ -12,11 +12,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // 重置所有 category=原盘 且已匹配的资源的 tmdb_id
+    // 重置原盘 + 4K原盘 且已匹配的资源的 tmdb_id
     const r = await sql`
       UPDATE xx_resources
       SET tmdb_id = NULL, updated_at = NOW()
-      WHERE category = '原盘' AND tmdb_id IS NOT NULL AND tmdb_id != ''
+      WHERE category IN ('原盘', '4K原盘') AND tmdb_id IS NOT NULL AND tmdb_id != ''
       RETURNING id
     `.catch(() => []) as any[];
 
