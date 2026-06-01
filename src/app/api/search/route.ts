@@ -157,7 +157,7 @@ export async function GET(request: NextRequest) {
       dbMatchedIds.push(...(matchedRows || []).map((r: any) => r.tmdb_id).filter(Boolean));
     }
 
-    // TMDB 结果中有 DB 资源的按 release_date 降序排前面
+    // tmdbWithDb 是 TMDB 搜到且库里有关联资源的，按 release_date 降序
     const tmdbWithDb = tmdbResults.filter((r: any) => dbMatchedIds.includes(String(r.id)));
     tmdbWithDb.sort((a: any, b: any) => {
       const aDate = a.release_date || a.first_air_date || '';
