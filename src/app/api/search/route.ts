@@ -21,6 +21,15 @@ const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频
 const NONFILM_CATEGORIES = ['全部', '音乐', '体育', '游戏', '电子书', '精品课', '文档'];
 const NONFILM_CATS = ['音乐', '体育', '游戏', '电子书', '精品课', '文档'];
 
+// 地区标签 -> TMDB 语法映射
+const REGION_MAP: Record<string, string> = {
+  '大陆': 'CN', '大陆地区': 'CN',
+  '欧美': 'US', '美国': 'US',
+  '日韩': 'JP', '日本': 'JP', '韩国': 'KR',
+  '港澳台': 'HK', '香港': 'HK', '台湾': 'TW', '澳门': 'MO',
+  '其他': '',
+};
+
 // 参考 src/app/api/cron/match-task/route.ts getTypesForCategory，禁止自行"优化"
 function getTypesForCategory(category: string, subType: string | null): string[] | null {
   if (category === '连载' || category === '剧集' || category === '动漫' || category === '少儿频道' || category === '综艺') return ['tv'];
@@ -38,8 +47,9 @@ async function sleep(ms: number) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-async function searchTMDBByType(q: string, type: string, lang = 'zh-CN') {
-  const url = `${TMDB_BASE}/search/${type}?query=${encodeURIComponent(q)}&api_key=${TMDB_KEY}&language=${lang}&page=1&include_adult=false`;
+async function searchTMDBByType(q: string, type: string, lang = 'zh-CN', includeRegion?: string) {
+  let url = `${TMDB_BASE}/search/${type}?query=${encodeURIComponent(q)}&api_key=${TMDB_KEY}&language=${lang}&page=1&include_adult=false`;
+  if (includeRegion) url += `&with_origin_country=${includeRegion}`;
   try {
     const res = await fetch(url, { next: { revalidate: 300 } });
     if (!res.ok) return [];
@@ -55,6 +65,8 @@ export async function GET(request: NextRequest) {
     const q = searchParams.get('q') || '';
     const category = searchParams.get('category') || '全部';
     const source = searchParams.get('source') || '全部';
+    const region = searchParams.get('region') || '全部';
+    const year = searchParams.get('year') || '全部';
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
     const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '30')));
     const zone = searchParams.get('zone') || 'film';
@@ -82,6 +94,18 @@ export async function GET(request: NextRequest) {
       conditions.push(`source = $${idx++}`);
       params.push(dbSource);
     }
+    // 年份筛选：优先用 tmdb_cache 的 release_date
+    if (year !== '全部' && zone === 'film') {
+      if (year === '2026' || year === '2025' || year === '2024' || year === '2023' || year === '2022' || year === '2021' || year === '2020') {
+        conditions.push(`(c.release_date LIKE $${idx} OR c.release_date LIKE $${idx} || '%')`);
+        params.push(`${year}-%`);
+        idx++;
+      } else if (year === '2010-2019') {
+        conditions.push(`(c.release_date >= '2010-01-01' AND c.release_date <= '2019-12-31')`);
+      } else if (year === '2000-2009') {
+        conditions.push(`(c.release_date >= '2000-01-01' AND c.release_date <= '2009-12-31')`);
+      }
+    }
     if (q.trim()) {
       conditions.push(`(name ILIKE $${idx} OR category ILIKE $${idx})`);
       params.push(`%${q.trim()}%`);
@@ -93,11 +117,10 @@ export async function GET(request: NextRequest) {
     // ─── 如果有搜索词 + 选了分类，按分类的 sub_type 分别查 TMDB ───────────────
     let tmdbResults: any[] = [];
     if (q.trim() && zone === 'film' && category !== '全部') {
-      let searchTypes: string[] = [];
+      // 地区参数传给 TMDB
+      const tmdbRegion = REGION_MAP[region] || '';
 
-      // 原盘特殊处理：按数据库里每个资源的 sub_type 分别查 TMDB
       if (category === '原盘') {
-        // 先查出库里有哪些 sub_type
         const subRows = await sql(
           `SELECT DISTINCT sub_type FROM xx_resources WHERE category = '原盘' AND name ILIKE $1 AND status = 'active' AND sub_type IS NOT NULL AND sub_type != ''`,
           [`%${q.trim()}%`]
@@ -105,29 +128,48 @@ export async function GET(request: NextRequest) {
         const subTypes = (subRows || []).map((r: any) => r.sub_type).filter(Boolean);
 
         if (subTypes.length > 0) {
-          // 每个 sub_type 对应的 TMDB 类型分别查
           for (const st of subTypes) {
             const types = getTypesForCategory('原盘', st);
             if (!types) continue;
             for (const type of types) {
               await sleep(20);
-              const results = await searchTMDBByType(q.trim(), type);
+              const results = await searchTMDBByType(q.trim(), type, 'zh-CN', tmdbRegion || undefined);
               tmdbResults.push(...results);
             }
           }
         } else {
-          // 没有 sub_type 记录，按默认逻辑查 movie
-          const results = await searchTMDBByType(q.trim(), 'movie');
+          const results = await searchTMDBByType(q.trim(), 'movie', 'zh-CN', tmdbRegion || undefined);
           tmdbResults.push(...results);
         }
       } else {
-        // 其他分类直接用 getTypesForCategory
         const types = getTypesForCategory(category, null);
         const cats = types || (category === '纪录片' ? ['tv', 'movie'] : ['movie']);
         for (const type of cats) {
           await sleep(20);
-          const results = await searchTMDBByType(q.trim(), type);
+          const results = await searchTMDBByType(q.trim(), type, 'zh-CN', tmdbRegion || undefined);
           tmdbResults.push(...results);
+        }
+      }
+
+      // 年份筛选（TMDB 结果层面）
+      if (year !== '全部' && zone === 'film') {
+        if (['2026','2025','2024','2023','2022','2021','2020'].includes(year)) {
+          tmdbResults = tmdbResults.filter((r: any) => {
+            const d = r.release_date || r.first_air_date || '';
+            return d.startsWith(year);
+          });
+        } else if (year === '2010-2019') {
+          tmdbResults = tmdbResults.filter((r: any) => {
+            const d = r.release_date || r.first_air_date || '';
+            const y = parseInt(d.slice(0, 4));
+            return y >= 2010 && y <= 2019;
+          });
+        } else if (year === '2000-2009') {
+          tmdbResults = tmdbResults.filter((r: any) => {
+            const d = r.release_date || r.first_air_date || '';
+            const y = parseInt(d.slice(0, 4));
+            return y >= 2000 && y <= 2009;
+          });
         }
       }
 
@@ -141,7 +183,6 @@ export async function GET(request: NextRequest) {
     }
 
     // 找出 TMDB 结果中在数据库里有资源的 tmdb_id
-    // 注意：不用 whereClause（因为 TMDB 搜到的电影在库里可能叫"[燃冬][韩版原盘]"，名字和搜索词不完全匹配）
     const tmdbIds = tmdbResults.map((r: any) => String(r.id));
     const dbMatchedIds: string[] = [];
     const dbMatchedRows: any[] = [];
@@ -182,7 +223,7 @@ export async function GET(request: NextRequest) {
     }
 
     const dbWhere = dbConditions.join(' AND ');
-    const countRows = await sql(`SELECT COUNT(*) as count FROM xx_resources r WHERE ${dbWhere}`, params);
+    const countRows = await sql(`SELECT COUNT(*) as count FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${dbWhere}`, params);
     const dbTotal = parseInt(countRows?.[0]?.count || '0');
 
     const dbParams = [...params, pageSize, offset];
@@ -194,7 +235,7 @@ export async function GET(request: NextRequest) {
        LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
        WHERE ${dbWhere}
         ORDER BY has_tmdb DESC, sort_date DESC NULLS LAST, r.created_at DESC
-       LIMIT $${idx} OFFSET $${idx + 1}`,
+        LIMIT $${idx} OFFSET $${idx + 1}`,
       dbParams
     ) as any[];
 
@@ -218,7 +259,7 @@ export async function GET(request: NextRequest) {
 
     // 把 TMDB 结果中有库资源的转成 items，拼到库里匹配结果后面
     const tmdbDbItems = dbMatchedRows.map((r: any) => ({
-      id: null, // TMDB 直接给的没有 id
+      id: null,
       name: r.title || '',
       link: '',
       linkCode: '',

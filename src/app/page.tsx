@@ -9,6 +9,8 @@ const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ
 
 const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频道', '综艺', '演唱会', '纪录片', '原盘', 'REMUX', '系列电影'];
 const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '夸克网盘', '磁力链接', 'ed2k链接'];
+const REGIONS = ['全部', '大陆', '欧美', '日韩', '港澳台'];
+const YEARS = ['全部', '2026', '2025', '2024', '2023', '2022', '2021', '2020', '2010-2019', '2000-2009'];
 
 interface DownloadToast {
   id: number;
@@ -67,6 +69,8 @@ export default function HomePage() {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('全部');
   const [source, setSource] = useState('全部');
+  const [region, setRegion] = useState('全部');
+  const [year, setYear] = useState('全部');
   const [items, setItems] = useState<ResourceItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -146,17 +150,19 @@ export default function HomePage() {
       if (query) params.set('q', query);
       if (category !== '全部') params.set('category', category);
       if (source !== '全部') params.set('source', source);
+      if (region !== '全部') params.set('region', region);
+      if (year !== '全部') params.set('year', year);
 
       const res = await fetch(`/api/search?${params}`);
       const data: SearchResponse = await res.json();
-      setItems(p === 1 ? data.items : [...items, ...data.items]);
+      setItems((prev) => p === 1 ? data.items : [...prev, ...data.items]);
       setTotal(data.total);
       setPage(p);
     } catch (err) { console.error('Fetch error:', err); }
     finally { setLoading(false); }
-  }, [query, category, source, items]);
+  }, [query, category, source, region, year]);
 
-  useEffect(() => { fetchItems(1); }, [category, source]);
+  useEffect(() => { fetchItems(1); }, [category, source, region, year]);
 
   const handleLogout = () => { localStorage.removeItem('token'); localStorage.removeItem('user'); setUser(null); };
 
@@ -234,6 +240,22 @@ export default function HomePage() {
               {SOURCES.map((src) => (
                 <button key={src} onClick={() => setSource(src)}
                   className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition shrink-0 ${source === src ? 'bg-pink-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{src}</button>
+              ))}
+            </div>
+            {/* 地区 */}
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+              <span className="text-xs text-white/30 self-center mr-1 shrink-0">地区</span>
+              {REGIONS.map((r) => (
+                <button key={r} onClick={() => setRegion(r)}
+                  className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition shrink-0 ${region === r ? 'bg-orange-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{r}</button>
+              ))}
+            </div>
+            {/* 年份 */}
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+              <span className="text-xs text-white/30 self-center mr-1 shrink-0">年份</span>
+              {YEARS.map((y) => (
+                <button key={y} onClick={() => setYear(y)}
+                  className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition shrink-0 ${year === y ? 'bg-cyan-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{y}</button>
               ))}
             </div>
           </div>
