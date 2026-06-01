@@ -181,6 +181,13 @@ export default function HomePage() {
       const data: SearchResponse = await res.json();
       setInitialLoading(false);
       setLoading(false);
+      // 如果当前页无数据但前几页有，说明服务器数据异常，保留已有内容避免白屏
+      if (!data.items || data.items.length === 0) {
+        if (pageRef.current > 1) {
+          console.warn('Page', targetPage, 'returned empty, keeping previous items');
+          return;
+        }
+      }
       setItems(data.items ?? []);
       setTotal(data.total ?? 0);
     } catch (err) {
