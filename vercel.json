@@ -8,7 +8,7 @@
   "crons": [
     {
       "path": "/api/cron/match-task",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 2 * * *"
     }
   ]
 }
