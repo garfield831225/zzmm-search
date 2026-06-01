@@ -21,13 +21,12 @@ const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频
 const NONFILM_CATEGORIES = ['全部', '音乐', '体育', '游戏', '电子书', '精品课', '文档'];
 const NONFILM_CATS = ['音乐', '体育', '游戏', '电子书', '精品课', '文档'];
 
-// 地区标签 -> TMDB 语法映射
-const REGION_MAP: Record<string, string> = {
-  '大陆': 'CN', '大陆地区': 'CN',
-  '欧美': 'US', '美国': 'US',
-  '日韩': 'JP', '日本': 'JP', '韩国': 'KR',
-  '港澳台': 'HK', '香港': 'HK', '台湾': 'TW', '澳门': 'MO',
-  '其他': '',
+// 地区标签 -> 国家代码
+const REGION_CODES: Record<string, string[]> = {
+  '大陆': ['CN'],
+  '欧美': ['US', 'GB', 'FR', 'DE', 'IT', 'ES', 'CA', 'AU', 'NZ'],
+  '日韩': ['JP', 'KR'],
+  '港澳台': ['HK', 'TW', 'MO'],
 };
 
 // 参考 src/app/api/cron/match-task/route.ts getTypesForCategory，禁止自行"优化"
@@ -47,9 +46,8 @@ async function sleep(ms: number) {
   return new Promise(r => setTimeout(r, ms));
 }
 
-async function searchTMDBByType(q: string, type: string, lang = 'zh-CN', includeRegion?: string) {
-  let url = `${TMDB_BASE}/search/${type}?query=${encodeURIComponent(q)}&api_key=${TMDB_KEY}&language=${lang}&page=1&include_adult=false`;
-  if (includeRegion) url += `&with_origin_country=${includeRegion}`;
+async function searchTMDBByType(q: string, type: string, lang = 'zh-CN') {
+  const url = `${TMDB_BASE}/search/${type}?query=${encodeURIComponent(q)}&api_key=${TMDB_KEY}&language=${lang}&page=1&include_adult=false`;
   try {
     const res = await fetch(url, { next: { revalidate: 300 } });
     if (!res.ok) return [];
@@ -118,9 +116,6 @@ export async function GET(request: NextRequest) {
     // ─── 如果有搜索词 + 选了分类，按分类的 sub_type 分别查 TMDB ───────────────
     let tmdbResults: any[] = [];
     if (q.trim() && zone === 'film' && category !== '全部') {
-      // 地区参数传给 TMDB
-      const tmdbRegion = REGION_MAP[region] || '';
-
       if (category === '原盘') {
         const subRows = await sql(
           `SELECT DISTINCT sub_type FROM xx_resources WHERE category = '原盘' AND name ILIKE $1 AND status = 'active' AND sub_type IS NOT NULL AND sub_type != ''`,
@@ -134,12 +129,12 @@ export async function GET(request: NextRequest) {
             if (!types) continue;
             for (const type of types) {
               await sleep(20);
-              const results = await searchTMDBByType(q.trim(), type, 'zh-CN', tmdbRegion || undefined);
+              const results = await searchTMDBByType(q.trim(), type, 'zh-CN');
               tmdbResults.push(...results);
             }
           }
         } else {
-          const results = await searchTMDBByType(q.trim(), 'movie', 'zh-CN', tmdbRegion || undefined);
+          const results = await searchTMDBByType(q.trim(), 'movie', 'zh-CN');
           tmdbResults.push(...results);
         }
       } else {
@@ -147,9 +142,18 @@ export async function GET(request: NextRequest) {
         const cats = types || (category === '纪录片' ? ['tv', 'movie'] : ['movie']);
         for (const type of cats) {
           await sleep(20);
-          const results = await searchTMDBByType(q.trim(), type, 'zh-CN', tmdbRegion || undefined);
+          const results = await searchTMDBByType(q.trim(), type, 'zh-CN');
           tmdbResults.push(...results);
         }
+      }
+
+      // 地区筛选：用 TMDB 结果的 origin_country 过滤
+      if (region !== '全部' && REGION_CODES[region]) {
+        const codes = REGION_CODES[region];
+        tmdbResults = tmdbResults.filter((r: any) => {
+          const countries = r.origin_country || r.production_countries?.map((c: any) => c.iso_3166_1) || [];
+          return codes.some((code) => countries.includes(code));
+        });
       }
 
       // 年份筛选（TMDB 结果层面）
