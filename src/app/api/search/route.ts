@@ -67,8 +67,9 @@ export async function GET(request: NextRequest) {
     const source = searchParams.get('source') || '全部';
     const region = searchParams.get('region') || '全部';
     const year = searchParams.get('year') || '全部';
+    const sort = searchParams.get('sort') || 'release_date'; // release_date | added_time
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-    const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '30')));
+    const pageSize = Math.min(150, Math.max(1, parseInt(searchParams.get('pageSize') || '30')));
     const zone = searchParams.get('zone') || 'film';
 
     const conditions: string[] = [`r.status = 'active'`];
@@ -201,13 +202,23 @@ export async function GET(request: NextRequest) {
       dbMatchedRows.push(...rows);
     }
 
-    // tmdbWithDb 是 TMDB 搜到且库里有关联资源的，按 release_date 降序
+    // tmdbWithDb 是 TMDB 搜到且库里有关联资源的
     const tmdbWithDb = tmdbResults.filter((r: any) => dbMatchedIds.includes(String(r.id)));
-    tmdbWithDb.sort((a: any, b: any) => {
-      const aDate = a.release_date || a.first_air_date || '';
-      const bDate = b.release_date || b.first_air_date || '';
-      return bDate.localeCompare(aDate);
-    });
+    if (sort === 'added_time') {
+      // 上架时间：按 created_at 排序，TMDB 结果里没有 created_at，统一按 release_date
+      tmdbWithDb.sort((a: any, b: any) => {
+        const aDate = a.release_date || a.first_air_date || '';
+        const bDate = b.release_date || b.first_air_date || '';
+        return bDate.localeCompare(aDate);
+      });
+    } else {
+      // 默认上映时间
+      tmdbWithDb.sort((a: any, b: any) => {
+        const aDate = a.release_date || a.first_air_date || '';
+        const bDate = b.release_date || b.first_air_date || '';
+        return bDate.localeCompare(aDate);
+      });
+    }
 
     // 无 DB 资源的 TMDB 结果排在后面
     const tmdbWithoutDb = tmdbResults.filter((r: any) => !dbMatchedIds.includes(String(r.id)));
@@ -226,6 +237,16 @@ export async function GET(request: NextRequest) {
     const countRows = await sql(`SELECT COUNT(*) as count FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${dbWhere}`, params);
     const dbTotal = parseInt(countRows?.[0]?.count || '0');
 
+    // 动态 ORDER BY
+    let orderBy: string;
+    if (sort === 'added_time') {
+      // 上架时间：优先 has_tmdb，然后 created_at 降序，没 TMDB 的排后面
+      orderBy = 'has_tmdb DESC, r.created_at DESC, sort_date DESC NULLS LAST';
+    } else {
+      // 默认上映时间：优先 has_tmdb，然后 release_date 降序
+      orderBy = 'has_tmdb DESC, sort_date DESC NULLS LAST, r.created_at DESC';
+    }
+
     const dbParams = [...params, pageSize, offset];
     const dbRows = await sql(
       `SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
@@ -234,7 +255,7 @@ export async function GET(request: NextRequest) {
        FROM xx_resources r
        LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
        WHERE ${dbWhere}
-        ORDER BY has_tmdb DESC, sort_date DESC NULLS LAST, r.created_at DESC
+        ORDER BY ${orderBy}
         LIMIT $${idx} OFFSET $${idx + 1}`,
       dbParams
     ) as any[];

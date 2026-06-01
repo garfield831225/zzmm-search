@@ -71,6 +71,8 @@ export default function HomePage() {
   const [source, setSource] = useState('全部');
   const [region, setRegion] = useState('全部');
   const [year, setYear] = useState('全部');
+  const [sort, setSort] = useState('release_date');
+  const [pageSize, setPageSize] = useState(30);
   const [items, setItems] = useState<ResourceItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -146,12 +148,13 @@ export default function HomePage() {
   const fetchItems = useCallback(async (p = 1) => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page: p.toString(), pageSize: '30' });
+      const params = new URLSearchParams({ page: p.toString(), pageSize: pageSize.toString() });
       if (query) params.set('q', query);
       if (category !== '全部') params.set('category', category);
       if (source !== '全部') params.set('source', source);
       if (region !== '全部') params.set('region', region);
       if (year !== '全部') params.set('year', year);
+      params.set('sort', sort);
 
       const res = await fetch(`/api/search?${params}`);
       const data: SearchResponse = await res.json();
@@ -160,9 +163,9 @@ export default function HomePage() {
       setPage(p);
     } catch (err) { console.error('Fetch error:', err); }
     finally { setLoading(false); }
-  }, [query, category, source, region, year]);
+  }, [query, category, source, region, year, sort, pageSize]);
 
-  useEffect(() => { fetchItems(1); }, [category, source, region, year]);
+  useEffect(() => { fetchItems(1); }, [category, source, region, year, sort]);
 
   const handleLogout = () => { localStorage.removeItem('token'); localStorage.removeItem('user'); setUser(null); };
 
@@ -264,8 +267,30 @@ export default function HomePage() {
 
       {/* Content */}
       <main className="max-w-7xl mx-auto px-4 py-6">
+        {/* Sort & Size Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4 px-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-white/40">排序</span>
+            <div className="flex gap-1">
+              <button onClick={() => setSort('release_date')}
+                className={`px-3 py-1 rounded-full text-xs transition ${sort === 'release_date' ? 'bg-violet-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>🎬 上映</button>
+              <button onClick={() => setSort('added_time')}
+                className={`px-3 py-1 rounded-full text-xs transition ${sort === 'added_time' ? 'bg-violet-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>📅 上架</button>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-white/40 hidden sm:inline">每页</span>
+            <div className="flex gap-1">
+              {[30, 90, 150].map((s) => (
+                <button key={s} onClick={() => { setPageSize(s); fetchItems(1); }}
+                  className={`px-3 py-1 rounded-full text-xs transition ${pageSize === s ? 'bg-pink-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{s}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
         {/* Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
           {items.map((item) => (
             <motion.div key={item.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               className="group cursor-pointer" onClick={() => handleItemClick(item)}>
@@ -325,16 +350,59 @@ export default function HomePage() {
           ))}
         </div>
 
-        {/* Load More */}
-        {items.length < total && (
-          <div className="flex justify-center mt-10">
-            <button onClick={() => fetchItems(page + 1)} disabled={loading}
-              className="px-12 py-4 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed min-w-[200px]">
-              {loading ? (
-                <span className="inline-block animate-spin mr-2">⟳</span>
-              ) : null}
-              {loading ? '加载中...' : `加载更多 (${total - items.length} 条)`}
-            </button>
+        {/* Pagination */}
+        {total > 0 && (
+          <div className="flex flex-col items-center gap-3 mt-8">
+            {/* Page info */}
+            <div className="text-xs text-white/40">
+              共 {total.toLocaleString()} 条，第 {((page - 1) * pageSize) + 1}–{Math.min(page * pageSize, total)} 页
+            </div>
+            {/* Page nav */}
+            <div className="flex items-center gap-1 flex-wrap justify-center">
+              <button onClick={() => fetchItems(1)} disabled={page === 1 || loading}
+                className="px-3 py-1.5 rounded-lg text-xs bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition">« 首页</button>
+              <button onClick={() => fetchItems(page - 1)} disabled={page === 1 || loading}
+                className="px-3 py-1.5 rounded-lg text-xs bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition">‹ 上一页</button>
+
+              {/* Page numbers */}
+              {(() => {
+                const totalPages = Math.ceil(total / pageSize);
+                const pages: (number | string)[] = [];
+                if (totalPages <= 7) {
+                  for (let i = 1; i <= totalPages; i++) pages.push(i);
+                } else {
+                  pages.push(1);
+                  if (page > 3) pages.push('...');
+                  for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) pages.push(i);
+                  if (page < totalPages - 2) pages.push('...');
+                  pages.push(totalPages);
+                }
+                return pages.map((p, idx) =>
+                  p === '...' ? (
+                    <span key={`ellipsis-${idx}`} className="px-1 text-white/30 text-xs">···</span>
+                  ) : (
+                    <button key={p} onClick={() => fetchItems(p as number)}
+                      className={`w-9 h-9 rounded-lg text-xs font-medium transition ${page === p ? 'bg-violet-600 text-white' : 'bg-white/5 hover:bg-white/10 text-white/60'}`}>{p}</button>
+                  )
+                );
+              })()}
+
+              <button onClick={() => fetchItems(page + 1)} disabled={page >= Math.ceil(total / pageSize) || loading}
+                className="px-3 py-1.5 rounded-lg text-xs bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition">下一页 ›</button>
+              <button onClick={() => fetchItems(Math.ceil(total / pageSize))} disabled={page >= Math.ceil(total / pageSize) || loading}
+                className="px-3 py-1.5 rounded-lg text-xs bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed transition">末页 »</button>
+            </div>
+
+            {/* Mobile page select */}
+            <div className="sm:hidden flex items-center gap-2">
+              <span className="text-xs text-white/40">跳至</span>
+              <select value={page} onChange={(e) => fetchItems(parseInt(e.target.value))}
+                className="bg-white/10 border border-white/10 text-white text-xs rounded-lg px-2 py-1.5">
+                {Array.from({ length: Math.ceil(total / pageSize) }, (_, i) => i + 1).map((p) => (
+                  <option key={p} value={p}>第 {p} 页</option>
+                ))}
+              </select>
+            </div>
           </div>
         )}
       </main>
