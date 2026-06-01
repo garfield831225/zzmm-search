@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     const rows = await sql`
       SELECT id, name FROM xx_resources
       WHERE (sub_type IS NULL OR sub_type = '')
-        AND category = '原盘'
+        AND category IN ('原盘', '4K原盘')
       LIMIT 5000
     `.catch(() => []) as any[];
 
@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
     // 3. 统计
     const stats = await sql`
       SELECT sub_type, COUNT(*)::int as cnt FROM xx_resources
-      WHERE category = '原盘' AND sub_type IS NOT NULL AND sub_type != ''
+      WHERE category IN ('原盘', '4K原盘') AND sub_type IS NOT NULL AND sub_type != ''
       GROUP BY sub_type
     `.catch(() => []) as any[];
 
