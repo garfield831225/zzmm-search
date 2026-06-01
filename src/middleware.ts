@@ -35,6 +35,8 @@ const PUBLIC_PATHS = [
   '/api/admin/reset',
   '/api/admin/reset-tmdb',
   '/api/admin/migrate-tmdb-id',
+  '/api/admin/add-sub-type',
+  '/api/admin/reset-yuancategory',
 ];
 
 export function middleware(request: NextRequest) {
