@@ -92,6 +92,7 @@ export default function HomePage() {
   // 用 ref 记录最新 page，让 fetchItems 闭包能读到正确值
   const pageRef = useRef(1);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [selectedItem, setSelectedItem] = useState<ResourceItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [relatedItems, setRelatedItems] = useState<ResourceItem[]>([]);
@@ -162,10 +163,11 @@ export default function HomePage() {
   useEffect(() => { setMounted(true); const stored = localStorage.getItem('user'); if (stored) { try { setUser(JSON.parse(stored)); } catch {} } }, []);
 
   const fetchItems = useCallback(async (p?: number) => {
-    setLoading(true);
     const targetPage = p !== undefined ? p : 1;
     pageRef.current = targetPage;
     setPage(targetPage);
+    // 首次加载才显示 loading 遮罩；翻页时直接替换，视觉上无白屏
+    if (initialLoading) setLoading(true);
     try {
       const params = new URLSearchParams({ page: targetPage.toString(), pageSize: pageSize.toString() });
       if (query) params.set('q', query);
@@ -177,11 +179,15 @@ export default function HomePage() {
 
       const res = await fetch(`/api/search?${params}`);
       const data: SearchResponse = await res.json();
-      setItems(data.items);
-      setTotal(data.total);
-    } catch (err) { console.error('Fetch error:', err); }
-    finally { setLoading(false); }
-  }, [query, category, source, region, year, sort, pageSize]);
+      setInitialLoading(false);
+      setLoading(false);
+      setItems(data.items ?? []);
+      setTotal(data.total ?? 0);
+    } catch (err) {
+      console.error('Fetch error:', err);
+      setLoading(false);
+    }
+  }, [query, category, source, region, year, sort, pageSize, initialLoading]);
 
   useEffect(() => { fetchItems(1); }, [category, source, region, year, sort, pageSize]);
 
