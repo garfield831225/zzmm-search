@@ -186,11 +186,11 @@ export async function GET(request: NextRequest) {
     const dbRows = await sql(
       `SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
               COALESCE(c.release_date, r.created_at::text) as sort_date,
-              CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 0 ELSE 1 END as has_tmdb
+               CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb
        FROM xx_resources r
        LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
        WHERE ${dbWhere}
-       ORDER BY has_tmdb ASC, sort_date DESC NULLS LAST, r.created_at DESC
+        ORDER BY has_tmdb DESC, sort_date DESC NULLS LAST, r.created_at DESC
        LIMIT $${idx} OFFSET $${idx + 1}`,
       dbParams
     ) as any[];
