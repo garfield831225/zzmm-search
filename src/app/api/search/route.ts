@@ -141,17 +141,18 @@ export async function GET(request: NextRequest) {
     }
 
     // 找出 TMDB 结果中在数据库里有资源的 tmdb_id
+    // 注意：不用 whereClause（因为 TMDB 搜到的电影在库里可能叫"[燃冬][韩版原盘]"，名字和搜索词不完全匹配）
     const tmdbIds = tmdbResults.map((r: any) => String(r.id));
     const dbMatchedIds: string[] = [];
 
     if (tmdbIds.length > 0) {
-      const placeholders = tmdbIds.map((_: any, i: number) => `$${idx++}`).join(',');
+      const placeholders = tmdbIds.map((_: any, i: number) => `$${i + 1}`).join(',');
       const matchedRows = await sql(
         `SELECT DISTINCT r.tmdb_id, c.title, c.poster_path, c.vote_average, c.release_date, c.overview
          FROM xx_resources r
          LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
-         WHERE r.tmdb_id IN (${placeholders}) AND ${whereClause}`,
-        [...params, ...tmdbIds]
+         WHERE r.tmdb_id IN (${placeholders}) AND r.status = 'active'`,
+        [...tmdbIds]
       );
       dbMatchedIds.push(...(matchedRows || []).map((r: any) => r.tmdb_id).filter(Boolean));
     }
