@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
+import { Music, Library, LogOut, CreditCard } from 'lucide-react';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
@@ -229,16 +230,27 @@ export default function HomePage() {
               {user ? (
                 <div className="flex items-center gap-2">
                   <span className="px-3 py-1.5 bg-violet-600/30 rounded-lg text-sm text-violet-300">{user.username}</span>
-                  <Link href="/nonfilm" className="px-3 py-1.5 bg-cyan-600/30 hover:bg-cyan-600/50 rounded-lg text-sm transition text-cyan-300">🎵 非影视</Link>
-                  <Link href="/library" className="px-3 py-1.5 bg-violet-600/30 hover:bg-violet-600/50 rounded-lg text-sm transition text-violet-300">📋 资源库</Link>
-                  <Link href="/admin/codes" className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">查看卡密</Link>
+                  <Link href="/nonfilm" className="group flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/50 rounded-lg text-sm transition-all duration-200 text-cyan-300 hover:shadow-[0_0_12px_rgba(34,211,238,0.4)] hover:scale-105">
+                    <Music size={14} className="transition-transform group-hover:scale-110" />
+                    <span>非影视区</span>
+                  </Link>
+                  <Link href="/library" className="group flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/20 hover:bg-violet-600/50 rounded-lg text-sm transition-all duration-200 text-violet-300 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105">
+                    <Library size={14} className="transition-transform group-hover:scale-110" />
+                    <span>文档资源库</span>
+                  </Link>
                   <button onClick={handleLogout} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">退出</button>
                   <Link href="/activate" className="px-3 py-1.5 bg-pink-600/50 hover:bg-pink-600 rounded-lg text-sm transition">续费</Link>
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
-                  <Link href="/nonfilm" className="px-3 py-1.5 bg-cyan-600/30 hover:bg-cyan-600/50 rounded-lg text-sm transition text-cyan-300">🎵 非影视</Link>
-                  <Link href="/library" className="px-3 py-1.5 bg-violet-600/30 hover:bg-violet-600/50 rounded-lg text-sm transition text-violet-300">📋 资源库</Link>
+                  <Link href="/nonfilm" className="group flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/50 rounded-lg text-sm transition-all duration-200 text-cyan-300 hover:shadow-[0_0_12px_rgba(34,211,238,0.4)] hover:scale-105">
+                    <Music size={14} className="transition-transform group-hover:scale-110" />
+                    <span>非影视区</span>
+                  </Link>
+                  <Link href="/library" className="group flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/20 hover:bg-violet-600/50 rounded-lg text-sm transition-all duration-200 text-violet-300 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105">
+                    <Library size={14} className="transition-transform group-hover:scale-110" />
+                    <span>文档资源库</span>
+                  </Link>
                   <Link href="/login" className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">登录 / 注册</Link>
                 </div>
               )}
