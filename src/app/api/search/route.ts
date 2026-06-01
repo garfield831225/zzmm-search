@@ -144,6 +144,7 @@ export async function GET(request: NextRequest) {
     // 注意：不用 whereClause（因为 TMDB 搜到的电影在库里可能叫"[燃冬][韩版原盘]"，名字和搜索词不完全匹配）
     const tmdbIds = tmdbResults.map((r: any) => String(r.id));
     const dbMatchedIds: string[] = [];
+    const dbMatchedRows: any[] = [];
 
     if (tmdbIds.length > 0) {
       const placeholders = tmdbIds.map((_: any, i: number) => `$${i + 1}`).join(',');
@@ -154,7 +155,9 @@ export async function GET(request: NextRequest) {
          WHERE r.tmdb_id IN (${placeholders}) AND r.status = 'active'`,
         [...tmdbIds]
       );
-      dbMatchedIds.push(...(matchedRows || []).map((r: any) => r.tmdb_id).filter(Boolean));
+      const rows = (matchedRows || []) as any[];
+      dbMatchedIds.push(...rows.map((r: any) => r.tmdb_id).filter(Boolean));
+      dbMatchedRows.push(...rows);
     }
 
     // tmdbWithDb 是 TMDB 搜到且库里有关联资源的，按 release_date 降序
@@ -213,7 +216,32 @@ export async function GET(request: NextRequest) {
       coverCache: null,
     }));
 
-    const allItems = [...dbItems];
+    // 把 TMDB 结果中有库资源的转成 items，拼到库里匹配结果后面
+    const tmdbDbItems = dbMatchedRows.map((r: any) => ({
+      id: null, // TMDB 直接给的没有 id
+      name: r.title || '',
+      link: '',
+      linkCode: '',
+      source: '',
+      sourceKey: '',
+      category: category,
+      size: '',
+      type: '',
+      tags: [],
+      tmdbId: String(r.tmdb_id || r.id),
+      viewCount: 0,
+      tmdb: {
+        title: r.title || '',
+        poster_path: r.poster_path || '',
+        vote_average: r.vote_average || 0,
+        release_date: r.release_date || '',
+        overview: r.overview || '',
+      },
+      musicCover: null,
+      coverCache: null,
+    }));
+
+    const allItems = [...dbItems, ...tmdbDbItems];
     const total = dbTotal + tmdbResults.length;
 
     const pageStart = (page - 1) * pageSize;
