@@ -94,6 +94,17 @@ export default function MatchManagePage() {
         <div className="flex items-center gap-3 mb-6">
           <button onClick={() => window.location.href = '/admin'} className="p-2 hover:bg-white/10 rounded-lg">←</button>
           <h1 className="text-2xl font-bold">🎬 TMDB 匹配管理</h1>
+          <button onClick={async () => {
+            if (!confirm('确认触发批量匹配？将从第1页开始匹配未匹配的记录。')) return;
+            const key = prompt('请输入 JWT_SECRET：');
+            if (!key) return;
+            const res = await fetch(`/api/admin/match?key=${key}&batchSize=500`);
+            const data = await res.json();
+            alert(`匹配完成！匹配: ${data.matched || 0}, 失败: ${data.failed || 0}, 跳过: ${data.skipped || 0}`);
+          }}
+            className="ml-auto px-4 py-2 bg-pink-600 hover:bg-pink-500 rounded-lg text-sm font-medium transition">
+            🚀 批量匹配
+          </button>
         </div>
 
         {/* 分类筛选 */}

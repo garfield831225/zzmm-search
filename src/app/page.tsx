@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 
@@ -76,6 +76,8 @@ export default function HomePage() {
   const [items, setItems] = useState<ResourceItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  // 用 ref 记录最新 page，让 fetchItems 闭包能读到正确值
+  const pageRef = useRef(1);
   const [loading, setLoading] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ResourceItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -145,10 +147,13 @@ export default function HomePage() {
 
   useEffect(() => { setMounted(true); const stored = localStorage.getItem('user'); if (stored) { try { setUser(JSON.parse(stored)); } catch {} } }, []);
 
-  const fetchItems = useCallback(async (p = 1) => {
+  const fetchItems = useCallback(async (p?: number) => {
     setLoading(true);
+    const targetPage = p !== undefined ? p : 1;
+    pageRef.current = targetPage;
+    setPage(targetPage);
     try {
-      const params = new URLSearchParams({ page: p.toString(), pageSize: pageSize.toString() });
+      const params = new URLSearchParams({ page: targetPage.toString(), pageSize: pageSize.toString() });
       if (query) params.set('q', query);
       if (category !== '全部') params.set('category', category);
       if (source !== '全部') params.set('source', source);
@@ -158,14 +163,14 @@ export default function HomePage() {
 
       const res = await fetch(`/api/search?${params}`);
       const data: SearchResponse = await res.json();
-      setItems((prev) => p === 1 ? data.items : [...prev, ...data.items]);
+      // 翻页时追加，切换筛选项/排序/条数时替换
+      setItems((prev) => targetPage > 1 ? [...prev, ...data.items] : data.items);
       setTotal(data.total);
-      setPage(p);
     } catch (err) { console.error('Fetch error:', err); }
     finally { setLoading(false); }
   }, [query, category, source, region, year, sort, pageSize]);
 
-  useEffect(() => { fetchItems(1); }, [category, source, region, year, sort]);
+  useEffect(() => { fetchItems(1); }, [category, source, region, year, sort, pageSize]);
 
   const handleLogout = () => { localStorage.removeItem('token'); localStorage.removeItem('user'); setUser(null); };
 
