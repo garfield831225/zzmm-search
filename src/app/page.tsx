@@ -177,8 +177,7 @@ export default function HomePage() {
 
       const res = await fetch(`/api/search?${params}`);
       const data: SearchResponse = await res.json();
-      // 翻页时追加，切换筛选项/排序/条数时替换
-      setItems((prev) => targetPage > 1 ? [...prev, ...data.items] : data.items);
+      setItems(data.items);
       setTotal(data.total);
     } catch (err) { console.error('Fetch error:', err); }
     finally { setLoading(false); }
