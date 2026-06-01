@@ -212,7 +212,11 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', year?: string, lan
     if (!res.ok) return null;
     const data = await res.json();
     if (!data.results?.length) return null;
-    return data.results[0];
+    const r = data.results[0];
+    return {
+      ...r,
+      genres: r.genre_ids ? [] : (r.genres || []),
+    };
   } catch { return null; }
 }
 
@@ -285,12 +289,52 @@ async function matchOne(rawName: string, category: string, subType: string | nul
 }
 
 // 缓存到 xx_tmdb_cache
-async function cacheIt(r: { id: string; tmdb_type: 'movie' | 'tv'; poster: string; title: string; vote: number; year: string }, sqlFn: any) {
+async function getTmdbDetails(tmdbId: string, type: 'movie' | 'tv', keyIndex = 0) {
+  await tmdbLimiter.wait(keyIndex);
+  const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_KEYS[keyIndex % TMDB_KEYS.length]}&language=zh-CN`;
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+async function getTmdbCredits(tmdbId: string, type: 'movie' | 'tv', keyIndex = 0) {
+  await tmdbLimiter.wait(keyIndex);
+  const url = `${TMDB_BASE}/${type}/${tmdbId}/credits?api_key=${TMDB_KEYS[keyIndex % TMDB_KEYS.length]}&language=zh-CN`;
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+async function cacheIt(r: { id: string; tmdb_type: 'movie' | 'tv'; poster: string; title: string; vote: number; year: string; overview?: string; tagline?: string; genres?: string[]; vote_count?: number; original_title?: string }, sqlFn: any) {
   try {
     await sqlFn`
       INSERT INTO xx_tmdb_cache (tmdb_id, tmdb_type, title, original_title, overview, poster_path, vote_average, vote_count, release_date, status, tagline, genres, cached_at)
-      VALUES (${r.id}, ${r.tmdb_type}, ${r.title}, ${''}, ${''}, ${r.poster}, ${r.vote}, ${0}, ${r.year || null}, ${null}, ${''}, ${''}, NOW())
-      ON CONFLICT (tmdb_id) DO UPDATE SET title = EXCLUDED.title, poster_path = EXCLUDED.poster_path, vote_average = EXCLUDED.vote_average, cached_at = NOW()
+      VALUES (
+        ${r.id}, ${r.tmdb_type}, ${r.title},
+        ${r.original_title || null},
+        ${r.overview || null},
+        ${r.poster},
+        ${r.vote}, ${r.vote_count || 0},
+        ${r.year || null}, ${null},
+        ${r.tagline || null},
+        ${r.genres ? JSON.stringify(r.genres) : null},
+        NOW()
+      )
+      ON CONFLICT (tmdb_id) DO UPDATE SET
+        title = EXCLUDED.title,
+        poster_path = EXCLUDED.poster_path,
+        vote_average = EXCLUDED.vote_average,
+        vote_count = EXCLUDED.vote_count,
+        release_date = COALESCE(EXCLUDED.release_date, xx_tmdb_cache.release_date),
+        overview = COALESCE(EXCLUDED.overview, xx_tmdb_cache.overview),
+        tagline = COALESCE(EXCLUDED.tagline, xx_tmdb_cache.tagline),
+        genres = COALESCE(EXCLUDED.genres, xx_tmdb_cache.genres),
+        original_title = COALESCE(EXCLUDED.original_title, xx_tmdb_cache.original_title),
+        cached_at = NOW()
     `;
   } catch {}
 }

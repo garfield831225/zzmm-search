@@ -23,8 +23,19 @@ interface TmdbInfo {
   title_zh: string;
   poster_path: string;
   vote_average: string;
+  vote_count: number;
   overview: string;
   release_date: string;
+  tagline: string;
+  original_title: string;
+  genres: string[];
+}
+
+interface CreditPerson {
+  name: string;
+  character: string;
+  profile_path: string;
+  known_for_department: string;
 }
 
 interface ResourceItem {
@@ -42,6 +53,7 @@ interface ResourceItem {
   viewCount: number;
   tmdb: TmdbInfo | null;
   isCurrent?: boolean;
+  credits?: { director: CreditPerson[]; cast: CreditPerson[] };
 }
 
 interface SearchResponse {
@@ -83,6 +95,7 @@ export default function HomePage() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [relatedItems, setRelatedItems] = useState<ResourceItem[]>([]);
   const [tmdbType, setTmdbType] = useState<string>('movie');
+  const [tmdbCredits, setTmdbCredits] = useState<{ director: any[]; cast: any[]; overview: string; tagline: string; original_title: string; vote_count: number; genres: string[] } | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [user, setUser] = useState<{ id: number; username: string; group: string; expire_at: string } | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -177,13 +190,21 @@ export default function HomePage() {
   const handleItemClick = async (item: ResourceItem) => {
     setSelectedItem(item);
     setHistoryExpanded(false);
+    setTmdbCredits(null);
     if (item.tmdbId) {
       setDetailLoading(true);
       try {
-        const res = await fetch(`/api/resource/${item.id}/related`);
-        const data = await res.json();
-        setRelatedItems(data.items || []);
-        setTmdbType(data.tmdbType || 'movie');
+        const [relRes, credRes] = await Promise.all([
+          fetch(`/api/resource/${item.id}/related`),
+          fetch(`/api/admin/tmdb-credits?tmdbId=${item.tmdbId}&type=${item.category === '连载' || item.category === '剧集' || item.category === '动漫' || item.category === '综艺' ? 'tv' : 'movie'}`),
+        ]);
+        const relData = await relRes.json();
+        const credData = await credRes.json();
+        setRelatedItems(relData.items || []);
+        setTmdbType(relData.tmdbType || 'movie');
+        if (credData.director || credData.cast) {
+          setTmdbCredits(credData);
+        }
       } catch {}
       setDetailLoading(false);
     }
@@ -431,38 +452,105 @@ export default function HomePage() {
                   </div>
                 </div>
                 <div className="flex-1 p-6 overflow-y-auto max-h-[70vh]">
-                  <div className="flex items-start justify-between mb-4">
-                    <div>
-                      <h2 className="text-2xl font-bold mb-2">{selectedItem.name}</h2>
-                      <div className="flex flex-wrap gap-2 text-sm text-white/60">
-                        <span className="px-2 py-1 bg-violet-600/30 rounded">{selectedItem.category}</span>
-                        <span className="px-2 py-1 bg-pink-600/30 rounded">{selectedItem.source}</span>
-                        {selectedItem.type && <span className="px-2 py-1 bg-white/10 rounded">{selectedItem.type}</span>}
-                      </div>
-                    </div>
-                    <button onClick={() => setSelectedItem(null)} className="p-2 hover:bg-white/10 rounded-lg transition">✕</button>
+                  {/* Title + Close */}
+                  <div className="flex items-start justify-between mb-5">
+                    <h2 className="text-xl font-bold leading-tight pr-4">{selectedItem.name}</h2>
+                    <button onClick={() => setSelectedItem(null)} className="p-1.5 hover:bg-white/10 rounded-lg transition shrink-0 text-white/40 hover:text-white">✕</button>
                   </div>
-
+                  {/* ── TMDB Info Section ── */}
                   {selectedItem.tmdb && (
-                    <div className="mb-6 p-4 bg-white/5 rounded-xl">
-                      <div className="flex items-center gap-4 mb-3">
+                    <div className="mb-5 space-y-4">
+                      {/* Tagline */}
+                      {tmdbCredits?.tagline && (
+                        <p className="text-sm italic text-amber-400/80">"{tmdbCredits.tagline}"</p>
+                      )}
+
+                      {/* Rating row */}
+                      <div className="flex items-center gap-3 flex-wrap">
                         {selectedItem.tmdb.vote_average && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-2xl font-bold text-yellow-400">{parseFloat(selectedItem.tmdb.vote_average).toFixed(1)}</span>
-                            <span className="text-white/40 text-sm">/ 10</span>
+                          <>
+                            <div className="flex items-center gap-1">
+                              <span className="text-2xl font-bold text-yellow-400">{parseFloat(selectedItem.tmdb.vote_average).toFixed(1)}</span>
+                              <span className="text-white/30 text-sm">/ 10</span>
+                            </div>
                             <StarRating score={parseFloat(selectedItem.tmdb.vote_average)} />
-                          </div>
+                            {(tmdbCredits?.vote_count ?? 0) > 0 && (
+                              <span className="text-xs text-white/30">{(tmdbCredits?.vote_count ?? 0).toLocaleString()} 人评分</span>
+                            )}
+                          </>
                         )}
                         {selectedItem.tmdb.release_date && (
-                          <span className="text-white/60 text-sm">{selectedItem.tmdb.release_date.slice(0, 4)}</span>
+                          <span className="text-sm text-white/50">📅 {selectedItem.tmdb.release_date}</span>
+                        )}
+                        {tmdbCredits?.original_title && tmdbCredits.original_title !== selectedItem.name && (
+                          <span className="text-sm text-white/30 italic">{tmdbCredits.original_title}</span>
                         )}
                       </div>
-                      <p className="text-sm text-white/70 leading-relaxed line-clamp-4">{selectedItem.tmdb.overview}</p>
+
+                      {/* Genres */}
+{(tmdbCredits && (tmdbCredits.genres?.length ?? 0) > 0) && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {tmdbCredits.genres.map((g) => (
+                            <span key={g} className="px-2.5 py-1 bg-violet-600/30 text-violet-300 text-xs rounded-full border border-violet-500/20">{g}</span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Director */}
+                      {tmdbCredits && tmdbCredits.director?.length > 0 && (
+                        <div>
+                          <div className="text-xs text-white/40 mb-2">🎬 导演</div>
+                          <div className="flex gap-3 overflow-x-auto scrollbar-hide">
+                            {tmdbCredits.director.map((d, i) => (
+                              <div key={i} className="flex flex-col items-center shrink-0 w-16">
+                                <div className="w-12 h-12 rounded-full bg-white/10 overflow-hidden mb-1 flex items-center justify-center text-lg">
+                                  {d.profile_path ? <img src={d.profile_path} alt={d.name} className="w-full h-full object-cover" /> : '🎬'}
+                                </div>
+                                <span className="text-xs text-white/70 text-center leading-tight truncate w-full">{d.name}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Cast */}
+                      {tmdbCredits && tmdbCredits.cast?.length > 0 && (
+                        <div>
+                          <div className="text-xs text-white/40 mb-2">🎭 演员</div>
+                          <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1">
+                            {tmdbCredits.cast.slice(0, 15).map((c, i) => (
+                              <div key={i} className="flex flex-col items-center shrink-0 w-16">
+                                <div className="w-12 h-12 rounded-full bg-white/10 overflow-hidden mb-1 flex items-center justify-center text-lg">
+                                  {c.profile_path ? <img src={c.profile_path} alt={c.name} className="w-full h-full object-cover" /> : '👤'}
+                                </div>
+                                <span className="text-xs text-white/70 text-center leading-tight truncate w-full">{c.name}</span>
+                                {c.character && <span className="text-xs text-white/30 text-center truncate w-full">{c.character}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Synopsis */}
+                      {tmdbCredits?.overview && (
+                        <div>
+                          <div className="text-xs text-white/40 mb-1.5">📖 简介</div>
+                          <p className="text-sm text-white/60 leading-relaxed">{tmdbCredits.overview}</p>
+                        </div>
+                      )}
+
+                      {/* Basic info row */}
+                      <div className="flex flex-wrap gap-2 text-sm">
+                        <span className="px-2 py-1 bg-violet-600/30 rounded text-violet-300">{selectedItem.category}</span>
+                        <span className="px-2 py-1 bg-pink-600/30 rounded text-pink-300">{selectedItem.source}</span>
+                        {selectedItem.type && <span className="px-2 py-1 bg-white/10 rounded text-white/60">{selectedItem.type}</span>}
+                        {selectedItem.size && <span className="px-2 py-1 bg-white/10 rounded text-white/50">📦 {selectedItem.size}</span>}
+                      </div>
                     </div>
                   )}
 
                   <div className="space-y-4">
-                    <h3 className="font-semibold text-lg">📎 资源链接</h3>
+                    <h3 className="font-semibold text-base text-white/80">📎 资源链接</h3>
                     <div className="space-y-2">
                       <div className="text-xs text-white/40 mb-1">📌 当前版本</div>
                       {isMagnetOrEd2k(selectedItem.link) ? (
