@@ -7,24 +7,12 @@ export const dynamic = 'force-dynamic';
 function inferSubType(name: string): string | null {
   if (!name) return null;
   const n = name.toLowerCase();
-
-  // 演唱会
   if (/演唱会|演奏会|音乐会|live|concert/i.test(name)) return '演唱会';
-
-  // 4K原盘 → movie
   if (/4k原盘|4k蓝光/i.test(name)) return '电影';
-  // 3D原盘 → movie
   if (/3d原盘|3d蓝光/i.test(name)) return '3D原盘';
-
-  // 动画电影
   if (/动画电影|动漫电影|卡通电影/i.test(name)) return '动画电影';
-
-  // 有季/Season标记 → 剧集
   if (/第.*季|s\d{1,2}|-season\s*\d/i.test(name)) return '剧集';
-
-  // 电影类关键词（REMUX/蓝光原盘/BluRay/4K）
   if (/remux|blu-?ray|bdmv|4k|uhd|原盘|蓝光/i.test(n)) return '电影';
-
   return null;
 }
 
@@ -44,25 +32,34 @@ export async function POST(req: NextRequest) {
     `.catch(() => []);
 
     if (!colCheck || colCheck.length === 0) {
-      // 加 column
       await sql`ALTER TABLE xx_resources ADD COLUMN sub_type text DEFAULT NULL`.catch(() => {});
     }
 
-    // 2. 回填 sub_type（只填 NULL 的记录）
-    let updated = 0;
+    // 2. 批量回填：一次查出所有待更新记录
     const rows = await sql`
       SELECT id, name FROM xx_resources
       WHERE (sub_type IS NULL OR sub_type = '')
-      AND category = '原盘'
+        AND category = '原盘'
       LIMIT 5000
     `.catch(() => []) as any[];
 
-    for (const row of rows) {
-      const inferred = inferSubType(row.name || '');
-      if (inferred) {
-        await sql`UPDATE xx_resources SET sub_type = ${inferred} WHERE id = ${row.id}`.catch(() => {});
-        updated++;
-      }
+    // 按 id 分组，每 200 条批量更新一次
+    const BATCH = 200;
+    let updated = 0;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const batch = rows.slice(i, i + BATCH);
+      const updates = batch
+        .map(r => { const t = inferSubType(r.name || ''); return t ? { id: r.id, subType: t } : null; })
+        .filter(Boolean) as { id: number; subType: string }[];
+
+      if (updates.length === 0) continue;
+
+      // 构造批量 UPDATE
+      const setClauses = updates.map(u => `WHEN ${u.id} THEN '${u.subType.replace(/'/g, "''")}'`).join(' ');
+      const ids = updates.map(u => u.id);
+      const sqlStr = `UPDATE xx_resources SET sub_type = CASE id ${setClauses} END WHERE id = ANY($1::int[])`;
+      await sql(`${sqlStr}` as any, [ids]).catch(() => {});
+      updated += updates.length;
     }
 
     // 3. 统计
