@@ -3,15 +3,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
 
 const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频道', '综艺', '演唱会', '纪录片', '原盘', 'REMUX', '系列电影'];
-const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '夸克网盘', '123网盘', '天翼云盘', '磁力链接', 'ed2k链接', '迅雷链接'];
-const REGIONS = ['全部', '大陆', '欧美', '日韩', '港澳台', '其他'];
-const YEARS = ['全部', '2026', '2025', '2024', '2023', '2022', '2021', '2020', '2010-2019', '2000-2009'];
+const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '夸克网盘', '磁力链接', 'ed2k链接'];
 
 interface DownloadToast {
   id: number;
@@ -70,8 +67,6 @@ export default function HomePage() {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('全部');
   const [source, setSource] = useState('全部');
-  const [region, setRegion] = useState('全部');
-  const [year, setYear] = useState('全部');
   const [items, setItems] = useState<ResourceItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -144,7 +139,7 @@ export default function HomePage() {
 
   useEffect(() => { setMounted(true); const stored = localStorage.getItem('user'); if (stored) { try { setUser(JSON.parse(stored)); } catch {} } }, []);
 
-  const fetchItems = useCallback(async (p = 1, prevItems?: ResourceItem[]) => {
+  const fetchItems = useCallback(async (p = 1) => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: p.toString(), pageSize: '30' });
@@ -154,12 +149,12 @@ export default function HomePage() {
 
       const res = await fetch(`/api/search?${params}`);
       const data: SearchResponse = await res.json();
-      setItems(p === 1 ? data.items : [...(prevItems || []), ...data.items]);
+      setItems(p === 1 ? data.items : [...items, ...data.items]);
       setTotal(data.total);
       setPage(p);
     } catch (err) { console.error('Fetch error:', err); }
     finally { setLoading(false); }
-  }, [query, category, source]);
+  }, [query, category, source, items]);
 
   useEffect(() => { fetchItems(1); }, [category, source]);
 
@@ -225,52 +220,21 @@ export default function HomePage() {
             <button onClick={() => fetchItems(1)} className="px-5 py-3 bg-violet-600 hover:bg-violet-500 rounded-xl text-white font-medium transition shrink-0">搜索</button>
           </div>
 
-          {/* ─── Filter Bar ─── */}
+          {/* Filter Bar */}
           <div className="flex flex-col gap-2 mt-4">
-            {/* 分类 + 地区 + 年份 同一行横排 */}
-            <div className="flex gap-6 overflow-x-auto pb-1 scrollbar-hide">
-              {/* 分类 */}
-              <div className="shrink-0">
-                <div className="flex gap-2 shrink-0">
-                  {CATEGORIES.map((cat) => (
-                    <button key={cat} onClick={() => setCategory(cat)}
-                      className={`px-4 py-1.5 rounded-full text-sm whitespace-nowrap transition ${category === cat ? 'bg-violet-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{cat}</button>
-                  ))}
-                </div>
-              </div>
+            {/* 分类 */}
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+              {CATEGORIES.map((cat) => (
+                <button key={cat} onClick={() => setCategory(cat)}
+                  className={`px-4 py-1.5 rounded-full text-sm whitespace-nowrap transition shrink-0 ${category === cat ? 'bg-violet-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{cat}</button>
+              ))}
             </div>
-
-            {/* 来源 + 地区 + 年份 */}
-            <div className="flex gap-6 overflow-x-auto pb-1 scrollbar-hide">
-              {/* 来源 */}
-              <div className="shrink-0">
-                <div className="flex gap-2 shrink-0">
-                  {SOURCES.map((src) => (
-                    <button key={src} onClick={() => setSource(src)}
-                      className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition flex items-center gap-1 ${source === src ? 'bg-pink-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{src}</button>
-                  ))}
-                </div>
-              </div>
-              {/* 地区 */}
-              <div className="shrink-0">
-                <span className="text-xs text-white/30 mr-2 self-center">地区</span>
-                <div className="flex gap-2 shrink-0">
-                  {REGIONS.map((r) => (
-                    <button key={r} onClick={() => setRegion(r)}
-                      className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition ${region === r ? 'bg-orange-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{r}</button>
-                  ))}
-                </div>
-              </div>
-              {/* 年份 */}
-              <div className="shrink-0">
-                <span className="text-xs text-white/30 mr-2 self-center">年份</span>
-                <div className="flex gap-2 shrink-0">
-                  {YEARS.map((y) => (
-                    <button key={y} onClick={() => setYear(y)}
-                      className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition ${year === y ? 'bg-cyan-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{y}</button>
-                  ))}
-                </div>
-              </div>
+            {/* 来源 */}
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+              {SOURCES.map((src) => (
+                <button key={src} onClick={() => setSource(src)}
+                  className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition shrink-0 ${source === src ? 'bg-pink-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{src}</button>
+              ))}
             </div>
           </div>
         </div>
@@ -279,7 +243,7 @@ export default function HomePage() {
       {/* Content */}
       <main className="max-w-7xl mx-auto px-4 py-6">
         {/* Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           {items.map((item) => (
             <motion.div key={item.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               className="group cursor-pointer" onClick={() => handleItemClick(item)}>
@@ -342,13 +306,12 @@ export default function HomePage() {
         {/* Load More */}
         {items.length < total && (
           <div className="flex justify-center mt-10">
-            <button onClick={() => fetchItems(page + 1, items)} disabled={loading}
-              className="px-10 py-4 bg-[#1a1a2e] hover:bg-[#252540] border border-white/10 rounded-xl text-sm font-medium transition flex items-center gap-2 disabled:opacity-50">
+            <button onClick={() => fetchItems(page + 1)} disabled={loading}
+              className="px-12 py-4 bg-violet-600 hover:bg-violet-500 rounded-xl text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed min-w-[200px]">
               {loading ? (
-                <><span className="animate-spin inline-block">⟳</span> 加载中...</>
-              ) : (
-                <>加载更多 ({total - items.length} 条)</>
-              )}
+                <span className="inline-block animate-spin mr-2">⟳</span>
+              ) : null}
+              {loading ? '加载中...' : `加载更多 (${total - items.length} 条)`}
             </button>
           </div>
         )}
