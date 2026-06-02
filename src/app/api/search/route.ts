@@ -57,9 +57,19 @@ export async function GET(request: NextRequest) {
       : '1=1';
 
     const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${yearFilter} AND ${nameFilter}`;
+    // 排序逻辑：
+    //   1) has_tmdb DESC（有 TMDB 排前面）
+    //   2) "已播完"优先（release_date < 今天）— 未来日期沉到底
+    //   3) 上映时间降序 / 上架时间降序
+    //   4) r.created_at DESC（兜底）
+    const dateWeight = `(CASE
+      WHEN c.release_date IS NULL OR c.release_date = '' THEN 1
+      WHEN c.release_date < CURRENT_DATE::text THEN 0
+      ELSE 1
+    END)`;
     const orderClause = sort === 'added_time'
-      ? 'has_tmdb DESC, r.created_at DESC'
-      : 'has_tmdb DESC, sort_date DESC NULLS LAST';
+      ? `has_tmdb DESC, ${dateWeight}, r.created_at DESC`
+      : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`;
     const offset = (page - 1) * pageSize;
 
     // ─── Count ────────────────────────────────────────────────────────────────
@@ -70,10 +80,11 @@ export async function GET(request: NextRequest) {
     const dbRows = await sql(`
       SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
              COALESCE(c.release_date, r.created_at::text) as sort_date,
+             ${dateWeight} as date_weight,
              CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb
       FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
       WHERE ${whereClause}
-      ORDER BY ${orderClause}, r.created_at DESC
+      ORDER BY ${orderClause}
       LIMIT ${pageSize} OFFSET ${offset}
     `) as any[];
 
