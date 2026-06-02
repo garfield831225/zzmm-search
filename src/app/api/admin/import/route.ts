@@ -128,8 +128,8 @@ export async function POST(request: NextRequest) {
             item.size || '',
           ]);
           try {
-            await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals}`, params);
-            totalImported += batch.length;
+            const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) DO NOTHING RETURNING id`, params);
+            totalImported += (r as any[]).length;
           } catch {
             totalFailed += batch.length;
           }
@@ -188,12 +188,10 @@ const BATCH = 200;
         item.size || '',
       ]);
       try {
-        // 先插入新记录（忽略冲突）
-        const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals}`, params);
-        // 统计本批次实际入库数量（按 link 去重）
-        const links = batch.map((item: any) => item.link).filter(Boolean);
-        const countRes = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE link = ANY(${links}::text[])`.catch(() => [{cnt: 0}]) as any[];
-        totalImported += countRes[0]?.cnt || 0;
+        // ON CONFLICT (link) DO NOTHING：相同 link 自动跳过（依赖 xx_resources_link_unique_idx）
+        const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) DO NOTHING RETURNING id`, params);
+        const inserted = (r as any[]).length;  // 实际插入的数量
+        totalImported += inserted;
       } catch (err: any) {
         console.error(`批次失败 (${Math.floor(i / BATCH) + 1}):`, err.message);
         totalFailed += batch.length;
