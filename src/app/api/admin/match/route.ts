@@ -200,17 +200,34 @@ function cleanFolderName(raw: string): { cleanName: string; year: string; season
 }
 
 // 搜索单个片名
-// TMDB status 黑名单：不匹配预告/待播/制作中内容
+// TMDB status 黑名单：拒绝未开播内容（In Production 制作中、Planned 计划中）
 const BAD_STATUSES: Record<string, string[]> = {
-  tv: ['Returning Series', 'In Production', 'Planned'],
+  tv: ['In Production', 'Planned'],
   movie: ['In Production', 'Planned'],
 };
+// 按 category 决定优先匹配的状态
+const PREFER_STATUSES: Record<string, string[]> = {
+  '连载': ['Returning Series'],  // 连载分类：优先匹配追更中的
+  'default': ['Ended', 'Canceled', 'Released'],  // 其他分类：优先匹配已播完/已上映
+};
 function isStatusOk(type: 'movie' | 'tv', status: string | undefined): boolean {
-  if (!status) return true; // 无 status 不拦截
+  if (!status) return true;
   return !(BAD_STATUSES[type] || []).includes(status);
 }
+function getPreferredStatuses(category: string, type: 'tv' | 'movie'): string[] {
+  const pref = PREFER_STATUSES[category] || PREFER_STATUSES.default;
+  // 电影没有 Returning Series 概念（电影只区分 Released/In Production/Planned）
+  if (type === 'movie') {
+    return pref.filter(s => s === 'Released' || s === 'Canceled');
+  }
+  return pref;
+}
+function isPreferred(category: string, type: 'tv' | 'movie', status: string | undefined): boolean {
+  if (!status) return false;
+  return getPreferredStatuses(category, type).includes(status);
+}
 
-async function searchTmdb(name: string, type: 'tv' | 'movie', year?: string, lang = 'zh-CN', keyIndex = 0) {
+async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, year?: string, lang = 'zh-CN', keyIndex = 0) {
   await tmdbLimiter.wait(keyIndex);
   const endpoint = type === 'tv' ? '/search/tv' : '/search/movie';
   const yearParam = type === 'tv' ? 'first_air_date_year' : 'year';
@@ -223,20 +240,26 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', year?: string, lan
     const data = await res.json();
     if (!data.results?.length) return null;
 
-    // 逐一验证 status，直到找到已上映的
+    // 先收集所有候选的 status
+    const candidates: Array<{ result: any; status: string | undefined }> = [];
     for (const r of data.results) {
       const detail = await getTmdbDetails(String(r.id), type, keyIndex);
-      if (!detail) continue; // 请求失败则跳过此结果
-      if (!isStatusOk(type, detail.status)) {
-        // status 不合格，尝试下一个结果
-        await tmdbLimiter.wait(keyIndex);
-        continue;
+      if (!detail) continue;
+      if (!isStatusOk(type, detail.status)) continue;  // 黑名单直接跳
+      candidates.push({ result: r, status: detail.status });
+      if (candidates.length >= 8) break;  // 限制每个搜索最多 8 个候选，避免过多 detail 调用
+    }
+    if (candidates.length === 0) return null;
+
+    // 第一优先：按 category 偏好状态
+    for (const c of candidates) {
+      if (isPreferred(category, type, c.status)) {
+        return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
       }
-      return {
-        ...r,
-        genres: r.genre_ids ? [] : (r.genres || []),
-        tmdb_status: detail.status,
-      };
+    }
+    // 第二优先：其他允许的状态（不是黑名单但也不是偏好）
+    for (const c of candidates) {
+      return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
     }
     return null;
   } catch { return null; }
@@ -293,7 +316,7 @@ async function matchOne(rawName: string, category: string, subType: string | nul
     let keyIdx = 0;
     for (const s of strategies) {
       for (const type of typeOrder) {
-        const result = await searchTmdb(cleanName, type, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length);
+        const result = await searchTmdb(cleanName, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length);
         keyIdx++;
         if (result) {
           return {
