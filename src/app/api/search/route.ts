@@ -252,17 +252,17 @@ export async function GET(request: NextRequest) {
     }
 
     const dbParams = [...params, pageSize, offset];
-    const dbRows = await sql(
-      `SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
+    const sqlStr = `SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
               COALESCE(c.release_date, r.created_at::text) as sort_date,
                CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb
        FROM xx_resources r
        LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
        WHERE ${dbWhere}
         ORDER BY ${orderBy}
-        LIMIT $${idx} OFFSET $${idx + 1}`,
-      dbParams
-    ) as any[];
+        LIMIT $${idx} OFFSET $${idx + 1}`;
+    console.log('DEBUG search:', { q, category, zone, page, pageSize, offset, idx, dbParamsLen: dbParams.length, sqlWhere: dbWhere, tmdbIdsLen: tmdbIds.length, mergedIdsLen: mergedIds.length });
+    const dbRows = await sql(sqlStr, dbParams) as any[];
+    console.log('DEBUG dbRows count:', dbRows.length, '| allItems len:', (dbRows?.length || 0) + (dbMatchedRows?.length || 0) + tmdbWithoutDb.length);
 
     const dbItems = (dbRows || []).map((item: any) => ({
       id: item.id,
