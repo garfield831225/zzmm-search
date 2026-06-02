@@ -128,7 +128,7 @@ export async function POST(request: NextRequest) {
             item.size || '',
           ]);
           try {
-            const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) DO NOTHING RETURNING id`, params);
+            const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) WHERE link IS NOT NULL AND link != '' DO NOTHING RETURNING id`, params);
             totalImported += (r as any[]).length;
           } catch {
             totalFailed += batch.length;
@@ -188,8 +188,8 @@ const BATCH = 200;
         item.size || '',
       ]);
       try {
-        // ON CONFLICT (link) DO NOTHING：相同 link 自动跳过（依赖 xx_resources_link_unique_idx）
-        const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) DO NOTHING RETURNING id`, params);
+        // ON CONFLICT (link) DO NOTHING：partial unique index 需带 WHERE 子句才能匹配
+        const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) WHERE link IS NOT NULL AND link != '' DO NOTHING RETURNING id`, params);
         const inserted = (r as any[]).length;  // 实际插入的数量
         totalImported += inserted;
       } catch (err: any) {
