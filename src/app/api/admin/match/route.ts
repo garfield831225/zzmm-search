@@ -200,6 +200,16 @@ function cleanFolderName(raw: string): { cleanName: string; year: string; season
 }
 
 // 搜索单个片名
+// TMDB status 黑名单：不匹配预告/待播/制作中内容
+const BAD_STATUSES: Record<string, string[]> = {
+  tv: ['Returning Series', 'In Production', 'Planned'],
+  movie: ['In Production', 'Planned'],
+};
+function isStatusOk(type: 'movie' | 'tv', status: string | undefined): boolean {
+  if (!status) return true; // 无 status 不拦截
+  return !(BAD_STATUSES[type] || []).includes(status);
+}
+
 async function searchTmdb(name: string, type: 'tv' | 'movie', year?: string, lang = 'zh-CN', keyIndex = 0) {
   await tmdbLimiter.wait(keyIndex);
   const endpoint = type === 'tv' ? '/search/tv' : '/search/movie';
@@ -212,11 +222,23 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', year?: string, lan
     if (!res.ok) return null;
     const data = await res.json();
     if (!data.results?.length) return null;
-    const r = data.results[0];
-    return {
-      ...r,
-      genres: r.genre_ids ? [] : (r.genres || []),
-    };
+
+    // 逐一验证 status，直到找到已上映的
+    for (const r of data.results) {
+      const detail = await getTmdbDetails(String(r.id), type, keyIndex);
+      if (!detail) continue; // 请求失败则跳过此结果
+      if (!isStatusOk(type, detail.status)) {
+        // status 不合格，尝试下一个结果
+        await tmdbLimiter.wait(keyIndex);
+        continue;
+      }
+      return {
+        ...r,
+        genres: r.genre_ids ? [] : (r.genres || []),
+        tmdb_status: detail.status,
+      };
+    }
+    return null;
   } catch { return null; }
 }
 
