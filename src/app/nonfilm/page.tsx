@@ -37,6 +37,7 @@ interface ResourceItem {
   tags: string[];
   formatTags: string[];
   musicCover: { artist: string; album: string; cover_url: string } | null;
+  sportsCover: { team_name: string; team_alternate: string; stadium: string; league: string; badge_url: string; banner_url: string; description: string } | null;
 }
 
 // 从文件名提取格式标签
@@ -220,8 +221,23 @@ export default function NonFilmPage() {
                   <img src={item.musicCover.cover_url} alt={item.musicCover.album}
                     className="w-full h-full object-cover"
                     onError={(e) => { (e.target as HTMLImageElement).style.display='none'; }} />
+                ) : item.sportsCover?.badge_url ? (
+                  <img src={item.sportsCover.badge_url} alt={item.sportsCover.team_name}
+                    className="w-2/3 h-2/3 object-contain"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display='none'; }} />
+                ) : item.sportsCover?.banner_url ? (
+                  <img src={item.sportsCover.banner_url} alt={item.sportsCover.team_name}
+                    className="w-full h-full object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display='none'; }} />
                 ) : (
-                  <span className="text-5xl">🎵</span>
+                  <span className="text-5xl">
+                    {item.category === '体育' ? '⚽' :
+                     item.category === '音乐' ? '🎵' :
+                     item.category === '游戏' ? '🎮' :
+                     item.category === '电子书' ? '📚' :
+                     item.category === '精品课' ? '🎓' :
+                     item.category === '文档' ? '📄' : '📁'}
+                  </span>
                 )}
                 <div className="absolute top-2 right-2">
                   <span className="px-2 py-0.5 bg-cyan-600 text-white text-xs rounded">{item.source}</span>
@@ -250,6 +266,9 @@ export default function NonFilmPage() {
                 )}
                 <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
                   <span>{item.category}</span>
+                  {item.musicCover?.artist && <span>🎤 {item.musicCover.artist}</span>}
+                  {item.sportsCover?.team_name && <span>🏆 {item.sportsCover.team_name}</span>}
+                  {item.sportsCover?.league && <span>· {item.sportsCover.league}</span>}
                   {item.size && <span>📦 {item.size}</span>}
                 </div>
               </div>

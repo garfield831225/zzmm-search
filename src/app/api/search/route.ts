@@ -118,9 +118,10 @@ export async function GET(request: NextRequest) {
       tmdbMap = new Map((ids || []).map((info: any) => [info?.tmdb_id, info]));
     }
 
-    // ─── Batch music/cover ─────────────────────────────────────────────────
+    // ─── Batch music/cover/sports ──────────────────────────────────────────
     let musicCoverMap = new Map<number, any>();
     let coverCacheMap = new Map<number, any>();
+    let sportsCoverMap = new Map<number, any>();
     if (allIds.length > 0) {
       const idsStr = allIds.map(id => `${id}`).join(',');
       try {
@@ -131,6 +132,10 @@ export async function GET(request: NextRequest) {
         const coverRows = await sql(`SELECT resource_id, cover_url, source, extra_data FROM xx_cover_cache WHERE resource_id IN (${idsStr})`);
         coverCacheMap = new Map((coverRows || []).map((r: any) => [r?.resource_id, r]));
       } catch { coverCacheMap = new Map(); }
+      try {
+        const sportsRows = await sql(`SELECT resource_id, team_name, team_alternate, stadium, league, badge_url, banner_url, description FROM xx_sports_cache WHERE resource_id IN (${idsStr})`);
+        sportsCoverMap = new Map((sportsRows || []).map((r: any) => [r?.resource_id, r]));
+      } catch { sportsCoverMap = new Map(); }
     }
 
     // ─── Map results ────────────────────────────────────────────────────────
@@ -150,6 +155,7 @@ export async function GET(request: NextRequest) {
       tmdb: item.tmdb_id ? (tmdbMap.get(item.tmdb_id) || null) : null,
       musicCover: item.category === '音乐' ? (musicCoverMap.get(item.id) || null) : null,
       coverCache: !item.tmdb_id ? (coverCacheMap.get(item.id) || null) : null,
+      sportsCover: item.category === '体育' ? (sportsCoverMap.get(item.id) || null) : null,
     }));
 
     return NextResponse.json({
