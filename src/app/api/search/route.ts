@@ -4,9 +4,6 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 
-const TMDB_KEY = process.env.TMDB_API_KEY_1 || '7985342d5961e9ee3d5ef6d969c1b8dd';
-const TMDB_BASE = 'https://api.themoviedb.org/3';
-
 const SOURCE_KEY_MAP: Record<string, string> = {
   '115网盘': '115', '百度网盘': 'baidu', '阿里云盘': 'aliyun',
   '夸克网盘': 'quark', '123网盘': '123', '天翼云盘': 'tianyi',
@@ -21,9 +18,7 @@ const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频
 const NONFILM_CATEGORIES = ['全部', '音乐', '体育', '游戏', '电子书', '精品课', '文档'];
 const NONFILM_CATS = ['音乐', '体育', '游戏', '电子书', '精品课', '文档'];
 
-async function sleep(ms: number) {
-  return new Promise(r => setTimeout(r, ms));
-}
+function esc(s: string) { return s.replace(/'/g, "''"); }
 
 export async function GET(request: NextRequest) {
   try {
@@ -38,68 +33,51 @@ export async function GET(request: NextRequest) {
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
     const pageSize = Math.min(150, Math.max(1, parseInt(searchParams.get('pageSize') || '30')));
     const zone = searchParams.get('zone') || 'film';
-    const diag = searchParams.get('diag');
 
-    // ─── Build simple filter params (plain strings for SQL inline use) ─────────
+    // ─── WHERE clauses (inline strings — no param placeholders) ─────────────
     const catFilter = category === '全部' && zone === 'film'
-      ? NONFILM_CATS.map(c => `r.category != '${c.replace(/'/g, "''")}'`).join(' AND ')
+      ? NONFILM_CATS.map(c => `r.category != '${esc(c)}'`).join(' AND ')
       : category === '全部' && zone === 'nonfilm'
-      ? `r.category IN ('${NONFILM_CATS.map(c => c.replace(/'/g, "''")).join("','")}')`
-      : category !== '全部' ? `r.category = '${category.replace(/'/g, "''")}'` : '1=1';
+      ? `r.category IN ('${NONFILM_CATS.map(esc).join("','")}')`
+      : category !== '全部' ? `r.category = '${esc(category)}'` : '1=1';
 
     const sourceFilter = source !== '全部'
-      ? `r.source = '${(SOURCE_KEY_MAP[source] || source).replace(/'/g, "''")}'`
-      : '1=1';
+      ? `r.source = '${esc(SOURCE_KEY_MAP[source] || source)}'` : '1=1';
 
     const yearFilter = year !== '全部' && zone === 'film'
       ? (['2026','2025','2024','2023','2022','2021','2020'].includes(year)
-        ? `(c.release_date LIKE '${year}-%' OR c.release_date LIKE '${year}-%' || '%')`
+        ? `(c.release_date LIKE '${year}-%')`
         : year === '2010-2019' ? "(c.release_date >= '2010-01-01' AND c.release_date <= '2019-12-31')"
         : year === '2000-2009' ? "(c.release_date >= '2000-01-01' AND c.release_date <= '2009-12-31')"
         : '1=1')
       : '1=1';
 
     const nameFilter = q.trim()
-      ? `(r.name ILIKE '%${q.trim().replace(/'/g, "''")}%' OR r.category ILIKE '%${q.trim().replace(/'/g, "''")}%')`
+      ? `(r.name ILIKE '%${esc(q.trim())}%' OR r.category ILIKE '%${esc(q.trim())}%')`
       : '1=1';
 
     const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${yearFilter} AND ${nameFilter}`;
     const orderClause = sort === 'added_time'
-      ? 'r.created_at DESC'
-      : 'c.release_date DESC NULLS LAST, r.created_at DESC';
+      ? 'has_tmdb DESC, r.created_at DESC'
+      : 'has_tmdb DESC, sort_date DESC NULLS LAST';
     const offset = (page - 1) * pageSize;
 
-    // DIAG mode: 返回详细诊断信息
-    if (diag) {
-      return NextResponse.json({
-        diag: true,
-        params: { q, category, source, region, year, sort, page, pageSize, zone },
-        whereClause,
-        orderClause,
-        offset,
-        pageSize,
-      });
-    }
-
-    // ─── Count total ──────────────────────────────────────────────────────────
-    let countRows: any[] = [];
-    try {
-      countRows = await sql(`SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause}`) as any[];
-    } catch (e: any) {
-      return NextResponse.json({ error: 'count query failed: ' + e.message, whereClause }, { status: 500 });
-    }
+    // ─── Count ────────────────────────────────────────────────────────────────
+    const countRows = await sql(`SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause}`) as any[];
     const total = parseInt(countRows?.[0]?.cnt || '0');
 
-    // ─── Fetch page ───────────────────────────────────────────────────────────
-    const rawSql = `SELECT r.id, r.name FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause} ORDER BY r.created_at DESC LIMIT ${pageSize} OFFSET ${offset}`;
-    let dbRows: any[] = [];
-    try {
-      dbRows = await sql(rawSql) as any[];
-    } catch (e: any) {
-      return NextResponse.json({ error: 'select query failed: ' + e.message, rawSql }, { status: 500 });
-    }
+    // ─── Fetch page ─────────────────────────────────────────────────────────
+    const dbRows = await sql(`
+      SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
+             COALESCE(c.release_date, r.created_at::text) as sort_date,
+             CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb
+      FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
+      WHERE ${whereClause}
+      ORDER BY ${orderClause}, r.created_at DESC
+      LIMIT ${pageSize} OFFSET ${offset}
+    `) as any[];
 
-    // ─── Batch fetch TMDB cache ───────────────────────────────────────────────
+    // ─── Batch TMDB cache ────────────────────────────────────────────────────
     const allIds = dbRows.map(r => r.id).filter(Boolean);
     const allTmdbIds: string[] = [];
     const seen = new Set<string>();
@@ -109,11 +87,11 @@ export async function GET(request: NextRequest) {
 
     let tmdbMap = new Map<string, any>();
     if (allTmdbIds.length > 0) {
-      const ids = await sql(`SELECT * FROM xx_tmdb_cache WHERE tmdb_id IN (${allTmdbIds.map(id => `'${id}'`).join(',')})`);
+      const ids = await sql(`SELECT * FROM xx_tmdb_cache WHERE tmdb_id IN (${allTmdbIds.map(id => `'${esc(id)}'`).join(',')})`);
       tmdbMap = new Map((ids || []).map((info: any) => [info?.tmdb_id, info]));
     }
 
-    // ─── Batch fetch music/cover cache ──────────────────────────────────────
+    // ─── Batch music/cover ─────────────────────────────────────────────────
     let musicCoverMap = new Map<number, any>();
     let coverCacheMap = new Map<number, any>();
     if (allIds.length > 0) {
@@ -128,7 +106,7 @@ export async function GET(request: NextRequest) {
       } catch { coverCacheMap = new Map(); }
     }
 
-    // ─── Map results ──────────────────────────────────────────────────────────
+    // ─── Map results ────────────────────────────────────────────────────────
     const items = dbRows.map((item: any) => ({
       id: item.id,
       name: item.name,
@@ -156,7 +134,7 @@ export async function GET(request: NextRequest) {
       sources: ['全部', ...Object.values(SOURCE_DISPLAY_MAP)],
     });
   } catch (error: any) {
-    console.error('Search error:', error.message, error.stack);
-    return NextResponse.json({ error: '搜索失败: ' + error.message, stack: error.stack }, { status: 500 });
+    console.error('Search error:', error.message);
+    return NextResponse.json({ error: '搜索失败: ' + error.message }, { status: 500 });
   }
 }
