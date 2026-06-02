@@ -38,6 +38,7 @@ export async function GET(request: NextRequest) {
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
     const pageSize = Math.min(150, Math.max(1, parseInt(searchParams.get('pageSize') || '30')));
     const zone = searchParams.get('zone') || 'film';
+    const diag = searchParams.get('diag');
 
     // ─── Build simple filter params (plain strings for SQL inline use) ─────────
     const catFilter = category === '全部' && zone === 'film'
@@ -68,20 +69,35 @@ export async function GET(request: NextRequest) {
       : 'c.release_date DESC NULLS LAST, r.created_at DESC';
     const offset = (page - 1) * pageSize;
 
+    // DIAG mode: 返回详细诊断信息
+    if (diag) {
+      return NextResponse.json({
+        diag: true,
+        params: { q, category, source, region, year, sort, page, pageSize, zone },
+        whereClause,
+        orderClause,
+        offset,
+        pageSize,
+      });
+    }
+
     // ─── Count total ──────────────────────────────────────────────────────────
-    const countRows = await sql(`SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause}`) as any[];
+    let countRows: any[] = [];
+    try {
+      countRows = await sql(`SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause}`) as any[];
+    } catch (e: any) {
+      return NextResponse.json({ error: 'count query failed: ' + e.message, whereClause }, { status: 500 });
+    }
     const total = parseInt(countRows?.[0]?.cnt || '0');
 
     // ─── Fetch page ───────────────────────────────────────────────────────────
-    const dbRows = await sql(`
-      SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
-             COALESCE(c.release_date, r.created_at::text) as sort_date,
-             CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb
-      FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
-      WHERE ${whereClause}
-      ORDER BY has_tmdb DESC, ${orderClause}
-      LIMIT ${pageSize} OFFSET ${offset}
-    `) as any[];
+    const rawSql = `SELECT r.id, r.name FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause} ORDER BY r.created_at DESC LIMIT ${pageSize} OFFSET ${offset}`;
+    let dbRows: any[] = [];
+    try {
+      dbRows = await sql(rawSql) as any[];
+    } catch (e: any) {
+      return NextResponse.json({ error: 'select query failed: ' + e.message, rawSql }, { status: 500 });
+    }
 
     // ─── Batch fetch TMDB cache ───────────────────────────────────────────────
     const allIds = dbRows.map(r => r.id).filter(Boolean);
@@ -141,6 +157,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('Search error:', error.message, error.stack);
-    return NextResponse.json({ error: '搜索失败: ' + error.message }, { status: 500 });
+    return NextResponse.json({ error: '搜索失败: ' + error.message, stack: error.stack }, { status: 500 });
   }
 }
