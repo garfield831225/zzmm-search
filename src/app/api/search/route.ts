@@ -21,13 +21,6 @@ const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频
 const NONFILM_CATEGORIES = ['全部', '音乐', '体育', '游戏', '电子书', '精品课', '文档'];
 const NONFILM_CATS = ['音乐', '体育', '游戏', '电子书', '精品课', '文档'];
 
-const REGION_CODES: Record<string, string[]> = {
-  '大陆': ['CN'],
-  '欧美': ['US', 'GB', 'FR', 'DE', 'IT', 'ES', 'CA', 'AU', 'NZ'],
-  '日韩': ['JP', 'KR'],
-  '港澳台': ['HK', 'TW', 'MO'],
-};
-
 async function sleep(ms: number) {
   return new Promise(r => setTimeout(r, ms));
 }
@@ -46,72 +39,49 @@ export async function GET(request: NextRequest) {
     const pageSize = Math.min(150, Math.max(1, parseInt(searchParams.get('pageSize') || '30')));
     const zone = searchParams.get('zone') || 'film';
 
-    // ─── Build WHERE conditions ──────────────────────────────────────────────
-    const conditions: string[] = [`r.status = 'active'`];
-    const params: any[] = [];
-    let idx = 1;
+    // ─── Build simple filter params (plain strings for SQL inline use) ─────────
+    const catFilter = category === '全部' && zone === 'film'
+      ? NONFILM_CATS.map(c => `r.category != '${c.replace(/'/g, "''")}'`).join(' AND ')
+      : category === '全部' && zone === 'nonfilm'
+      ? `r.category IN ('${NONFILM_CATS.map(c => c.replace(/'/g, "''")).join("','")}')`
+      : category !== '全部' ? `r.category = '${category.replace(/'/g, "''")}'` : '1=1';
 
-    // Zone/category filter
-    if (category === '全部' && zone === 'film') {
-      for (const cat of NONFILM_CATS) {
-        conditions.push(`r.category != $${idx++}`);
-        params.push(cat);
-      }
-    }
-    if (category === '全部' && zone === 'nonfilm') {
-      conditions.push(`r.category = ANY($${idx++})`);
-      params.push(NONFILM_CATS);
-    }
-    if (category !== '全部') {
-      conditions.push(`r.category = $${idx++}`);
-      params.push(category);
-    }
-    if (source !== '全部') {
-      const dbSource = SOURCE_KEY_MAP[source] || source;
-      conditions.push(`r.source = $${idx++}`);
-      params.push(dbSource);
-    }
-    if (year !== '全部' && zone === 'film') {
-      if (['2026','2025','2024','2023','2022','2021','2020'].includes(year)) {
-        conditions.push(`(c.release_date LIKE $${idx} OR c.release_date LIKE $${idx} || '%')`);
-        params.push(`${year}-%`);
-        idx++;
-      } else if (year === '2010-2019') {
-        conditions.push(`(c.release_date >= '2010-01-01' AND c.release_date <= '2019-12-31')`);
-      } else if (year === '2000-2009') {
-        conditions.push(`(c.release_date >= '2000-01-01' AND c.release_date <= '2009-12-31')`);
-      }
-    }
-    if (q.trim()) {
-      conditions.push(`(r.name ILIKE $${idx} OR r.category ILIKE $${idx})`);
-      params.push(`%${q.trim()}%`);
-      idx++;
-    }
+    const sourceFilter = source !== '全部'
+      ? `r.source = '${(SOURCE_KEY_MAP[source] || source).replace(/'/g, "''")}'`
+      : '1=1';
 
-    const dbWhere = conditions.join(' AND ');
+    const yearFilter = year !== '全部' && zone === 'film'
+      ? (['2026','2025','2024','2023','2022','2021','2020'].includes(year)
+        ? `(c.release_date LIKE '${year}-%' OR c.release_date LIKE '${year}-%' || '%')`
+        : year === '2010-2019' ? "(c.release_date >= '2010-01-01' AND c.release_date <= '2019-12-31')"
+        : year === '2000-2009' ? "(c.release_date >= '2000-01-01' AND c.release_date <= '2009-12-31')"
+        : '1=1')
+      : '1=1';
+
+    const nameFilter = q.trim()
+      ? `(r.name ILIKE '%${q.trim().replace(/'/g, "''")}%' OR r.category ILIKE '%${q.trim().replace(/'/g, "''")}%')`
+      : '1=1';
+
+    const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${yearFilter} AND ${nameFilter}`;
+    const orderClause = sort === 'added_time'
+      ? 'r.created_at DESC'
+      : 'c.release_date DESC NULLS LAST, r.created_at DESC';
     const offset = (page - 1) * pageSize;
-    const totalParams = [...params];
 
     // ─── Count total ──────────────────────────────────────────────────────────
-    const countRows = await sql(`SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${dbWhere}`, totalParams) as any[];
+    const countRows = await sql(`SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause}`) as any[];
     const total = parseInt(countRows?.[0]?.cnt || '0');
 
     // ─── Fetch page ───────────────────────────────────────────────────────────
-    const orderBy = sort === 'added_time'
-      ? 'has_tmdb DESC, r.created_at DESC'
-      : 'has_tmdb DESC, sort_date DESC NULLS LAST';
-
-    const dbParams = [...params, pageSize, offset];
-    const dbRows = await sql(
-      `SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
-              COALESCE(c.release_date, r.created_at::text) as sort_date,
-              CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb
-       FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
-       WHERE ${dbWhere}
-       ORDER BY ${orderBy}, r.created_at DESC
-       LIMIT $${idx} OFFSET $${idx + 1}`,
-      dbParams
-    ) as any[];
+    const dbRows = await sql(`
+      SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
+             COALESCE(c.release_date, r.created_at::text) as sort_date,
+             CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb
+      FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
+      WHERE ${whereClause}
+      ORDER BY has_tmdb DESC, ${orderClause}
+      LIMIT ${pageSize} OFFSET ${offset}
+    `) as any[];
 
     // ─── Batch fetch TMDB cache ───────────────────────────────────────────────
     const allIds = dbRows.map(r => r.id).filter(Boolean);
@@ -123,22 +93,21 @@ export async function GET(request: NextRequest) {
 
     let tmdbMap = new Map<string, any>();
     if (allTmdbIds.length > 0) {
-      const placeholders = allTmdbIds.map((_, i) => `$${i + 1}`).join(',');
-      const tmdbRows = await sql(`SELECT * FROM xx_tmdb_cache WHERE tmdb_id IN (${placeholders})`, allTmdbIds);
-      tmdbMap = new Map((tmdbRows || []).map((info: any) => [info?.tmdb_id, info]));
+      const ids = await sql(`SELECT * FROM xx_tmdb_cache WHERE tmdb_id IN (${allTmdbIds.map(id => `'${id}'`).join(',')})`);
+      tmdbMap = new Map((ids || []).map((info: any) => [info?.tmdb_id, info]));
     }
 
     // ─── Batch fetch music/cover cache ──────────────────────────────────────
     let musicCoverMap = new Map<number, any>();
     let coverCacheMap = new Map<number, any>();
     if (allIds.length > 0) {
-      const idPlaceholders = allIds.map((_, i) => `$${i + 1}`).join(',');
+      const idsStr = allIds.map(id => `${id}`).join(',');
       try {
-        const musicRows = await sql(`SELECT resource_id, artist, album, cover_url FROM xx_music_cache WHERE resource_id IN (${idPlaceholders})`, allIds);
+        const musicRows = await sql(`SELECT resource_id, artist, album, cover_url FROM xx_music_cache WHERE resource_id IN (${idsStr})`);
         musicCoverMap = new Map((musicRows || []).map((r: any) => [r?.resource_id, r]));
       } catch { musicCoverMap = new Map(); }
       try {
-        const coverRows = await sql(`SELECT resource_id, cover_url, source, extra_data FROM xx_cover_cache WHERE resource_id IN (${idPlaceholders})`, allIds);
+        const coverRows = await sql(`SELECT resource_id, cover_url, source, extra_data FROM xx_cover_cache WHERE resource_id IN (${idsStr})`);
         coverCacheMap = new Map((coverRows || []).map((r: any) => [r?.resource_id, r]));
       } catch { coverCacheMap = new Map(); }
     }
@@ -171,7 +140,7 @@ export async function GET(request: NextRequest) {
       sources: ['全部', ...Object.values(SOURCE_DISPLAY_MAP)],
     });
   } catch (error: any) {
-    console.error('Search error:', error.message);
+    console.error('Search error:', error.message, error.stack);
     return NextResponse.json({ error: '搜索失败: ' + error.message }, { status: 500 });
   }
 }
