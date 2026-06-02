@@ -62,11 +62,11 @@ export default function LibraryPage() {
       if (source !== '全部') params.set('source', source);
       const res = await fetch(`/api/search?${params}`);
       const data = await res.json();
-      setItems(p === 1 ? (data.items || []) : prev => [...prev, ...(data.items || [])]);
+      setItems(p === 1 ? (data.items || []) : (prev: any[]) => [...prev, ...(data.items || [])]);
       setTotal(data.total || 0);
       setPage(p);
     } catch { addToast('error', '加载失败'); }
-    setLoading(false);
+    finally { setLoading(false); }
   }, [query, category, source, pageSize, addToast]);
 
   useEffect(() => { fetchItems(1); }, [category, source]);

@@ -119,12 +119,12 @@ export default function NonFilmPage() {
         formatTags: extractFormatTags(item.name),
         musicCover: item.musicCover || null,
       }));
-      setItems(p === 1 ? mapped : [...items, ...mapped]);
+      setItems(p === 1 ? mapped : (prev: any[]) => [...prev, ...mapped]);
       setTotal(data.total);
       setPage(p);
     } catch {}
-    setLoading(false);
-  }, [query, category, source, items]);
+    finally { setLoading(false); }
+  }, [query, category, source]);
 
   useEffect(() => { fetchItems(1); }, [category, source]);
 
