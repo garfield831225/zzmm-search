@@ -18,6 +18,14 @@ const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频
 const NONFILM_CATEGORIES = ['全部', '音乐', '体育', '游戏', '电子书', '精品课', '文档'];
 const NONFILM_CATS = ['音乐', '体育', '游戏', '电子书', '精品课', '文档'];
 
+// 地区 → 国家代码映射（与 TMDB iso_3166_1 一致）
+const REGION_CODES: Record<string, string[]> = {
+  '大陆': ['CN'],
+  '欧美': ['US', 'GB', 'FR', 'DE', 'IT', 'ES', 'CA', 'AU', 'NZ'],
+  '日韩': ['JP', 'KR'],
+  '港澳台': ['HK', 'TW', 'MO'],
+};
+
 function esc(s: string) { return s.replace(/'/g, "''"); }
 
 export async function GET(request: NextRequest) {
@@ -56,7 +64,15 @@ export async function GET(request: NextRequest) {
       ? `(r.name ILIKE '%${esc(q.trim())}%' OR r.category ILIKE '%${esc(q.trim())}%')`
       : '1=1';
 
-    const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${yearFilter} AND ${nameFilter}`;
+    // 地区筛选：依赖 xx_tmdb_cache.origin_country（match 脚本写入）
+    // 没 cache 的资源允许通过，等下次匹配
+    const regionCodes = REGION_CODES[region];
+    const regionFilter = regionCodes
+      ? `(c.origin_country IS NOT NULL AND c.origin_country <> '' AND (${regionCodes.map(c => `c.origin_country LIKE '%${c}%'`).join(' OR ')}))`
+      : '1=1';
+
+    const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${regionFilter} AND ${yearFilter} AND ${nameFilter}`;
+
     // 排序逻辑：
     //   1) has_tmdb DESC（有 TMDB 排前面）
     //   2) "已播完"优先（release_date < 今天）— 未来日期沉到底
