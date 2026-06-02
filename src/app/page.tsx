@@ -194,7 +194,7 @@ export default function HomePage() {
       console.error('Fetch error:', err);
       setLoading(false);
     }
-  }, [query, category, source, region, year, sort, pageSize, initialLoading]);
+  }, [query, category, source, region, year, sort, pageSize]);
 
   useEffect(() => { fetchItems(1); }, [category, source, region, year, sort, pageSize]);
 
