@@ -60,6 +60,7 @@ export async function GET(request: NextRequest) {
   try {
     const sql = neon(process.env.DATABASE_URL || '');
     const { searchParams } = new URL(request.url);
+    const debug = searchParams.get('debug');
     const q = searchParams.get('q') || '';
     const category = searchParams.get('category') || '全部';
     const source = searchParams.get('source') || '全部';
@@ -263,6 +264,26 @@ export async function GET(request: NextRequest) {
     console.log('DEBUG search:', { q, category, zone, page, pageSize, offset, idx, dbParamsLen: dbParams.length, sqlWhere: dbWhere, tmdbIdsLen: tmdbIds.length, mergedIdsLen: mergedIds.length });
     const dbRows = await sql(sqlStr, dbParams) as any[];
     console.log('DEBUG dbRows count:', dbRows.length, '| allItems len:', (dbRows?.length || 0) + (dbMatchedRows?.length || 0) + tmdbWithoutDb.length);
+
+    // Debug mode: 返回诊断信息
+    if (debug) {
+      return NextResponse.json({
+        debug: true,
+        dbRowsCount: dbRows.length,
+        dbTotal,
+        tmdbResultsLen: tmdbResults.length,
+        allItemsLen: dbRows.length,
+        page,
+        pageSize,
+        offset,
+        idx,
+        dbParamsLen: dbParams.length,
+        sqlWhere: dbWhere.slice(0, 200),
+        paramsPreview: params.map((p, i) => `$${i+1}=${JSON.stringify(p).slice(0, 30)}`),
+        sampleDbRow: dbRows?.[0] ? { id: dbRows[0].id, name: dbRows[0].name?.slice(0, 20) } : null,
+      });
+    }
+
 
     const dbItems = (dbRows || []).map((item: any) => ({
       id: item.id,
