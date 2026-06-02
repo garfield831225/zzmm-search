@@ -89,10 +89,7 @@ export default function HomePage() {
   const [items, setItems] = useState<ResourceItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  // 用 ref 记录最新 page，让 fetchItems 闭包能读到正确值
-  const pageRef = useRef(1);
   const [loading, setLoading] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(true);
   const [selectedItem, setSelectedItem] = useState<ResourceItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [relatedItems, setRelatedItems] = useState<ResourceItem[]>([]);
@@ -162,39 +159,38 @@ export default function HomePage() {
 
   useEffect(() => { setMounted(true); const stored = localStorage.getItem('user'); if (stored) { try { setUser(JSON.parse(stored)); } catch {} } }, []);
 
+  // 用 ref 记录最新 state，在 effect 调用 fetchItems 之前同步最新值
+  const latestRef = useRef({ query, category, source, region, year, sort, pageSize });
+  latestRef.current = { query, category, source, region, year, sort, pageSize };
+
+  // 空 deps —— 永远同一函数引用，永远用 latestRef 读最新 state
   const fetchItems = useCallback(async (p?: number) => {
     const targetPage = p !== undefined ? p : 1;
-    pageRef.current = targetPage;
     setPage(targetPage);
-    // 首次加载才显示 loading 遮罩；翻页时直接替换，视觉上无白屏
-    if (initialLoading) setLoading(true);
+    setLoading(true);
+    const { query: q, category: cat, source: src, region: reg, year: yr, sort: s, pageSize: ps } = latestRef.current;
     try {
-      const params = new URLSearchParams({ page: targetPage.toString(), pageSize: pageSize.toString() });
-      if (query) params.set('q', query);
-      if (category !== '全部') params.set('category', category);
-      if (source !== '全部') params.set('source', source);
-      if (region !== '全部') params.set('region', region);
-      if (year !== '全部') params.set('year', year);
-      params.set('sort', sort);
-
+      const params = new URLSearchParams({ page: targetPage.toString(), pageSize: ps.toString() });
+      if (q) params.set('q', q);
+      if (cat !== '全部') params.set('category', cat);
+      if (src !== '全部') params.set('source', src);
+      if (reg !== '全部') params.set('region', reg);
+      if (yr !== '全部') params.set('year', yr);
+      params.set('sort', s);
       const res = await fetch(`/api/search?${params}`);
       const data: SearchResponse = await res.json();
-      setInitialLoading(false);
-      setLoading(false);
-      // 如果当前页无数据但前几页有，说明服务器数据异常，保留已有内容避免白屏
-      if (!data.items || data.items.length === 0) {
-        if (pageRef.current > 1) {
-          console.warn('Page', targetPage, 'returned empty, keeping previous items');
-          return;
-        }
-      }
       setItems(data.items ?? []);
       setTotal(data.total ?? 0);
-    } catch (err) {
-      console.error('Fetch error:', err);
-      setLoading(false);
-    }
-  }, [query, category, source, region, year, sort, pageSize]);
+    } catch (err) { console.error('Fetch error:', err); }
+    finally { setLoading(false); }
+  }, []);
+
+  // 先同步 ref 再调用，永远读最新 state
+  useEffect(() => {
+    latestRef.current = { query, category, source, region, year, sort, pageSize };
+    fetchItems(1);
+  }, [category, source, region, year, sort, pageSize]); // eslint-line -- stable deps
+
 
   useEffect(() => { fetchItems(1); }, [category, source, region, year, sort, pageSize]);
 
@@ -332,7 +328,7 @@ export default function HomePage() {
             <span className="text-xs text-white/40 hidden sm:inline">每页</span>
             <div className="flex gap-1">
               {[30, 90, 150].map((s) => (
-                <button key={s} onClick={() => { setPageSize(s); fetchItems(1); }}
+                  <button key={s} onClick={() => { latestRef.current = { ...latestRef.current, pageSize: s }; setPageSize(s); }}
                   className={`px-3 py-1 rounded-full text-xs transition ${pageSize === s ? 'bg-pink-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{s}</button>
               ))}
             </div>
