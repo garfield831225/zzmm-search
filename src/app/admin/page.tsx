@@ -172,6 +172,9 @@ export default function AdminPage() {
           <a href="/admin/import" className="px-4 py-2 rounded-lg text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
             📥 导入
           </a>
+          <a href="/admin/pay-config" className="px-4 py-2 rounded-lg text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+            💰 付费配置
+          </a>
           <button onClick={() => setTab('match')}
             className={`px-4 py-2 rounded-lg text-sm ${tab === 'match' ? 'bg-violet-600' : 'bg-white/5 hover:bg-white/10'}`}>
             🔍 匹配

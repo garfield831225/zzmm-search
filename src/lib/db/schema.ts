@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, integer, serial } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean, integer, serial, numeric } from 'drizzle-orm/pg-core';
 
 // ============ 资源表 ============
 export const resources = pgTable('xx_resources', {
@@ -20,6 +20,9 @@ export const resources = pgTable('xx_resources', {
   approvedBy: text('approved_by'),
   approvedAt: timestamp('approved_at'),
   viewCount: integer('view_count').default(0),
+  // 2026-06-03 单资源付费
+  payType: text('pay_type').default('free'),         // 'free' | 'code'
+  codePrice: numeric('code_price', { precision: 10, scale: 2 }).default('0.00'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
@@ -94,6 +97,19 @@ export const activationCodes = pgTable('xx_activation_codes', {
   createdBy: text('created_by'),
   createdAt: timestamp('created_at').defaultNow(),
   expiresAt: timestamp('expires_at'),
+  // 2026-06-03 单资源解锁
+  codeType: text('code_type').default('unlock'),                  // 'unlock' = 单资源一次性
+  targetResourceId: integer('target_resource_id'),               // 解锁资源 id
+  priceAtIssue: numeric('price_at_issue', { precision: 10, scale: 2 }),  // 发码时价格
+});
+
+// ============ 用户解锁记录表 ============
+export const userUnlocks = pgTable('xx_user_unlocks', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id').notNull(),
+  resourceId: integer('resource_id').notNull(),
+  activationCodeId: integer('activation_code_id'),
+  unlockedAt: timestamp('unlocked_at').defaultNow(),
 });
 
 // ============ 支付记录表 ============

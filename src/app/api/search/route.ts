@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
+import jwt from 'jsonwebtoken';
 
 const SOURCE_KEY_MAP: Record<string, string> = {
   '115网盘': '115', '百度网盘': 'baidu', '阿里云盘': 'aliyun',
@@ -95,6 +96,7 @@ export async function GET(request: NextRequest) {
     // ─── Fetch page ─────────────────────────────────────────────────────────
     const dbRows = await sql(`
       SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
+             r.pay_type, r.code_price,
              COALESCE(c.release_date, r.created_at::text) as sort_date,
              ${dateWeight} as date_weight,
              CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb
@@ -139,6 +141,22 @@ export async function GET(request: NextRequest) {
     }
 
     // ─── Map results ────────────────────────────────────────────────────────
+    // 批量查用户已解锁的 resource_id 集合（用于 pay_type='code' 资源）
+    const userUnlockedIds = new Set<number>();
+    if (zone === 'film' && allIds.length > 0) {
+      try {
+        // 当前用户从 token 拿
+        const authHeader = request.headers.get('authorization');
+        if (authHeader?.startsWith('Bearer ')) {
+          const token = authHeader.replace('Bearer ', '');
+          const payload = jwt.verify(token, (process.env.JWT_SECRET || 'cLWhs2015')) as any;
+          const userId = String(payload.id);
+          const unlocked = await sql`SELECT resource_id FROM xx_user_unlocks WHERE user_id = ${userId} AND resource_id = ANY(${allIds})`;
+          unlocked.forEach((r: any) => userUnlockedIds.add(r.resource_id));
+        }
+      } catch { /* 未登录或无效 token，不算解锁 */ }
+    }
+
     const items = dbRows.map((item: any) => ({
       id: item.id,
       name: item.name,
@@ -152,6 +170,9 @@ export async function GET(request: NextRequest) {
       tags: item.tags ? (Array.isArray(item.tags) ? item.tags : []) : [],
       tmdbId: item.tmdb_id || null,
       viewCount: item.view_count || 0,
+      payType: item.pay_type || 'free',
+      codePrice: item.code_price ? Number(item.code_price) : 0,
+      unlocked: userUnlockedIds.has(item.id),
       tmdb: item.tmdb_id ? (tmdbMap.get(item.tmdb_id) || null) : null,
       musicCover: item.category === '音乐' ? (musicCoverMap.get(item.id) || null) : null,
       coverCache: !item.tmdb_id ? (coverCacheMap.get(item.id) || null) : null,
