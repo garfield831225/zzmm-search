@@ -75,8 +75,8 @@ export default function ActivatePage() {
               <span className="text-2xl">🎫</span>
             </div>
             <div>
-              <h1 className="text-xl font-bold">激活会员卡</h1>
-              <p className="text-sm text-white/40">输入卡密，延长会员有效期</p>
+              <h1 className="text-xl font-bold">资源激活码</h1>
+              <p className="text-sm text-white/40">8 位码 · 单资源一次性解锁</p>
             </div>
           </div>
 
@@ -88,8 +88,7 @@ export default function ActivatePage() {
             >
               <div className="text-6xl mb-4">🎉</div>
               <h2 className="text-2xl font-bold text-green-400 mb-2">激活成功！</h2>
-              <p className="text-white/60 mb-4">获得 <span className="text-violet-400 font-bold text-xl">+{bonusDays} 天</span></p>
-              <p className="text-sm text-white/40">会员有效期至：{newExpire}</p>
+              <p className="text-white/60 mb-4">已解锁资源：<br/><span className="text-violet-400 font-bold text-base">{bonusDays || '资源'}</span></p>
               <button
                 onClick={() => router.push('/')}
                 className="mt-6 px-6 py-3 bg-violet-600 rounded-xl hover:opacity-90 transition"
@@ -101,13 +100,14 @@ export default function ActivatePage() {
             <>
               <form onSubmit={handleActivate} className="space-y-5">
                 <div>
-                  <label className="block text-sm text-white/60 mb-2">会员卡密</label>
+                  <label className="block text-sm text-white/60 mb-2">资源激活码（8 位）</label>
                   <input
                     type="text"
                     value={code}
-                    onChange={(e) => setCode(e.target.value.toUpperCase())}
-                    placeholder="例如：ZM3K-9X7P-2N4Q"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-violet-500/50 font-mono tracking-wider text-center text-lg"
+                    onChange={(e) => setCode(e.target.value.toUpperCase().slice(0, 8))}
+                    placeholder="例如：ZM3K9X7P"
+                    maxLength={8}
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-violet-500/50 font-mono tracking-widest text-center text-lg"
                     required
                   />
                 </div>
@@ -120,7 +120,7 @@ export default function ActivatePage() {
 
                 <button
                   type="submit"
-                  disabled={loading || code.length < 10}
+                  disabled={loading || code.length !== 8}
                   className="w-full py-3 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl font-semibold hover:opacity-90 disabled:opacity-50 transition"
                 >
                   {loading ? '激活中...' : '立即激活'}
@@ -128,7 +128,10 @@ export default function ActivatePage() {
               </form>
 
               <div className="mt-6 text-center text-sm text-white/40">
-                没有卡密？联系客服购买
+                没有激活码？联系 HK 麦盘人微信 / 支付宝扫码购买
+              </div>
+              <div className="mt-2 text-center text-xs text-white/30">
+                提示：激活码绑定具体资源，可在资源详情页输入
               </div>
             </>
           )}

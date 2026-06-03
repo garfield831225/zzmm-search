@@ -21,51 +21,66 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '登录已过期' }, { status: 401 });
     }
 
-    const { code } = await req.json();
-    if (!code || code.length < 8) {
-      return NextResponse.json({ error: '卡密格式错误' }, { status: 400 });
+    const body = await req.json().catch(() => ({}));
+    const { code } = body;
+    if (!code || typeof code !== 'string' || !/^[A-Za-z0-9]{8}$/.test(code)) {
+      return NextResponse.json({ error: '激活码格式错误（必须 8 位大小写字母数字）' }, { status: 400 });
     }
 
     const sql = neon(process.env.DATABASE_URL || '');
 
-    // 查找卡密
-    const codes = await sql`SELECT id, days, batch_id FROM xx_activation_codes WHERE code = ${code} AND status = 'unused'`;
-    const codeRows = codes as any[];
+    // 2026-06-03 单资源激活码模式（已取代 VIP 体系）
+    // 流程：输码 → 自动解锁对应 target_resource_id 资源
+    const codes = await sql`
+      SELECT id, code, code_type, target_resource_id, is_used, used_by, used_at, expires_at
+      FROM xx_activation_codes
+      WHERE code = ${code}
+      LIMIT 1
+    `;
+    if (!codes[0]) {
+      return NextResponse.json({ error: '激活码无效' }, { status: 404 });
+    }
+    const c = codes[0] as any;
 
-    if (!codeRows.length) {
-      return NextResponse.json({ error: '卡密无效或已使用' }, { status: 400 });
+    if (c.code_type !== 'unlock') {
+      return NextResponse.json({ error: '该激活码不是资源解锁类型' }, { status: 400 });
+    }
+    if (c.is_used) {
+      return NextResponse.json({ error: '该激活码已被使用' }, { status: 409 });
+    }
+    if (c.expires_at && new Date(c.expires_at) < new Date()) {
+      return NextResponse.json({ error: '该激活码已过期' }, { status: 410 });
     }
 
-    const codeInfo = codeRows[0];
+    const userId = String(payload.id);
 
-    // 使用卡密
-    await sql`UPDATE xx_activation_codes SET status = 'used', used_by = ${payload.id}, used_at = NOW() WHERE id = ${codeInfo.id}`.catch(() => {});
-
-    // 更新用户过期时间
-    const currentUser = await sql`SELECT expire_at, user_group FROM xx_users WHERE id = ${payload.id}` as any[];
-    if (!currentUser.length) {
-      return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+    // 检查用户是否已解锁过此资源
+    const existing = await sql`
+      SELECT id FROM xx_user_unlocks
+      WHERE user_id = ${userId} AND resource_id = ${c.target_resource_id}
+    `;
+    if (existing[0]) {
+      return NextResponse.json({ error: '您已解锁过此资源' }, { status: 409 });
     }
 
-    const user = currentUser[0] as any;
-    const now = new Date();
-    let newExpire: Date;
-
-    if (user.expire_at && new Date(user.expire_at) > now) {
-      // 顺延
-      newExpire = new Date(new Date(user.expire_at).getTime() + codeInfo.days * 86400000);
-    } else {
-      // 从今天开始
-      newExpire = new Date(now.getTime() + codeInfo.days * 86400000);
+    // 验证资源 pay_type='code'
+    const resources = await sql`SELECT id, name FROM xx_resources WHERE id = ${c.target_resource_id}`;
+    if (!resources[0]) {
+      return NextResponse.json({ error: '资源不存在' }, { status: 404 });
     }
 
-    await sql`UPDATE xx_users SET expire_at = ${newExpire.toISOString()}, user_group = 'member', updated_at = NOW() WHERE id = ${payload.id}`;
+    // 事务：mark 码已用 + 写解锁记录
+    try {
+      await sql`UPDATE xx_activation_codes SET is_used = true, used_by = ${userId}, used_at = NOW() WHERE id = ${c.id}`;
+      await sql`INSERT INTO xx_user_unlocks (user_id, resource_id, activation_code_id, unlocked_at) VALUES (${userId}, ${c.target_resource_id}, ${c.id}, NOW())`;
+    } catch (e: any) {
+      return NextResponse.json({ error: '解锁失败: ' + e.message }, { status: 500 });
+    }
 
     return NextResponse.json({
       success: true,
-      bonus_days: codeInfo.days,
-      new_expire_at: newExpire.toISOString().slice(0, 10),
-      new_group: 'member',
+      message: '激活成功！',
+      resource: { id: resources[0].id, name: resources[0].name },
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
