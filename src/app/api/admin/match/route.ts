@@ -263,15 +263,30 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, 
     }
     if (candidates.length === 0) return null;
 
-    // 第一优先：按 category 偏好状态
+    // 2026-06-03 修：必须 1:1 严格匹配（length 相等 + norm 完全相等）才返回
+    // 修复「情书」被错配到「给阿嫲的情书」（子串命中但长度差 3 倍）
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '');
+    const cn = norm(name);
+    // 第一优先：按 category 偏好状态 + 1:1 匹配
     for (const c of candidates) {
-      if (isPreferred(category, type, c.status)) {
+      if (!isPreferred(category, type, c.status)) continue;
+      const t = c.result.title || c.result.name || '';
+      if (!t) continue;
+      const tn = norm(t);
+      if (tn.length !== cn.length) continue;  // 长度必须相等
+      if (tn === cn) {
         return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
       }
     }
-    // 第二优先：其他允许的状态（不是黑名单但也不是偏好）
+    // 第二优先：其他允许的状态 + 1:1 匹配
     for (const c of candidates) {
-      return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
+      const t = c.result.title || c.result.name || '';
+      if (!t) continue;
+      const tn = norm(t);
+      if (tn.length !== cn.length) continue;
+      if (tn === cn) {
+        return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
+      }
     }
     return null;
   } catch { return null; }
