@@ -92,12 +92,14 @@ function cleanFolderName(raw: string): { cleanName: string; year: string; season
     season = seasonMatch[1] ? chineseToNumber(seasonMatch[1]) : parseInt(seasonMatch[2]);
   }
 
-  // 2026-06-03: 在主流程入口就剥掉「第X季」「Sxx」字样，避免干扰 TMDB 搜索
+  // 2026-06-03: 在主流程入口就剥掉「第X季」「Sxx」「(YYYY)」字样，避免干扰 TMDB 搜索
   // 例：「乘风第七季」→ 「乘风」,「开始推理吧 第四季」→ 「开始推理吧」
+  // 例：「老友记 第一季（1994）」→ 「老友记」（不剥 year 不然搜不到 Friends 1994）
   raw = raw
     .replace(/第[一二三四五六七八九十\d]+季/g, '')
     .replace(/S\d{1,2}(?=[^\d]|$)/gi, '')
     .replace(/Season\s*\d{1,2}/gi, '')
+    .replace(/[（(]\s*\d{4}\s*[)）]/g, '')
     .trim();
 
   // A1: 片名.规格（排除片名.年份）
