@@ -394,9 +394,36 @@ export default function HomePage() {
 
         {/* Grid */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
-          {items.map((item) => (
+          {(() => {
+            // 2026-06-03: 连载/剧集/动漫/综艺 按 category + tmdb_id 折叠
+            // 显示最新一条 + "+N 集"徽章
+            const groupableCats = ['连载', '剧集', '动漫', '综艺'];
+            const seen = new Set<string>();
+            const displayItems: Array<ResourceItem & { _extraCount?: number; _allIds?: number[] }> = [];
+            for (const item of items) {
+              if (item.tmdbId && groupableCats.includes(item.category)) {
+                const key = `${item.category}:${item.tmdbId}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                // 同 tmdb 同 category 的其他资源
+                const group = items.filter(i =>
+                  i.tmdbId === item.tmdbId && i.category === item.category
+                );
+                const extraCount = group.length - 1;
+                const allIds = group.map(i => i.id);
+                displayItems.push({ ...item, _extraCount: extraCount, _allIds: allIds });
+              } else {
+                displayItems.push(item);
+              }
+            }
+            return displayItems;
+          })().map((item) => {
+            const extraCount = (item as any)._extraCount || 0;
+            const allIds = (item as any)._allIds || [item.id];
+            return (
             <motion.div key={item.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              className="group cursor-pointer" onClick={() => handleItemClick(item)}>
+              className="group cursor-pointer" onClick={() => handleItemClick(item)}
+            >
               {/* Poster */}
               <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-3">
                 {item.tmdb?.poster_path ? (
@@ -422,6 +449,12 @@ export default function HomePage() {
                   {item.tags?.slice(0, 2).map((tag) => (
                     <span key={tag} className="px-2 py-0.5 bg-violet-600/80 text-xs rounded">{tag}</span>
                   ))}
+                  {/* 2026-06-03: 同 TMDB 多集徽章 */}
+                  {extraCount > 0 && (
+                    <span className="px-2 py-0.5 bg-amber-500/90 text-black text-xs rounded font-medium">
+                      +{extraCount} 集
+                    </span>
+                  )}
                 </div>
 
                 {/* Source Badge */}
@@ -461,7 +494,8 @@ export default function HomePage() {
                 </div>
               </div>
             </motion.div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Pagination */}
