@@ -9,8 +9,7 @@ export default function ActivatePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
-  const [bonusDays, setBonusDays] = useState(0);
-  const [newExpire, setNewExpire] = useState('');
+  const [unlockedResource, setUnlockedResource] = useState<{ id: number; name: string } | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -44,17 +43,7 @@ export default function ActivatePage() {
       }
 
       setSuccess(true);
-      setBonusDays(data.bonus_days);
-      setNewExpire(data.new_expire_at);
-
-      // 更新本地存储的用户信息
-      const userStr = localStorage.getItem('user');
-      if (userStr) {
-        const user = JSON.parse(userStr);
-        user.expire_at = data.new_expire_at;
-        user.group = data.new_group;
-        localStorage.setItem('user', JSON.stringify(user));
-      }
+      setUnlockedResource(data.resource || { id: 0, name: data.resource_name || '已解锁资源' });
     } catch {
       setError('网络错误，请重试');
     } finally {
@@ -88,7 +77,19 @@ export default function ActivatePage() {
             >
               <div className="text-6xl mb-4">🎉</div>
               <h2 className="text-2xl font-bold text-green-400 mb-2">激活成功！</h2>
-              <p className="text-white/60 mb-4">已解锁资源：<br/><span className="text-violet-400 font-bold text-base">{bonusDays || '资源'}</span></p>
+              <p className="text-white/60 mb-4">已解锁资源：<br/><span className="text-violet-400 font-bold text-base">{unlockedResource?.name || '已解锁资源'}</span></p>
+              <button
+                onClick={() => unlockedResource?.id ? router.push(`/?unlock=${unlockedResource.id}`) : router.push('/')}
+                className="mt-3 mx-1 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-sm transition"
+              >
+                继续浏览
+              </button>
+              <button
+                onClick={() => router.push(`/resource/${unlockedResource?.id}`)}
+                className="mt-3 mx-1 px-6 py-3 bg-violet-600 rounded-xl hover:opacity-90 transition"
+              >
+                查看资源详情
+              </button>
               <button
                 onClick={() => router.push('/')}
                 className="mt-6 px-6 py-3 bg-violet-600 rounded-xl hover:opacity-90 transition"
@@ -128,9 +129,16 @@ export default function ActivatePage() {
               </form>
 
               <div className="mt-6 text-center text-sm text-white/40">
-                没有激活码？联系 HK 麦盘人微信 / 支付宝扫码购买
+                没有激活码？
               </div>
-              <div className="mt-2 text-center text-xs text-white/30">
+              <button
+                onClick={() => router.push('/shop')}
+                className="mt-3 w-full py-3 bg-gradient-to-r from-orange-500 to-amber-500 rounded-xl font-semibold hover:opacity-90 transition flex items-center justify-center gap-2"
+              >
+                <span>🛒</span>
+                <span>立即购买</span>
+              </button>
+              <div className="mt-4 text-center text-xs text-white/30">
                 提示：激活码绑定具体资源，可在资源详情页输入
               </div>
             </>

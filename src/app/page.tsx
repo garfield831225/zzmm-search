@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
-import { Music, Library, LogOut, CreditCard } from 'lucide-react';
+import { Music, Library, LogOut, CreditCard, ShoppingCart } from 'lucide-react';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
@@ -304,7 +304,10 @@ export default function HomePage() {
                     <span>文档资源库</span>
                   </Link>
                   <button onClick={handleLogout} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">退出</button>
-                  <Link href="/activate" className="px-3 py-1.5 bg-pink-600/50 hover:bg-pink-600 rounded-lg text-sm transition">续费</Link>
+                  <Link href="/activate" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/30 hover:bg-pink-600/60 rounded-lg text-sm transition-all duration-200 text-pink-200 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
+                    <ShoppingCart size={14} className="transition-transform group-hover:scale-110" />
+                    <span>购物车</span>
+                  </Link>
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
@@ -315,6 +318,10 @@ export default function HomePage() {
                   <Link href="/library" className="group flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/20 hover:bg-violet-600/50 rounded-lg text-sm transition-all duration-200 text-violet-300 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105">
                     <Library size={14} className="transition-transform group-hover:scale-110" />
                     <span>文档资源库</span>
+                  </Link>
+                  <Link href="/activate" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/30 hover:bg-pink-600/60 rounded-lg text-sm transition-all duration-200 text-pink-200 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
+                    <ShoppingCart size={14} className="transition-transform group-hover:scale-110" />
+                    <span>购物车</span>
                   </Link>
                   <Link href="/login" className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">登录 / 注册</Link>
                 </div>
