@@ -21,14 +21,14 @@ export async function GET(req: NextRequest) {
         FROM xx_resources r
         LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
         WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id NOT IN ('NOMATCH', 'GARBLED')
-        ${category ? sql`AND r.category = ${category}` : sql``}
+        ${category ? sql`AND r.category = ${category}` : sql`AND 1=1`}
         ORDER BY r.updated_at DESC
         LIMIT ${pageSize} OFFSET ${offset}
       ` as any[];
       const cnt = await sql`
         SELECT COUNT(*)::int as cnt FROM xx_resources
         WHERE tmdb_id IS NOT NULL AND tmdb_id != '' AND tmdb_id NOT IN ('NOMATCH', 'GARBLED')
-        ${category ? sql`AND category = ${category}` : sql``}
+        ${category ? sql`AND category = ${category}` : sql`AND 1=1`}
       `.catch(() => [{cnt:0}]) as any[];
       return NextResponse.json({ tab, items: rows, total: cnt[0]?.cnt, page, pageSize });
     } else {
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
         FROM xx_resources
         WHERE (tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id IN ('NOMATCH', 'GARBLED'))
           AND status = 'active'
-        ${category ? sql`AND category = ${category}` : sql``}
+        ${category ? sql`AND category = ${category}` : sql`AND 1=1`}
         ORDER BY created_at DESC
         LIMIT ${pageSize} OFFSET ${offset}
       ` as any[];
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
         SELECT COUNT(*)::int as cnt FROM xx_resources
         WHERE (tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id IN ('NOMATCH', 'GARBLED'))
           AND status = 'active'
-        ${category ? sql`AND category = ${category}` : sql``}
+        ${category ? sql`AND category = ${category}` : sql`AND 1=1`}
       `.catch(() => [{cnt:0}]) as any[];
       return NextResponse.json({ tab, items: rows, total: cnt[0]?.cnt, page, pageSize });
     }
