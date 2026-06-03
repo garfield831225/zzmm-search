@@ -45,8 +45,8 @@ export async function GET(req: NextRequest) {
     LEFT JOIN xx_resources r ON u.resource_id = r.id
     LEFT JOIN xx_activation_codes ac ON u.activation_code_id = ac.id
     WHERE 1=1
-      ${userId ? sql`AND u.user_id = ${userId}` : sql``}
-      ${resourceId ? sql`AND u.resource_id = ${parseInt(resourceId)}` : sql``}
+      ${userId ? sql`AND u.user_id = ${userId}` : sql`AND 1=1`}
+      ${resourceId ? sql`AND u.resource_id = ${parseInt(resourceId)}` : sql`AND 1=1`}
     ORDER BY u.id DESC
     LIMIT ${pageSize} OFFSET ${offset}
   `;
@@ -54,8 +54,8 @@ export async function GET(req: NextRequest) {
   const cnt = await sql`
     SELECT COUNT(*)::int as cnt FROM xx_user_unlocks
     WHERE 1=1
-      ${userId ? sql`AND user_id = ${userId}` : sql``}
-      ${resourceId ? sql`AND resource_id = ${parseInt(resourceId)}` : sql``}
+      ${userId ? sql`AND user_id = ${userId}` : sql`AND 1=1`}
+      ${resourceId ? sql`AND resource_id = ${parseInt(resourceId)}` : sql`AND 1=1`}
   `;
 
   return NextResponse.json({

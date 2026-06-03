@@ -124,20 +124,26 @@ export async function GET(req: NextRequest) {
     FROM xx_activation_codes ac
     LEFT JOIN xx_resources r ON ac.target_resource_id = r.id
     WHERE 1=1
-      ${codeType ? sql`AND ac.code_type = ${codeType}` : sql``}
-      ${targetId ? sql`AND ac.target_resource_id = ${parseInt(targetId)}` : sql``}
+      ${codeType ? sql`AND ac.code_type = ${codeType}` : sql`AND 1=1`}
+      ${targetId ? sql`AND ac.target_resource_id = ${parseInt(targetId)}` : sql`AND 1=1`}
     ORDER BY ac.id DESC
     LIMIT ${pageSize} OFFSET ${offset}
   `;
 
+  const totalCnt = await sql`
+    SELECT COUNT(*)::int as cnt FROM xx_activation_codes ac
+    WHERE 1=1
+    ${codeType ? sql`AND ac.code_type = ${codeType}` : sql`AND 1=1`} ${targetId ? sql`AND ac.target_resource_id = ${parseInt(targetId)}` : sql`AND 1=1`}
+  `;
+
   const cnt = await sql`
     SELECT COUNT(*)::int as cnt FROM xx_activation_codes ac
-    WHERE 1=1 ${codeType ? sql`AND ac.code_type = ${codeType}` : sql``} ${targetId ? sql`AND ac.target_resource_id = ${parseInt(targetId)}` : sql``}
+    WHERE 1=1 ${codeType ? sql`AND ac.code_type = ${codeType}` : sql`AND 1=1`} ${targetId ? sql`AND ac.target_resource_id = ${parseInt(targetId)}` : sql`AND 1=1`}
   `;
 
   return NextResponse.json({
     items: rows,
-    total: cnt[0]?.cnt,
+    total: totalCnt[0]?.cnt,
     page,
     pageSize,
   });
