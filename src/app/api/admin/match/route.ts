@@ -92,6 +92,14 @@ function cleanFolderName(raw: string): { cleanName: string; year: string; season
     season = seasonMatch[1] ? chineseToNumber(seasonMatch[1]) : parseInt(seasonMatch[2]);
   }
 
+  // 2026-06-03: 在主流程入口就剥掉「第X季」「Sxx」字样，避免干扰 TMDB 搜索
+  // 例：「乘风第七季」→ 「乘风」,「开始推理吧 第四季」→ 「开始推理吧」
+  raw = raw
+    .replace(/第[一二三四五六七八九十\d]+季/g, '')
+    .replace(/S\d{1,2}(?=[^\d]|$)/gi, '')
+    .replace(/Season\s*\d{1,2}/gi, '')
+    .trim();
+
   // A1: 片名.规格（排除片名.年份）
   const firstDot = raw.indexOf('.');
   if (firstDot > 0 && firstDot < 20) {
@@ -196,6 +204,8 @@ function cleanFolderName(raw: string): { cleanName: string; year: string; season
     .replace(/\b(Bluray|BluRay|BDMV|WEB-DL|REMUX|DIY|CEE|美版|日版|港版|欧版|韩版|台版)\b/gi, ' ')
     .replace(/\./g, ' ').replace(/\s+/g, ' ').trim();
   if (t.length < 2) t = raw;
+  // 2026-06-03 兜底再剥一次「第X季」（防止前面策略未覆盖到）
+  t = t.replace(/第[一二三四五六七八九十\d]+季/g, '').replace(/\s+/g, ' ').trim();
   return { cleanName: t, year, season };
 }
 

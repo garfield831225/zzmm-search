@@ -19,17 +19,26 @@ export async function GET(req: Request) {
     const cleaned = await sql`DELETE FROM xx_tmdb_cache WHERE cached_at < NOW() - INTERVAL '7 days'`.catch(() => []);
     console.log('cleaned old tmdb cache');
 
-    // 统计各分类待匹配数量
+    // 统计各分类待匹配数量（包含 NULL/空/NOMATCH/GARBLED）
     const stats = await sql(`
       SELECT category, COUNT(*) as cnt FROM xx_resources
-      WHERE tmdb_id IS NULL AND status = 'active' AND name IS NOT NULL AND LENGTH(name) > 2
+      WHERE (tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id IN ('NOMATCH', 'GARBLED'))
+        AND status = 'active' AND name IS NOT NULL AND LENGTH(name) > 2
       GROUP BY category ORDER BY cnt DESC
     `) as any[];
 
-    const total = await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE tmdb_id IS NULL AND status = 'active'`) as any[];
+    const total = await sql(`
+      SELECT COUNT(*) as cnt FROM xx_resources
+      WHERE (tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id IN ('NOMATCH', 'GARBLED'))
+        AND status = 'active'
+    `) as any[];
 
-    // 搜索结果统计
-    const searchTotal = await sql(`SELECT COUNT(*) as cnt FROM xx_resources WHERE tmdb_id IS NOT NULL AND status = 'active'`) as any[];
+    // 已匹配 = 有真实 tmdb_id（排除占位符）
+    const searchTotal = await sql(`
+      SELECT COUNT(*) as cnt FROM xx_resources
+      WHERE tmdb_id IS NOT NULL AND tmdb_id != '' AND tmdb_id NOT IN ('NOMATCH', 'GARBLED')
+        AND status = 'active'
+    `) as any[];
 
     // 资源来源统计
     const sourceStats = await sql(`
@@ -40,7 +49,8 @@ export async function GET(req: Request) {
     // 最新导入的资源（未匹配）
     const recent = await sql(`
       SELECT id, name, category, source, created_at FROM xx_resources
-      WHERE tmdb_id IS NULL AND status = 'active'
+      WHERE (tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id IN ('NOMATCH', 'GARBLED'))
+        AND status = 'active'
       ORDER BY created_at DESC LIMIT 10
     `) as any[];
 
