@@ -55,6 +55,10 @@ interface ResourceItem {
   tmdb: TmdbInfo | null;
   isCurrent?: boolean;
   credits?: { director: CreditPerson[]; cast: CreditPerson[] };
+  // 2026-06-03 单资源付费
+  payType?: 'free' | 'code';
+  codePrice?: number;
+  unlocked?: boolean;
 }
 
 interface SearchResponse {
@@ -100,6 +104,11 @@ export default function HomePage() {
   const [mounted, setMounted] = useState(false);
   const [downloadToasts, setDownloadToasts] = useState<DownloadToast[]>([]);
   const [copyToasts, setCopyToasts] = useState<DownloadToast[]>([]);
+  // 2026-06-03 单资源付费 unlock modal
+  const [unlockItem, setUnlockItem] = useState<ResourceItem | null>(null);
+  const [unlockCode, setUnlockCode] = useState('');
+  const [unlockLoading, setUnlockLoading] = useState(false);
+  const [unlockError, setUnlockError] = useState('');
   let toastCounter = 0;
   let copyToastCounter = 0;
 
@@ -195,6 +204,54 @@ export default function HomePage() {
   useEffect(() => { fetchItems(1); }, [category, source, region, year, sort, pageSize]);
 
   const handleLogout = () => { localStorage.removeItem('token'); localStorage.removeItem('user'); setUser(null); };
+
+  // 2026-06-03 单资源付费 - 解锁处理
+  const handleUnlock = async () => {
+    if (!unlockItem || !unlockCode.trim()) {
+      setUnlockError('请输入激活码');
+      return;
+    }
+    if (!user) {
+      setUnlockError('请先登录');
+      return;
+    }
+    setUnlockLoading(true);
+    setUnlockError('');
+    try {
+      const token = localStorage.getItem('token') || '';
+      const r = await fetch('/api/resources/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ code: unlockCode.trim(), resource_id: unlockItem.id }),
+      });
+      const data = await r.json();
+      if (data.success) {
+        // 更新本地状态
+        setItems(prev => prev.map(i => i.id === unlockItem.id ? { ...i, unlocked: true } : i));
+        if (selectedItem?.id === unlockItem.id) {
+          setSelectedItem(prev => prev ? { ...prev, unlocked: true } : prev);
+        }
+        setUnlockItem(null);
+        setUnlockCode('');
+        addToast('success', `🎉 解锁成功: ${data.resource.name}`);
+      } else {
+        setUnlockError(data.error || '解锁失败');
+      }
+    } catch (e: any) {
+      setUnlockError('网络错误: ' + e.message);
+    }
+    setUnlockLoading(false);
+  };
+
+  const openUnlock = (item: ResourceItem) => {
+    if (!user) {
+      addToast('error', '请先登录');
+      return;
+    }
+    setUnlockItem(item);
+    setUnlockCode('');
+    setUnlockError('');
+  };
 
   const handleItemClick = async (item: ResourceItem) => {
     setSelectedItem(item);
@@ -368,8 +425,19 @@ export default function HomePage() {
                 </div>
 
                 {/* Source Badge */}
-                <div className="absolute top-2 right-2">
+                <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
                   <span className="px-2 py-0.5 bg-pink-600/80 text-xs rounded">{item.source}</span>
+                  {/* 2026-06-03 单资源付费标记 */}
+                  {item.payType === 'code' && !item.unlocked && (
+                    <span className="px-2 py-0.5 bg-yellow-500/90 text-black text-xs rounded font-medium">
+                      ¥{item.codePrice || 0} 解锁
+                    </span>
+                  )}
+                  {item.payType === 'code' && item.unlocked && (
+                    <span className="px-2 py-0.5 bg-green-500/90 text-white text-xs rounded font-medium">
+                      ✓ 已解锁
+                    </span>
+                  )}
                 </div>
 
                 {/* Overlay + Action */}
@@ -592,6 +660,28 @@ export default function HomePage() {
                           <span className="px-3 py-1 bg-violet-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">🔗 打开</span>
                         </button>
                       )}
+
+                      {/* 2026-06-03 单资源付费 - 解锁按钮 */}
+                      {selectedItem.payType === 'code' && !selectedItem.unlocked && (
+                        <div className="mt-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-xl">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-medium text-yellow-300">🔒 此资源需要激活码</div>
+                              <div className="text-xs text-white/60 mt-1">起步价 ¥{selectedItem.codePrice || 0} · 8 位激活码</div>
+                            </div>
+                            <button onClick={() => openUnlock(selectedItem)}
+                              className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-sm font-medium shrink-0">
+                              输入激活码
+                            </button>
+                          </div>
+                          <div className="text-xs text-white/40 mt-2">购买联系：HK 麦盘人微信 / 支付宝扫码</div>
+                        </div>
+                      )}
+                      {selectedItem.payType === 'code' && selectedItem.unlocked && (
+                        <div className="mt-3 p-2 bg-green-500/10 border border-green-500/20 rounded-lg text-sm text-green-300 flex items-center gap-2">
+                          ✓ 您已解锁此资源
+                        </div>
+                      )}
                     </div>
 
                     {relatedItems.length > 0 && tmdbType === 'tv' ? (
@@ -711,6 +801,61 @@ export default function HomePage() {
           ))}
         </AnimatePresence>
       </div>
+
+      {/* 2026-06-03 单资源付费 unlock 弹窗 */}
+      {unlockItem && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-[60]"
+          onClick={() => !unlockLoading && setUnlockItem(null)}>
+          <div className="bg-[#12121a] rounded-2xl p-6 w-full max-w-md border border-yellow-500/30"
+            onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-2xl">🔒</span>
+              <h3 className="text-lg font-semibold">解锁资源</h3>
+              <button onClick={() => !unlockLoading && setUnlockItem(null)}
+                className="ml-auto p-1 hover:bg-white/10 rounded text-white/40 hover:text-white">✕</button>
+            </div>
+            <div className="mb-4">
+              <div className="text-sm text-white/80 font-medium truncate">{unlockItem.name}</div>
+              <div className="flex items-center gap-2 mt-2">
+                <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-300 rounded text-xs">付费资源</span>
+                <span className="text-yellow-300 font-bold">¥{unlockItem.codePrice || 0}</span>
+                <span className="text-xs text-white/40">{unlockItem.category} · #{unlockItem.id}</span>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-white/60 mb-1.5">激活码（8 位大小写字母数字）</label>
+                <input
+                  value={unlockCode}
+                  onChange={e => setUnlockCode(e.target.value.toUpperCase().slice(0, 8))}
+                  onKeyDown={e => e.key === 'Enter' && handleUnlock()}
+                  placeholder="如 A3B7X9K2"
+                  maxLength={8}
+                  className="w-full bg-black/40 border border-white/20 rounded-lg px-4 py-3 text-white font-mono text-lg tracking-widest uppercase placeholder-white/20"
+                  autoFocus
+                  disabled={unlockLoading}
+                />
+              </div>
+              {unlockError && (
+                <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                  ✕ {unlockError}
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2 mt-6 justify-end">
+              <button onClick={() => setUnlockItem(null)} disabled={unlockLoading}
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm disabled:opacity-30">取消</button>
+              <button onClick={handleUnlock} disabled={unlockLoading || unlockCode.length !== 8}
+                className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-sm font-medium disabled:opacity-30">
+                {unlockLoading ? '解锁中...' : '🔓 解锁'}
+              </button>
+            </div>
+            <div className="mt-4 text-xs text-white/40 text-center">
+              购买激活码联系：HK 麦盘人微信 / 支付宝扫码
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
