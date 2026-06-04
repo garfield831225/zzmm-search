@@ -29,6 +29,47 @@ const REGION_CODES: Record<string, string[]> = {
 
 function esc(s: string) { return s.replace(/'/g, "''"); }
 
+// 异步 fetch TMDB 详情并写 cache（search 路由调用，fire-and-forget）
+async function fetchAndCacheTmdb(tmdbId: string): Promise<any | null> {
+  const sql = neon(process.env.DATABASE_URL || '');
+  const key = process.env.TMDB_API_KEY;
+  if (!key) return null;
+  // 先试 tv 再试 movie
+  for (const t of ['tv', 'movie']) {
+    try {
+      const r = await fetch(`https://api.themoviedb.org/3/${t}/${tmdbId}?api_key=${key}&language=zh-CN`, {
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!r.ok) continue;
+      const d = await r.json();
+      if (!d?.id) continue;
+      const title = d.title || d.name;
+      const orig = d.original_title || d.original_name;
+      const countries = (d.production_countries || []).map((c: any) => c.iso_3166_1).filter(Boolean);
+      const genres = (d.genres || []).map((g: any) => g.name);
+      const release = d.release_date || d.first_air_date || null;
+      await sql`
+        INSERT INTO xx_tmdb_cache (tmdb_id, tmdb_type, title, original_title, overview, poster_path, vote_average, vote_count, release_date, status, tagline, genres, origin_country, cached_at)
+        VALUES (
+          ${tmdbId}, ${t}, ${title}, ${orig}, ${d.overview || null},
+          ${d.poster_path || ''}, ${d.vote_average || 0}, ${d.vote_count || 0},
+          ${release}, ${d.status || null}, ${d.tagline || null},
+          ${genres}::text[], ${countries.join(',')}, NOW()
+        )
+        ON CONFLICT (tmdb_id) DO UPDATE SET
+          title = EXCLUDED.title, original_title = EXCLUDED.original_title,
+          overview = EXCLUDED.overview, poster_path = EXCLUDED.poster_path,
+          vote_average = EXCLUDED.vote_average, vote_count = EXCLUDED.vote_count,
+          release_date = EXCLUDED.release_date, status = EXCLUDED.status,
+          tagline = EXCLUDED.tagline, genres = EXCLUDED.genres,
+          origin_country = EXCLUDED.origin_country, cached_at = NOW()
+      `;
+      return d;
+    } catch { continue; }
+  }
+  return null;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const sql = neon(process.env.DATABASE_URL || '');
@@ -115,9 +156,23 @@ export async function GET(request: NextRequest) {
     });
 
     let tmdbMap = new Map<string, any>();
+    const missingTmdbIds: string[] = [];
     if (allTmdbIds.length > 0) {
       const ids = await sql(`SELECT * FROM xx_tmdb_cache WHERE tmdb_id IN (${allTmdbIds.map(id => `'${esc(id)}'`).join(',')})`);
       tmdbMap = new Map((ids || []).map((info: any) => [info?.tmdb_id, info]));
+      // 找没 cache 的 tmdb_id，后台异步 fetch 写 cache（不阻塞主返回）
+      allTmdbIds.forEach(id => { if (!tmdbMap.has(id)) missingTmdbIds.push(id); });
+    }
+
+    // 异步补 missing cache（fire-and-forget，用户刷新就有了）
+    if (missingTmdbIds.length > 0 && process.env.TMDB_API_KEY) {
+      // 限流：一次最多补 5 个，避免 TMDB rate limit
+      const toFetch = missingTmdbIds.slice(0, 5);
+      toFetch.forEach(tmdbId => {
+        fetchAndCacheTmdb(tmdbId).catch(() => {}).then(info => {
+          if (info) tmdbMap.set(tmdbId, info);
+        });
+      });
     }
 
     // ─── Batch music/cover/sports ──────────────────────────────────────────
