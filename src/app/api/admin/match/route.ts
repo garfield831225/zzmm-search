@@ -432,7 +432,7 @@ export async function GET(req: Request) {
     const rows = await sql`
       SELECT id, name, link, category, source, sub_type
       FROM xx_resources
-      WHERE tmdb_id IS NULL
+      WHERE (tmdb_id IS NULL OR tmdb_id = 'NOMATCH')
         AND status = 'active'
         AND name IS NOT NULL
         AND LENGTH(name) > 2
