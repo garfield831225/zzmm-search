@@ -212,27 +212,42 @@ export async function GET(request: NextRequest) {
       } catch { /* 未登录或无效 token，不算解锁 */ }
     }
 
-    const items = dbRows.map((item: any) => ({
-      id: item.id,
-      name: item.name,
-      link: item.link || '',
-      linkCode: item.link_code || '',
-      source: SOURCE_DISPLAY_MAP[item.source] || item.source || '',
-      sourceKey: item.source || '',
-      category: item.category || '',
-      size: item.size || '',
-      type: item.type || '',
-      tags: item.tags ? (Array.isArray(item.tags) ? item.tags : []) : [],
-      tmdbId: item.tmdb_id || null,
-      viewCount: item.view_count || 0,
-      payType: item.pay_type || 'free',
-      codePrice: item.code_price ? Number(item.code_price) : 0,
-      unlocked: userUnlockedIds.has(item.id),
-      tmdb: item.tmdb_id ? (tmdbMap.get(item.tmdb_id) || null) : null,
-      musicCover: item.category === '音乐' ? (musicCoverMap.get(item.id) || null) : null,
-      coverCache: !item.tmdb_id ? (coverCacheMap.get(item.id) || null) : null,
-      sportsCover: item.category === '体育' ? (sportsCoverMap.get(item.id) || null) : null,
-    }));
+    // 类别 → 期望的 cache.tmdb_type（不匹配则清空 tmdb，不显示海报）
+    const TV_CATS_FILTER = new Set(['连载', '剧集', '动漫', '综艺', '少儿频道', '纪录片']);
+    const MOVIE_CATS_FILTER = new Set(['电影', '华语电影', '外语电影', '动画电影', '演唱会', 'REMUX', '系列电影']);
+    const expectedType = (cat: string): 'tv' | 'movie' | null => {
+      if (TV_CATS_FILTER.has(cat)) return 'tv';
+      if (MOVIE_CATS_FILTER.has(cat)) return 'movie';
+      return null; // 原盘/合集/音乐/体育等
+    };
+
+    const items = dbRows.map((item: any) => {
+      // 类别错配过滤：category 要求 tv，但 cache 是 movie（或反之）→ 不返回 tmdb 字段
+      const cacheInfo = item.tmdb_id ? tmdbMap.get(item.tmdb_id) : null;
+      const exp = expectedType(item.category);
+      const tmdbOk = !cacheInfo || !exp || cacheInfo.tmdb_type === exp;
+      return {
+        id: item.id,
+        name: item.name,
+        link: item.link || '',
+        linkCode: item.link_code || '',
+        source: SOURCE_DISPLAY_MAP[item.source] || item.source || '',
+        sourceKey: item.source || '',
+        category: item.category || '',
+        size: item.size || '',
+        type: item.type || '',
+        tags: item.tags ? (Array.isArray(item.tags) ? item.tags : []) : [],
+        tmdbId: tmdbOk ? (item.tmdb_id || null) : null,
+        viewCount: item.view_count || 0,
+        payType: item.pay_type || 'free',
+        codePrice: item.code_price ? Number(item.code_price) : 0,
+        unlocked: userUnlockedIds.has(item.id),
+        tmdb: tmdbOk && item.tmdb_id ? (tmdbMap.get(item.tmdb_id) || null) : null,
+        musicCover: item.category === '音乐' ? (musicCoverMap.get(item.id) || null) : null,
+        coverCache: !item.tmdb_id ? (coverCacheMap.get(item.id) || null) : null,
+        sportsCover: item.category === '体育' ? (sportsCoverMap.get(item.id) || null) : null,
+      };
+    });
 
     return NextResponse.json({
       total,
