@@ -150,12 +150,23 @@ export default function LibraryPage() {
               <div className="text-xs text-gray-500 truncate">{SOURCE_DISPLAY_MAP[item.source] || item.source}</div>
               <div className="text-xs text-gray-400">{item.size || '—'}</div>
               <div>
-                <button
-                  onClick={() => isMagnetOrEd2k(item.link) ? handleCopy(item.link) : handleCopy(item.link)}
-                  className="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs text-white font-medium transition opacity-0 group-hover:opacity-100 whitespace-nowrap"
-                >
-                  📋 复制链接
-                </button>
+                {isMagnetOrEd2k(item.link) ? (
+                  <button
+                    onClick={() => handleCopy(item.link)}
+                    className="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs text-white font-medium transition whitespace-nowrap"
+                  >
+                    📋 复制
+                  </button>
+                ) : (
+                  <a
+                    href={item.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs text-white font-medium transition whitespace-nowrap"
+                  >
+                    🔗 打开
+                  </a>
+                )}
               </div>
             </div>
           ))}
