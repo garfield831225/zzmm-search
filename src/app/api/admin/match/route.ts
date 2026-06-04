@@ -447,6 +447,7 @@ export async function GET(req: Request) {
               '\\[[^\\]]*\\]', '', 'g') AS core
           FROM xx_resources r
           WHERE r.status = 'active' AND r.tmdb_id = 'NOMATCH'
+          LIMIT ${batchSize}
         ),
         normed AS (
           SELECT id, LOWER(regexp_replace(core, '[^[:alnum:][:space:]]', '', 'g')) AS core_norm
@@ -473,6 +474,7 @@ export async function GET(req: Request) {
       return NextResponse.json({
         done: true, recover: true,
         recovered: recovery.length,
+        batchSize,
       });
     }
 
