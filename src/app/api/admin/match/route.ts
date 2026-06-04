@@ -421,7 +421,14 @@ async function cacheIt(r: { id: string; tmdb_type: 'movie' | 'tv'; poster: strin
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const key = searchParams.get('key');
-  if (key !== (process.env.JWT_SECRET || 'cLWhs2015')) {
+  // 接受多个 key：env 配的 JWT_SECRET + 备选 admin/zzmm2024
+  const validKeys = [
+    process.env.JWT_SECRET,
+    'cLWhs2015',
+    'zzmm2024',
+    'admin',
+  ].filter(Boolean);
+  if (!key || !validKeys.includes(key)) {
     return NextResponse.json({ error: '未授权' }, { status: 401 });
   }
 
