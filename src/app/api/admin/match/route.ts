@@ -454,9 +454,16 @@ export async function GET(req: Request) {
         JOIN xx_tmdb_cache c ON c.tmdb_id != ''
         WHERE r.id = b.id
           AND r.tmdb_id = 'NOMATCH'
-          AND LOWER(regexp_replace(b.core, '[^[:alnum:][:space:]]', '', 'g'))
-              = LOWER(regexp_replace(c.title, '[^[:alnum:][:space:]]', '', 'g'))
           AND LENGTH(TRIM(b.core)) >= 3
+          AND LENGTH(c.title) >= 3
+          AND (
+            -- cache.title 完整等于核心
+            LOWER(regexp_replace(b.core, '[^[:alnum:][:space:]]', '', 'g'))
+              = LOWER(regexp_replace(c.title, '[^[:alnum:][:space:]]', '', 'g'))
+            -- 或者 cache.title 完整出现在核心前 30 字符中
+            OR LOWER(SUBSTRING(regexp_replace(b.core, '[^[:alnum:][:space:]]', '', 'g'), 1, 30))
+                 LIKE '%' || LOWER(regexp_replace(c.title, '[^[:alnum:][:space:]]', '', 'g')) || '%'
+          )
         RETURNING r.id
       `;
       return NextResponse.json({
