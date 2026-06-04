@@ -436,7 +436,8 @@ export async function GET(req: Request) {
         AND status = 'active'
         AND name IS NOT NULL
         AND LENGTH(name) > 5
-        AND name ~ '[\x{4e00}-\x{9fff}]'  -- 必须含中文（排除乱码/纯英文老片名）
+        -- 必须含中文字符（用 position 函数代替正则，避开 Neon $1 占位符问题）
+        AND (position(E'\u4e00' in name) > 0 OR position(E'\u9fff' in name) > 0)
         AND category NOT IN ('音乐', '体育', '合集', '学习资料', '其他', '游戏', '电子书', '精品课', '文档')
       ORDER BY id
       LIMIT ${batchSize}
