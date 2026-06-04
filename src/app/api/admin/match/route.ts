@@ -435,7 +435,8 @@ export async function GET(req: Request) {
       WHERE (tmdb_id IS NULL OR tmdb_id = 'NOMATCH')
         AND status = 'active'
         AND name IS NOT NULL
-        AND LENGTH(name) > 2
+        AND LENGTH(name) > 5
+        AND name ~ '[\x{4e00}-\x{9fff}]'  -- 必须含中文（排除乱码/纯英文老片名）
         AND category NOT IN ('音乐', '体育', '合集', '学习资料', '其他', '游戏', '电子书', '精品课', '文档')
       ORDER BY id
       LIMIT ${batchSize}
