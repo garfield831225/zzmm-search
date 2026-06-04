@@ -430,12 +430,12 @@ export async function GET(req: Request) {
   const recoverMode = searchParams.get('recover') === '1';
 
   try {
-    // 2026-06-04 恢复模式: 直接用 cache.title vs name 核心做子串匹配，把误伤的资源恢复
+    // 2026-06-04 恢复模式: 用 SQL CTE 找对应 cache 然后 UPDATE（不用 CROSS JOIN）
     if (recoverMode) {
       const recovery = await sql`
         WITH base AS (
           SELECT
-            r.id, r.tmdb_id,
+            r.id,
             regexp_replace(
               regexp_replace(
                 regexp_replace(
@@ -447,23 +447,27 @@ export async function GET(req: Request) {
               '\\[[^\\]]*\\]', '', 'g') AS core
           FROM xx_resources r
           WHERE r.status = 'active' AND r.tmdb_id = 'NOMATCH'
+        ),
+        normed AS (
+          SELECT id, LOWER(regexp_replace(core, '[^[:alnum:][:space:]]', '', 'g')) AS core_norm
+          FROM base
+        ),
+        candidates AS (
+          SELECT DISTINCT ON (n.id)
+            n.id, c.tmdb_id
+          FROM normed n
+          JOIN xx_tmdb_cache c
+            ON LENGTH(c.title) >= 3
+           AND (
+             LOWER(regexp_replace(c.title, '[^[:alnum:][:space:]]', '', 'g')) = n.core_norm
+             OR SUBSTRING(n.core_norm, 1, 30) LIKE
+                '%' || LOWER(regexp_replace(c.title, '[^[:alnum:][:space:]]', '', 'g')) || '%'
+           )
         )
         UPDATE xx_resources r
         SET tmdb_id = c.tmdb_id
-        FROM base b
-        JOIN xx_tmdb_cache c ON c.tmdb_id != ''
-        WHERE r.id = b.id
-          AND r.tmdb_id = 'NOMATCH'
-          AND LENGTH(TRIM(b.core)) >= 3
-          AND LENGTH(c.title) >= 3
-          AND (
-            -- cache.title 完整等于核心
-            LOWER(regexp_replace(b.core, '[^[:alnum:][:space:]]', '', 'g'))
-              = LOWER(regexp_replace(c.title, '[^[:alnum:][:space:]]', '', 'g'))
-            -- 或者 cache.title 完整出现在核心前 30 字符中
-            OR LOWER(SUBSTRING(regexp_replace(b.core, '[^[:alnum:][:space:]]', '', 'g'), 1, 30))
-                 LIKE '%' || LOWER(regexp_replace(c.title, '[^[:alnum:][:space:]]', '', 'g')) || '%'
-          )
+        FROM candidates c
+        WHERE r.id = c.id
         RETURNING r.id
       `;
       return NextResponse.json({
