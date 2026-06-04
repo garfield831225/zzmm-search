@@ -168,24 +168,21 @@ export default function HomePage() {
     catch { addCopyToast('复制失败，请手动复制'); }
   }, [addCopyToast]);
 
-  // 2026-06-04: 强制激活守卫 — 已登录但未激活任何资源的用户必须输入激活码
+  // 2026-06-04: 强制激活守卫 — 已登录但 group='user' (未激活) 必须输入激活码
   const [mustActivate, setMustActivate] = useState(false);
   useEffect(() => {
     setMounted(true);
     const stored = localStorage.getItem('user');
     if (stored) {
-      try { setUser(JSON.parse(stored)); } catch {}
+      try {
+        const u = JSON.parse(stored);
+        setUser(u);
+        // 2026-06-04: 按 group 判断（'user' = 未激活；'basic'/'vip' = 已激活）
+        setMustActivate(!u.group || u.group === 'user');
+      } catch {}
     } else {
       setMustActivate(false);
-      return;
     }
-    // 已登录：查解锁数
-    const token = localStorage.getItem('token');
-    if (!token) { setMustActivate(true); return; }
-    fetch('/api/user/unlocks/count', { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : { count: 0 })
-      .then(d => setMustActivate((d.count || 0) === 0))
-      .catch(() => setMustActivate(true));
   }, []);
 
   // 用 ref 记录最新 state，在 effect 调用 fetchItems 之前同步最新值

@@ -113,7 +113,11 @@ export async function GET(request: NextRequest) {
       ? `(c.origin_country IS NOT NULL AND c.origin_country <> '' AND (${regionCodes.map(c => `c.origin_country LIKE '%${c}%'`).join(' OR ')}))`
       : '1=1';
 
-    const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${regionFilter} AND ${yearFilter} AND ${nameFilter}`;
+    // 2026-06-04: access_level 过滤（userGroup 会在下方赋值）
+    // 默认 basic 限制；下方根据实际 userGroup 重新生成
+    let accessLevelFilter = "(r.access_level = 'basic')";
+
+    const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${regionFilter} AND ${yearFilter} AND ${nameFilter} AND ${accessLevelFilter}`;
 
     // 排序逻辑：
     //   1) has_tmdb DESC（有 TMDB 排前面）
@@ -196,20 +200,29 @@ export async function GET(request: NextRequest) {
     }
 
     // ─── Map results ────────────────────────────────────────────────────────
-    // 批量查用户已解锁的 resource_id 集合（用于 pay_type='code' 资源）
+    // 2026-06-04: 根据用户 group 过滤 access_level（先在 map 前声明）
+    // - 未登录/普通用户：只返回 basic
+    // - basic 用户：basic
+    // - vip 用户：basic + vip
+    // - admin: 全看
+    // - code 资源：单独付费解锁（不影响过滤）
     const userUnlockedIds = new Set<number>();
+    let userGroup: string = 'user';  // 默认普通用户
     if (zone === 'film' && allIds.length > 0) {
       try {
-        // 当前用户从 token 拿
         const authHeader = request.headers.get('authorization');
         if (authHeader?.startsWith('Bearer ')) {
           const token = authHeader.replace('Bearer ', '');
           const payload = jwt.verify(token, (process.env.JWT_SECRET || 'cLWhs2015')) as any;
           const userId = String(payload.id);
+          userGroup = (payload.group || 'user').toLowerCase();
+          // 批量查用户信息（含 group）
+          const userRow = await sql`SELECT "group" FROM xx_users WHERE id = ${userId} LIMIT 1`;
+          if (userRow[0]?.group) userGroup = String(userRow[0].group).toLowerCase();
           const unlocked = await sql`SELECT resource_id FROM xx_user_unlocks WHERE user_id = ${userId} AND resource_id = ANY(${allIds})`;
           unlocked.forEach((r: any) => userUnlockedIds.add(r.resource_id));
         }
-      } catch { /* 未登录或无效 token，不算解锁 */ }
+      } catch { /* 未登录或无效 token */ }
     }
 
     // 类别 → 期望的 cache.tmdb_type（不匹配则清空 tmdb，不显示海报）
@@ -240,6 +253,7 @@ export async function GET(request: NextRequest) {
         tmdbId: tmdbOk ? (item.tmdb_id || null) : null,
         viewCount: item.view_count || 0,
         payType: item.pay_type || 'free',
+        accessLevel: item.access_level || 'basic',  // 2026-06-04
         codePrice: item.code_price ? Number(item.code_price) : 0,
         unlocked: userUnlockedIds.has(item.id),
         tmdb: tmdbOk && item.tmdb_id ? (tmdbMap.get(item.tmdb_id) || null) : null,
