@@ -324,21 +324,27 @@ async function matchOne(rawName: string, category: string, subType: string | nul
         { lang: 'en-US', useYear: true },
       ];
 
-  // 根据 sub_type 决定 TMDB 搜索顺序
-  let typeOrder: ('tv' | 'movie')[];
-  if (category === '演唱会') {
-    typeOrder = ['movie'];
-  } else if (category === '纪录片') {
-    typeOrder = ['tv', 'movie'];
-  } else if (subType) {
-    // 有 sub_type → 直接按 sub_type 查对应类型
-    const tmdbType = subTypeToTmdb(subType);
-    typeOrder = [tmdbType];
-  } else if (season !== null) {
-    typeOrder = ['tv'];
-  } else {
-    typeOrder = ['movie'];
-  }
+    // 强制按类别决定 TMDB 搜索类型（关键！剧集不能匹配 movie，电影不能匹配 tv）
+    let typeOrder: ('tv' | 'movie')[];
+    if (category === '演唱会') {
+      typeOrder = ['movie'];
+    } else if (category === '纪录片') {
+      typeOrder = ['tv', 'movie'];
+    } else if (subType) {
+      // 有 sub_type → 直接按 sub_type 查对应类型
+      const tmdbType = subTypeToTmdb(subType);
+      typeOrder = [tmdbType];
+    } else if (['连载', '剧集', '动漫', '综艺', '少儿频道'].includes(category)) {
+      // 剧集类只搜 tv
+      typeOrder = ['tv'];
+    } else if (['电影', '华语电影', '外语电影', '动画电影', 'REMUX', '系列电影'].includes(category)) {
+      // 电影类只搜 movie
+      typeOrder = ['movie'];
+    } else if (season !== null) {
+      typeOrder = ['tv'];
+    } else {
+      typeOrder = ['movie'];
+    }
 
     let keyIdx = 0;
     for (const s of strategies) {
