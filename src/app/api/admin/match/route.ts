@@ -488,6 +488,9 @@ export async function GET(req: Request) {
         -- 必须含中文字符（用 position 函数代替正则，避开 Neon $1 占位符问题）
         AND (position(E'\u4e00' in name) > 0 OR position(E'\u9fff' in name) > 0)
         AND category NOT IN ('音乐', '体育', '合集', '学习资料', '其他', '游戏', '电子书', '精品课', '文档')
+        -- 2026-06-05: 修复 round-robin 反复扫前 500 条已 NOMATCH 记录的 bug
+        -- 只取 5 分钟内没尝试过的（NULL 或 > 5 分钟前的重试）
+        AND (last_attempt_at IS NULL OR last_attempt_at < NOW() - INTERVAL '5 minutes')
       ORDER BY id
       LIMIT ${batchSize}
       FOR UPDATE SKIP LOCKED
@@ -525,20 +528,20 @@ export async function GET(req: Request) {
           // 链接去重：同链接已被匹配过，直接复用
           if (item.link && linkMap[item.link]) {
             const reusedId = linkMap[item.link];
-            await sql`UPDATE xx_resources SET tmdb_id = ${reusedId}, updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
+            await sql`UPDATE xx_resources SET tmdb_id = ${reusedId}, last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
             return { id: item.id, tmdb_id: reusedId, reused: true };
           }
           const result = await matchOne(item.name, item.category, item.sub_type || null);
           if (result === 'GARBLED') {
-            const r = await sql`UPDATE xx_resources SET tmdb_id = 'GARBLED', updated_at = NOW() WHERE id = ${item.id} RETURNING id`;
+            const r = await sql`UPDATE xx_resources SET tmdb_id = 'GARBLED', last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id} RETURNING id`;
             return { id: item.id, tmdb_id: r.length ? 'GARBLED' : null, updateFailed: !r.length };
           }
           if (result === 'NOMATCH') {
-            const r = await sql`UPDATE xx_resources SET tmdb_id = 'NOMATCH', updated_at = NOW() WHERE id = ${item.id} RETURNING id`;
+            const r = await sql`UPDATE xx_resources SET tmdb_id = 'NOMATCH', last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id} RETURNING id`;
             return { id: item.id, tmdb_id: r.length ? 'NOMATCH' : null, updateFailed: !r.length };
           }
           if (result) {
-            const updResult = await sql`UPDATE xx_resources SET tmdb_id = ${result.id}, updated_at = NOW() WHERE id = ${item.id} RETURNING id`;
+            const updResult = await sql`UPDATE xx_resources SET tmdb_id = ${result.id}, last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id} RETURNING id`;
             if (!updResult.length) {
               // UPDATE failed - record not found or already updated
               return { id: item.id, tmdb_id: null, updateFailed: true };
