@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Music, Library, LogOut, CreditCard, ShoppingCart } from 'lucide-react';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
@@ -101,6 +102,7 @@ export default function HomePage() {
   const [tmdbCredits, setTmdbCredits] = useState<{ director: any[]; cast: any[]; overview: string; tagline: string; original_title: string; vote_count: number; genres: string[] } | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [user, setUser] = useState<{ id: number; username: string; group: string; expire_at: string } | null>(null);
+  const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [downloadToasts, setDownloadToasts] = useState<DownloadToast[]>([]);
   const [copyToasts, setCopyToasts] = useState<DownloadToast[]>([]);
@@ -166,7 +168,25 @@ export default function HomePage() {
     catch { addCopyToast('复制失败，请手动复制'); }
   }, [addCopyToast]);
 
-  useEffect(() => { setMounted(true); const stored = localStorage.getItem('user'); if (stored) { try { setUser(JSON.parse(stored)); } catch {} } }, []);
+  // 2026-06-04: 强制激活守卫 — 已登录但未激活任何资源的用户必须输入激活码
+  const [mustActivate, setMustActivate] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+    const stored = localStorage.getItem('user');
+    if (stored) {
+      try { setUser(JSON.parse(stored)); } catch {}
+    } else {
+      setMustActivate(false);
+      return;
+    }
+    // 已登录：查解锁数
+    const token = localStorage.getItem('token');
+    if (!token) { setMustActivate(true); return; }
+    fetch('/api/user/unlocks/count', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { count: 0 })
+      .then(d => setMustActivate((d.count || 0) === 0))
+      .catch(() => setMustActivate(true));
+  }, []);
 
   // 用 ref 记录最新 state，在 effect 调用 fetchItems 之前同步最新值
   const latestRef = useRef({ query, category, source, region, year, sort, pageSize });
@@ -278,6 +298,42 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white">
+      {/* 2026-06-04: 强制激活守卫 — 已登录但未激活任何资源 */}
+      {mounted && mustActivate && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+            className="w-full max-w-md bg-[#12121a] rounded-2xl p-8 border border-white/10 shadow-2xl"
+          >
+            <div className="text-center mb-6">
+              <div className="text-5xl mb-3">🔒</div>
+              <h2 className="text-2xl font-bold mb-2">需要激活</h2>
+              <p className="text-sm text-white/60">输入激活码后才能进入资源库</p>
+            </div>
+            <button
+              onClick={() => router.push('/activate')}
+              className="w-full py-3 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl font-semibold hover:opacity-90 transition"
+            >
+              🎫 立即激活
+            </button>
+            <button
+              onClick={() => router.push('/shop')}
+              className="w-full mt-3 py-3 bg-white/5 hover:bg-white/10 rounded-xl text-sm transition"
+            >
+              🛒 没有激活码？去购买
+            </button>
+            <div className="mt-6 text-center text-xs text-white/40">
+              联系站长微信 HKmaipanren 获取激活码
+            </div>
+            <button
+              onClick={handleLogout}
+              className="w-full mt-2 text-xs text-white/30 hover:text-white/60 transition"
+            >
+              退出登录
+            </button>
+          </motion.div>
+        </div>
+      )}
       {/* Header */}
       <header className="sticky top-0 z-40 bg-[#0a0a0f]/95 backdrop-blur-md border-b border-white/5">
         <div className="max-w-7xl mx-auto px-4 py-4">
