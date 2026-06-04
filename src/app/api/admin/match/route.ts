@@ -427,8 +427,44 @@ export async function GET(req: Request) {
 
   const sql = neon(process.env.DATABASE_URL || '');
   const batchSize = Math.min(1000, Math.max(50, parseInt(searchParams.get('batchSize') || '500')));
+  const recoverMode = searchParams.get('recover') === '1';
 
   try {
+    // 2026-06-04 恢复模式: 直接用 cache.title vs name 核心做子串匹配，把误伤的资源恢复
+    if (recoverMode) {
+      const recovery = await sql`
+        WITH base AS (
+          SELECT
+            r.id, r.tmdb_id,
+            regexp_replace(
+              regexp_replace(
+                regexp_replace(
+                  regexp_replace(
+                    regexp_replace(r.name, '\\(20[0-9]{2}\\)', ''),
+                    '\\{tmdb-\\d+\\}', '', 'g'),
+                  '第[一二三四五六七八九十\\d]+季', '', 'g'),
+                'S\\d{1,2}|Season\\s*\\d{1,2}', '', 'g'),
+              '\\[[^\\]]*\\]', '', 'g') AS core
+          FROM xx_resources r
+          WHERE r.status = 'active' AND r.tmdb_id = 'NOMATCH'
+        )
+        UPDATE xx_resources r
+        SET tmdb_id = c.tmdb_id
+        FROM base b
+        JOIN xx_tmdb_cache c ON c.tmdb_id != ''
+        WHERE r.id = b.id
+          AND r.tmdb_id = 'NOMATCH'
+          AND LOWER(regexp_replace(b.core, '[^[:alnum:][:space:]]', '', 'g'))
+              = LOWER(regexp_replace(c.title, '[^[:alnum:][:space:]]', '', 'g'))
+          AND LENGTH(TRIM(b.core)) >= 3
+        RETURNING r.id
+      `;
+      return NextResponse.json({
+        done: true, recover: true,
+        recovered: recovery.length,
+      });
+    }
+
     const rows = await sql`
       SELECT id, name, link, category, source, sub_type
       FROM xx_resources
