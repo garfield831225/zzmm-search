@@ -40,6 +40,7 @@ const ZZMM_SHEET_MAP: Record<string, string | null> = {
 
 export default function ImportPage() {
   const [mode, setMode] = useState<ImportMode>('zzmm');
+  const [syncMode, setSyncMode] = useState(false);  // 泽泽妈妈专属：二次导入软删差异
   const [file, setFile] = useState<File | null>(null);
   const [docUrl, setDocUrl] = useState('');
   const [progress, setProgress] = useState(0);
@@ -204,9 +205,14 @@ export default function ImportPage() {
       addLog(`✅ 文件读取完成，共 ${wb.SheetNames.length} 个 sheet`);
 
       let items: any[] = [];
+      let actualMode: string = mode;
       if (mode === 'zzmm') {
         items = parseZZMM(wb);
         addLog(`📋 泽泽妈妈模式：解析到 ${items.length} 条数据`);
+        if (syncMode) {
+          actualMode = 'zezhe-sync';
+          addLog('🔄 已启用增量同步：本次 Excel 中未出现的旧链接将被软删除（status=deleted）');
+        }
       } else {
         items = parseStandard(wb);
         addLog(`📋 标准 Excel 模式：解析到 ${items.length} 条数据`);
@@ -218,8 +224,42 @@ export default function ImportPage() {
         return;
       }
 
-      addLog(`📊 开始分批导入 ${items.length} 条...`);
+      addLog(`📊 开始${syncMode ? '增量同步' : '分批导入'} ${items.length} 条...`);
       setStatus('importing');
+      setProgress(50);
+
+      // 增量同步模式：必须一次性发完（分批会导致 diff 算错，把每批外的全删了）
+      if (syncMode) {
+        try {
+          const res = await fetch('/api/admin/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminKey}` },
+            body: JSON.stringify({ items, mode: 'zezhe-sync' }),
+          });
+          const result = await res.json();
+          if (result.success) {
+            setProgress(100);
+            setStatus('done');
+            addLog(`\n🎉 增量同步完成！`);
+            addLog(`📥 本次 Excel 共: ${result.total} 条`);
+            addLog(`✅ 新增: ${result.inserted} 条`);
+            addLog(`🗑️ 软删除: ${result.deleted} 条（不再出现的旧链接）`);
+            addLog(`⏸️ 不变: ${result.unchanged} 条`);
+            if (result.failed > 0) addLog(`⚠️ 失败: ${result.failed} 条`);
+            setResults([{ batch: 1, imported: result.inserted, failed: result.failed, total: result.total }]);
+          } else {
+            setStatus('error');
+            addLog(`❌ 同步失败: ${result.error}`);
+            if (result.error?.includes('ENABLE_ZEZHE_SYNC')) {
+              addLog(`💡 提示：请在 Vercel 项目环境变量中添加 ENABLE_ZEZHE_SYNC=true`);
+            }
+          }
+        } catch (err: any) {
+          setStatus('error');
+          addLog(`❌ 网络错误: ${err.message}`);
+        }
+        return;
+      }
 
       const BATCH = 200;
       let totalImported = 0;
@@ -236,7 +276,7 @@ export default function ImportPage() {
           const res = await fetch('/api/admin/import', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminKey}` },
-            body: JSON.stringify({ items: batch, mode }),
+            body: JSON.stringify({ items: batch, mode: actualMode }),
           });
           const result = await res.json();
           if (result.success) {
@@ -292,7 +332,7 @@ export default function ImportPage() {
           {MODES.map(m => (
             <button
               key={m.key}
-              onClick={() => { setMode(m.key); setFile(null); setLog([]); setResults([]); setProgress(0); setStatus('idle'); }}
+              onClick={() => { setMode(m.key); setFile(null); setLog([]); setResults([]); setProgress(0); setStatus('idle'); setSyncMode(false); }}
               className={`flex-1 py-3 px-4 rounded-xl border transition text-left ${
                 mode === m.key
                   ? 'border-violet-500 bg-violet-500/10 text-white'
@@ -305,6 +345,27 @@ export default function ImportPage() {
             </button>
           ))}
         </div>
+
+        {/* 泽泽妈妈模式：二次导入同步开关 */}
+        {mode === 'zzmm' && !file && (
+          <div className="mb-6 bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={syncMode}
+                onChange={e => setSyncMode(e.target.checked)}
+                className="mt-1 w-5 h-5 accent-amber-500"
+              />
+              <div className="flex-1">
+                <div className="font-medium text-amber-200">🔄 启用增量同步（二次导入）</div>
+                <div className="text-xs text-white/60 mt-1">
+                  开启后，本次 Excel 中<strong className="text-amber-300">不再出现的旧链接会被软删除</strong>（status=deleted，数据保留可恢复）。
+                  第一次导入时<strong className="text-amber-300">不要勾选</strong>，避免误删历史数据。
+                </div>
+              </div>
+            </label>
+          </div>
+        )}
 
         {/* File Upload Area */}
         {mode !== 'doc' && (

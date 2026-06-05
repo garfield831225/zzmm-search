@@ -117,7 +117,28 @@ export async function GET(request: NextRequest) {
     // 默认 basic 限制；下方根据实际 userGroup 重新生成
     let accessLevelFilter = "(r.access_level = 'basic')";
 
-    const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${regionFilter} AND ${yearFilter} AND ${nameFilter} AND ${accessLevelFilter}`;
+    // 2026-06-06: 预解析 userGroup（用于 import_channel 灰度过滤）
+    // 灰度开关 BASIC_ZEZHE_ONLY=true 才生效；默认 false → 不影响老用户
+    let userGroup: string = 'user';
+    if (zone === 'film') {
+      try {
+        const authHeader = request.headers.get('authorization');
+        if (authHeader?.startsWith('Bearer ')) {
+          const token = authHeader.replace('Bearer ', '');
+          const payload = jwt.verify(token, (process.env.JWT_SECRET || 'cLWhs2015')) as any;
+          const userId = String(payload.id);
+          userGroup = (payload.group || 'user').toLowerCase();
+          const userRow = await sql`SELECT "group" FROM xx_users WHERE id = ${userId} LIMIT 1`;
+          if (userRow[0]?.group) userGroup = String(userRow[0].group).toLowerCase();
+        }
+      } catch { /* 未登录或无效 token → userGroup='user' */ }
+    }
+    const basicZezheOnly = process.env.BASIC_ZEZHE_ONLY === 'true';
+    const isVipPlus = ['vip', 'admin', 'code'].includes(userGroup);
+    const importChannelFilter = (basicZezheOnly && !isVipPlus)
+      ? `(r.import_channel = 'zezhe')` : '1=1';
+
+    const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${regionFilter} AND ${yearFilter} AND ${nameFilter} AND ${accessLevelFilter} AND ${importChannelFilter}`;
 
     // 排序逻辑：
     //   1) has_tmdb DESC（有 TMDB 排前面）
@@ -199,32 +220,23 @@ export async function GET(request: NextRequest) {
       } catch { sportsCoverMap = new Map(); }
     }
 
-    // ─── Map results ────────────────────────────────────────────────────────
-    // 2026-06-04: 根据用户 group 过滤 access_level（先在 map 前声明）
-    // - 未登录/普通用户：只返回 basic
-    // - basic 用户：basic
-    // - vip 用户：basic + vip
-    // - admin: 全看
-    // - code 资源：单独付费解锁（不影响过滤）
+    // ─── 用户解锁资源（仅 film 区）────────────────────────────────────
+    // userGroup 已在上面预解析（用于 import_channel 过滤）
     const userUnlockedIds = new Set<number>();
-    let userGroup: string = 'user';  // 默认普通用户
-    if (zone === 'film' && allIds.length > 0) {
+    if (zone === 'film' && allIds.length > 0 && userGroup !== 'user') {
       try {
         const authHeader = request.headers.get('authorization');
         if (authHeader?.startsWith('Bearer ')) {
           const token = authHeader.replace('Bearer ', '');
           const payload = jwt.verify(token, (process.env.JWT_SECRET || 'cLWhs2015')) as any;
           const userId = String(payload.id);
-          userGroup = (payload.group || 'user').toLowerCase();
-          // 批量查用户信息（含 group）
-          const userRow = await sql`SELECT "group" FROM xx_users WHERE id = ${userId} LIMIT 1`;
-          if (userRow[0]?.group) userGroup = String(userRow[0].group).toLowerCase();
           const unlocked = await sql`SELECT resource_id FROM xx_user_unlocks WHERE user_id = ${userId} AND resource_id = ANY(${allIds})`;
           unlocked.forEach((r: any) => userUnlockedIds.add(r.resource_id));
         }
       } catch { /* 未登录或无效 token */ }
     }
 
+    // ─── Map results ────────────────────────────────────────────────────────
     // 类别 → 期望的 cache.tmdb_type（不匹配则清空 tmdb，不显示海报）
     const TV_CATS_FILTER = new Set(['连载', '剧集', '动漫', '综艺', '少儿频道', '纪录片']);
     const MOVIE_CATS_FILTER = new Set(['电影', '华语电影', '外语电影', '动画电影', '演唱会', 'REMUX', '系列电影']);

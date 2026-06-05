@@ -86,6 +86,111 @@ async function fetchFeishuDoc(docUrl: string): Promise<any[]> {
   return [];
 }
 
+/**
+ * 泽泽妈妈专属增量同步（mode='zezhe-sync'）
+ * - 拉取 DB 中 import_channel='zezhe' AND status='active' 的所有 link
+ * - 与本次 items 做 diff：
+ *     新增：本次有、DB 没有 → INSERT（标 channel='zezhe'）
+ *     删除：DB 有、本次没有 → 软删（status='deleted'，只动 zezhe 通道）
+ *     不变：本次有、DB 也有 → 不动（link/link_code 视为唯一键）
+ * - 全程只动 import_channel='zezhe' 的行，其他资源完全不动
+ */
+async function handleZezheSync(
+  sql: any,
+  items: any[],
+  totalInput: number,
+  skippedCodes: Set<string>
+) {
+  const BATCH = 200;
+
+  // 1) 拉取 DB 中 zezhe 的所有 (id, link)
+  const existing = await sql`
+    SELECT id, link FROM xx_resources
+    WHERE import_channel = 'zezhe' AND status = 'active' AND link IS NOT NULL AND link != ''
+  `;
+  const existingLinkToId = new Map<string, number>();
+  for (const r of existing as any[]) {
+    existingLinkToId.set(r.link, r.id);
+  }
+
+  // 2) diff
+  const toInsert: any[] = [];
+  const seenLinks = new Set<string>();
+  let unchanged = 0;
+  for (const item of items) {
+    if (!item.link) continue;
+    if (seenLinks.has(item.link)) continue;  // 本次去重
+    seenLinks.add(item.link);
+    if (existingLinkToId.has(item.link)) {
+      unchanged++;
+    } else {
+      toInsert.push(item);
+    }
+  }
+  const toDeleteIds: number[] = [];
+  for (const entry of Array.from(existingLinkToId.entries())) {
+    const [link, id] = entry;
+    if (!seenLinks.has(link)) toDeleteIds.push(id);
+  }
+
+  // 3) 软删（分批，限定 zezhe 防误伤）
+  let deleted = 0;
+  for (let i = 0; i < toDeleteIds.length; i += BATCH) {
+    const batchIds = toDeleteIds.slice(i, i + BATCH);
+    try {
+      await sql`
+        UPDATE xx_resources
+        SET status = 'deleted', updated_at = NOW()
+        WHERE id = ANY(${batchIds}) AND import_channel = 'zezhe' AND status = 'active'
+      `;
+      deleted += batchIds.length;
+    } catch (err: any) {
+      console.error(`[zezhe-sync] 软删批次失败:`, err.message);
+    }
+  }
+
+  // 4) 新增（分批，标 channel='zezhe'）
+  let inserted = 0;
+  let failed = 0;
+  for (let i = 0; i < toInsert.length; i += BATCH) {
+    const batch = toInsert.slice(i, i + BATCH);
+    const cols = 'name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
+    const vals = batch.map((_: any, idx: number) => {
+      const base = idx * 7;
+      return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), $${base+7})`;
+    }).join(', ');
+    const params: any[] = batch.flatMap((item: any) => [
+      item.name || '',
+      item.link || '',
+      item.link_code || '',
+      item.source || detectSource(item.link || ''),
+      item.category || '其他',
+      item.size || '',
+      'zezhe',
+    ]);
+    try {
+      const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) WHERE link IS NOT NULL AND link != '' DO NOTHING RETURNING id`, params);
+      inserted += (r as any[]).length;
+    } catch (err: any) {
+      console.error(`[zezhe-sync] 插入批次失败:`, err.message);
+      failed += batch.length;
+    }
+  }
+
+  return NextResponse.json({
+    success: true,
+    mode: 'zezhe-sync',
+    import_channel: 'zezhe',
+    total: items.length,
+    inserted,
+    failed,
+    deleted,
+    unchanged,
+    skipped: totalInput - items.length,
+    skippedCodes: Array.from(skippedCodes),
+  });
+}
+
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
   // 临时跳过授权，方便调试导入
@@ -142,11 +247,17 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 标准 / 泽泽妈妈 模式（批量数据）
+    // 标准 / 泽泽妈妈 / zezhe-sync 模式（批量数据）
     const items: any[] = body.items || [];
     if (items.length === 0) {
       return NextResponse.json({ error: '没有数据' }, { status: 400 });
     }
+
+    // mode → import_channel 映射
+    //   zzmm / zezhe-sync → 'zezhe'（泽泽妈妈文档专属）
+    //   standard / doc / 其他 → 'other'（其他渠道）
+    const importMode: string = body.mode || 'standard';
+    const channel: string = (importMode === 'zzmm' || importMode === 'zezhe-sync') ? 'zezhe' : 'other';
 
     const sql = neon(process.env.DATABASE_URL || '');
     const blacklist = await getBlacklistedCodes(sql);
@@ -168,16 +279,27 @@ export async function POST(request: NextRequest) {
       return true;
     });
 
-const BATCH = 200;
+    // zezhe-sync：泽泽妈妈专属增量同步（diff + 软删 + 新增）
+    // 默认禁用，需 ENABLE_ZEZHE_SYNC=true 才允许执行 DELETE 操作
+    if (importMode === 'zezhe-sync') {
+      if (process.env.ENABLE_ZEZHE_SYNC !== 'true') {
+        return NextResponse.json({
+          error: 'zezhe-sync 模式未启用，需在 Vercel 环境变量中设置 ENABLE_ZEZHE_SYNC=true',
+        }, { status: 403 });
+      }
+      return await handleZezheSync(sql, filteredItems, items.length, skippedCodes);
+    }
+
+    const BATCH = 200;
     let totalImported = 0;
     let totalFailed = 0;
 
     for (let i = 0; i < filteredItems.length; i += BATCH) {
       const batch = filteredItems.slice(i, i + BATCH);
-      const cols = 'name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at';
+      const cols = 'name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
       const vals = batch.map((_: any, idx: number) => {
-        const base = idx * 6;
-        return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW())`;
+        const base = idx * 7;
+        return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), $${base+7})`;
       }).join(', ');
       const params: any[] = batch.flatMap((item: any) => [
         item.name || '',
@@ -186,6 +308,7 @@ const BATCH = 200;
         item.source || detectSource(item.link || ''),
         item.category || '其他',
         item.size || '',
+        channel,
       ]);
       try {
         // ON CONFLICT (link) DO NOTHING：partial unique index 需带 WHERE 子句才能匹配
@@ -203,6 +326,8 @@ const BATCH = 200;
 
     return NextResponse.json({
       success: true,
+      mode: importMode,
+      import_channel: channel,
       imported: totalImported,
       failed: totalFailed,
       total: filteredItems.length,
