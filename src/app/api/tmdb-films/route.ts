@@ -148,30 +148,11 @@ async function _GET(request: NextRequest) {
     LIMIT $${params.length + 2} OFFSET $${params.length + 3}
   `, [...params, type, perBlock, offset3]) as any[];
 
-  // 真实总数（不带 LIMIT，3 个独立 COUNT）
-  const count1 = await sql`
-    SELECT COUNT(DISTINCT r.tmdb_id)::int as cnt
-    FROM xx_resources r
-    WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH'
-      AND r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000
-      AND r.status = 'active' AND ${resourceWhere}
-  ` as any[];
-  const count2 = await sql`
-    SELECT COUNT(*)::int as cnt FROM xx_resources r
-    WHERE r.status = 'active'
-      AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')
-      AND ${resourceWhere}
-  ` as any[];
-  const count3 = await sql`
-    SELECT COUNT(*)::int as cnt FROM xx_tmdb_discover
-    WHERE tmdb_type = ${type} AND poster_path IS NOT NULL
-      AND tmdb_id NOT IN (
-        SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r
-        WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH'
-          AND r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000
-          AND r.status = 'active'
-      )
-  ` as any[];
+  // 真实总数（不带 LIMIT，3 个独立 COUNT；resourceWhere 是字符串拼接，不用 ${}）
+  const resourceBase = `r.status = 'active'${cats.length ? ` AND r.category IN (${cats.map((_, i) => `'${cats[i].replace(/'/g, "''")}'`).join(',')})` : ''}${linkType === '115' ? ` AND r.source = '115'` : linkType === 'baidu' ? ` AND r.source = 'baidu'` : linkType === 'other' ? ` AND r.source NOT IN ('115','baidu','aliyun','quark')` : ''}`;
+  const count1 = await sql(`SELECT COUNT(DISTINCT r.tmdb_id)::int as cnt FROM xx_resources r WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH' AND r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000 AND ${resourceBase}`) as any[];
+  const count2 = await sql(`SELECT COUNT(*)::int as cnt FROM xx_resources r WHERE ${resourceBase} AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')`) as any[];
+  const count3 = await sql(`SELECT COUNT(*)::int as cnt FROM xx_tmdb_discover WHERE tmdb_type = $1 AND poster_path IS NOT NULL AND tmdb_id NOT IN (SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH' AND r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000 AND r.status = 'active')`, [type]) as any[];
 
   // ─── 关键词过滤（在内存中做）──────────────────────────────────────
   let b1 = block1, b2 = block2, b3 = block3;
