@@ -26,6 +26,15 @@ async function getUser(req: NextRequest): Promise<UserInfo | null> {
 }
 
 export async function GET(request: NextRequest) {
+  try {
+    return await _GET(request);
+  } catch (e: any) {
+    console.error('TMDB-FILMS API ERR:', e?.message, e?.stack?.slice(0, 800));
+    return NextResponse.json({ error: e?.message || 'unknown', stack: e?.stack?.slice(0, 800) }, { status: 500 });
+  }
+}
+
+async function _GET(request: NextRequest) {
   const sql = neon(process.env.DATABASE_URL || '');
   const { searchParams } = new URL(request.url);
   const type       = searchParams.get('type') || 'movie';          // movie | tv
@@ -240,11 +249,14 @@ export async function GET(request: NextRequest) {
   ];
 
   return NextResponse.json({
+    debug: { cats, params, paramsLen: params.length, type, year, genre, linkType, sort, page, pageSize, keyword },
     page,
     pageSize,
     items,
     counts: { block1: b1.length, block2: b2.length, block3: b3.length },
     user: { group: userGroup, isVipPlus },
     poster_base: TMDB_IMG,
+  });
+}
   });
 }
