@@ -94,51 +94,87 @@ async function _GET(request: NextRequest) {
   const isSearch = !!keyword;
   const kwEsc = (keyword || '').replace(/[\\%_]/g, '\\$&').toLowerCase();
   const kwLike = `%${kwEsc}%`;
-
-  // 1 块 SQL：用户已导入 + 已匹配（按 release_date DESC 排，搜索时加 ILIKE）
   const offset1 = isSearch ? 0 : (page - 1) * pageSize;
   const limit1 = isSearch ? 200 : pageSize;
-  const b1Search = isSearch ? ` AND (LOWER(COALESCE(d.title, c.title, '')) LIKE LOWER($${params.length + 5}) ESCAPE '\\' OR LOWER(COALESCE(d.original_title, '')) LIKE LOWER($${params.length + 5}) ESCAPE '\\')` : '';
-  const block1 = await sql(`
-    WITH matched AS (
-      SELECT r.tmdb_id::int as tmdb_id, MAX(r.updated_at) as updated_at,
-             MAX(r.view_count) as view_count, COUNT(*) as link_count
-      FROM xx_resources r
-      WHERE r.tmdb_id IS NOT NULL
-        AND r.tmdb_id != ''
-        AND r.tmdb_id != 'NOMATCH'
-        AND r.tmdb_id ~ '^[0-9]+$'
-        AND (r.tmdb_id)::int > 10000
-        AND ${resourceWhere}
-      GROUP BY r.tmdb_id
-    )
-    SELECT m.tmdb_id, m.view_count, m.link_count, m.updated_at,
-           d.tmdb_type, d.title, d.original_title, d.poster_path, d.backdrop_path,
-           d.release_date, d.first_air_date, d.vote_average, d.popularity,
-           d.genres, d.origin_country, d.overview,
-           c.title as cached_title, c.poster_path as cached_poster, c.overview as cached_overview,
-           c.release_date as cache_release
-    FROM matched m
-    LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = $${params.length + 1}
-    LEFT JOIN xx_tmdb_cache c ON c.tmdb_id = m.tmdb_id::text
-    WHERE 1=1${b1Search}
-    ORDER BY COALESCE(c.release_date, d.release_date, d.first_air_date, '1900-01-01') DESC NULLS LAST
-    LIMIT $${params.length + 2} OFFSET $${params.length + 3}
-  `, isSearch ? [...params, type, limit1, offset1, kwLike] : [...params, type, limit1, offset1]) as any[];
+
+  // 1 块 SQL：用户已导入 + 已匹配（按 release_date DESC，搜索时 ILIKE）
+  const block1 = isSearch
+    ? await sql`
+        WITH matched AS (
+          SELECT r.tmdb_id::int as tmdb_id, MAX(r.updated_at) as updated_at,
+                 MAX(r.view_count) as view_count, COUNT(*) as link_count
+          FROM xx_resources r
+          WHERE r.tmdb_id IS NOT NULL
+            AND r.tmdb_id != ''
+            AND r.tmdb_id != 'NOMATCH'
+            AND r.tmdb_id ~ '^[0-9]+$'
+            AND (r.tmdb_id)::int > 10000
+            AND ${resourceWhere}
+          GROUP BY r.tmdb_id
+        )
+        SELECT m.tmdb_id, m.view_count, m.link_count, m.updated_at,
+               d.tmdb_type, d.title, d.original_title, d.poster_path, d.backdrop_path,
+               d.release_date, d.first_air_date, d.vote_average, d.popularity,
+               d.genres, d.origin_country, d.overview,
+               c.title as cached_title, c.poster_path as cached_poster, c.overview as cached_overview,
+               c.release_date as cache_release
+        FROM matched m
+        LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = ${type}
+        LEFT JOIN xx_tmdb_cache c ON c.tmdb_id = m.tmdb_id::text
+        WHERE (LOWER(COALESCE(d.title, c.title, '')) LIKE ${kwLike} ESCAPE '\\'
+            OR LOWER(COALESCE(d.original_title, '')) LIKE ${kwLike} ESCAPE '\\')
+        ORDER BY COALESCE(c.release_date, d.release_date, d.first_air_date, '1900-01-01') DESC NULLS LAST
+        LIMIT ${limit1} OFFSET ${offset1}
+      ` as any[]
+    : await sql`
+        WITH matched AS (
+          SELECT r.tmdb_id::int as tmdb_id, MAX(r.updated_at) as updated_at,
+                 MAX(r.view_count) as view_count, COUNT(*) as link_count
+          FROM xx_resources r
+          WHERE r.tmdb_id IS NOT NULL
+            AND r.tmdb_id != ''
+            AND r.tmdb_id != 'NOMATCH'
+            AND r.tmdb_id ~ '^[0-9]+$'
+            AND (r.tmdb_id)::int > 10000
+            AND ${resourceWhere}
+          GROUP BY r.tmdb_id
+        )
+        SELECT m.tmdb_id, m.view_count, m.link_count, m.updated_at,
+               d.tmdb_type, d.title, d.original_title, d.poster_path, d.backdrop_path,
+               d.release_date, d.first_air_date, d.vote_average, d.popularity,
+               d.genres, d.origin_country, d.overview,
+               c.title as cached_title, c.poster_path as cached_poster, c.overview as cached_overview,
+               c.release_date as cache_release
+        FROM matched m
+        LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = ${type}
+        LEFT JOIN xx_tmdb_cache c ON c.tmdb_id = m.tmdb_id::text
+        ORDER BY COALESCE(c.release_date, d.release_date, d.first_air_date, '1900-01-01') DESC NULLS LAST
+        LIMIT ${limit1} OFFSET ${offset1}
+      ` as any[];
 
   // 2 块 SQL：用户已导入 + 未匹配（按 created_at DESC，搜索时 ILIKE name）
   const offset2 = isSearch ? 0 : (page - 1) * pageSize;
   const limit2 = isSearch ? 200 : pageSize;
-  const b2Search = isSearch ? ` AND LOWER(r.name) LIKE LOWER($${params.length + 3}) ESCAPE '\\'` : '';
-  const block2 = await sql(`
-    SELECT id, name, link, link_code, source, category, size, view_count, created_at
-    FROM xx_resources r
-    WHERE r.status = 'active'
-      AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')
-      AND ${resourceWhere}${b2Search}
-    ORDER BY r.created_at DESC
-    LIMIT $${params.length + 1} OFFSET $${params.length + 2}
-  `, isSearch ? [...params, limit2, offset2, kwLike] : [...params, limit2, offset2]) as any[];
+  const block2 = isSearch
+    ? await sql`
+        SELECT id, name, link, link_code, source, category, size, view_count, created_at
+        FROM xx_resources r
+        WHERE r.status = 'active'
+          AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')
+          AND ${resourceWhere}
+          AND LOWER(r.name) LIKE ${kwLike} ESCAPE '\\'
+        ORDER BY r.created_at DESC
+        LIMIT ${limit2} OFFSET ${offset2}
+      ` as any[]
+    : await sql`
+        SELECT id, name, link, link_code, source, category, size, view_count, created_at
+        FROM xx_resources r
+        WHERE r.status = 'active'
+          AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')
+          AND ${resourceWhere}
+        ORDER BY r.created_at DESC
+        LIMIT ${limit2} OFFSET ${offset2}
+      ` as any[];
 
   // 3 块 SQL：TMDB 全量 ∖ 用户已导入（按 release_date DESC，搜索时 ILIKE）
   const offset3 = isSearch ? 0 : (page - 1) * pageSize;
