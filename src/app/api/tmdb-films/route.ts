@@ -258,5 +258,3 @@ async function _GET(request: NextRequest) {
     poster_base: TMDB_IMG,
   });
 }
-  });
-}
