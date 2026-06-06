@@ -211,6 +211,11 @@ export default function TmdbFilmDetailPage() {
         </div>
       </div>
 
+      {/* 在线观看区（VIP 锁） */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-2 pb-2">
+        <WatchSection tmdbId={id} type={type} title={tmdb.title} />
+      </div>
+
       {/* 链接区（平铺） */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {links.length === 0 ? (
@@ -448,5 +453,125 @@ function VipPromptModal({ onClose }: { onClose: () => void }) {
         </div>
       </motion.div>
     </motion.div>
+  );
+}
+
+// ─── 在线观看区（VIP 锁） ────────────────────────────────────────────
+function WatchSection({ tmdbId, type, title }: { tmdbId: string; type: string; title: string }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<{ msg: string; code?: string } | null>(null);
+  const [activeEmbed, setActiveEmbed] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    setData(null);
+    const token = (typeof document !== 'undefined' && (document.cookie.match(/zzmm_token=([^;]+)/)?.[1] || document.cookie.match(/(?:^|;\s*)token=([^;]+)/)?.[1])) || '';
+    fetch(`/api/tmdb-films/${tmdbId}/watch?type=${type}`, {
+      headers: token ? { 'Authorization': `Bearer ${decodeURIComponent(token)}` } : {},
+    })
+      .then(r => r.json().then(j => ({ status: r.status, json: j })))
+      .then(({ status, json }) => {
+        if (status === 401 || status === 403) {
+          setError({ msg: json.error || '需 VIP', code: json.code });
+        } else {
+          setData(json);
+        }
+      })
+      .catch(e => setError({ msg: e.message }))
+      .finally(() => setLoading(false));
+  }, [tmdbId, type]);
+
+  if (loading) {
+    return (
+      <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-5">
+        <div className="text-sm text-white/40">🎬 在线观看加载中...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-gradient-to-r from-violet-900/20 to-pink-900/20 border border-violet-500/30 rounded-2xl p-5">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <Lock className="w-5 h-5 text-violet-400" />
+            <div>
+              <div className="font-medium flex items-center gap-2">
+                🎬 在线观看
+                <span className="px-2 py-0.5 bg-violet-500/20 text-violet-300 rounded text-xs">VIP 专享</span>
+              </div>
+              <div className="text-sm text-white/50 mt-0.5">{error.msg}</div>
+            </div>
+          </div>
+          <Link href="/shop" className="px-4 py-2 bg-gradient-to-r from-violet-600 to-pink-600 rounded-lg text-sm font-medium">
+            购买 VIP
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const videos = data?.videos || [];
+  const active = videos.find((v: any) => v.embed_url === activeEmbed) || videos.find((v: any) => v.embed_url);
+
+  return (
+    <div className="bg-gradient-to-r from-violet-900/20 to-pink-900/20 border border-violet-500/30 rounded-2xl p-5">
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+        <div className="flex items-center gap-3">
+          <div className="text-2xl">🎬</div>
+          <div>
+            <div className="font-medium flex items-center gap-2">
+              在线观看
+              <span className="px-2 py-0.5 bg-violet-500/20 text-violet-300 rounded text-xs">VIP 专享</span>
+            </div>
+            <div className="text-xs text-white/50">TMDB trailers + 公开视频源聚合</div>
+          </div>
+        </div>
+        {data?.keelSearch && (
+          <a href={data.keelSearch} target="_blank" rel="noopener" className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs flex items-center gap-1">
+            <ExternalLink className="w-3 h-3" /> Keel 公开源搜索
+          </a>
+        )}
+      </div>
+      {/* 播放器 */}
+      {active?.embed_url ? (
+        <div className="aspect-video bg-black rounded-xl overflow-hidden mb-3">
+          <iframe
+            src={active.embed_url}
+            className="w-full h-full"
+            allow="autoplay; encrypted-media; picture-in-picture"
+            allowFullScreen
+            title={active.name}
+          />
+        </div>
+      ) : (
+        <div className="aspect-video bg-black/40 rounded-xl flex flex-col items-center justify-center text-white/40 mb-3">
+          <div className="text-4xl mb-2">📭</div>
+          <div>暂无可播放源</div>
+        </div>
+      )}
+      {/* 视频列表 */}
+      {videos.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {videos.slice(0, 6).map((v: any) => (
+            <button
+              key={v.key}
+              onClick={() => v.embed_url && setActiveEmbed(v.embed_url)}
+              className={`px-3 py-1.5 rounded-lg text-xs transition ${
+                (activeEmbed || active?.embed_url) === v.embed_url
+                  ? 'bg-violet-500/30 text-violet-200 border border-violet-500/50'
+                  : 'bg-white/5 text-white/60 hover:bg-white/10 border border-white/5'
+              }`}
+            >
+              <span className="font-mono mr-1.5">▶</span>
+              {v.name || v.type}
+              <span className="text-white/40 ml-1.5 text-[10px]">{v.site}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
