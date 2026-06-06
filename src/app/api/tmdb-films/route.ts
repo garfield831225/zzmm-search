@@ -44,7 +44,7 @@ async function _GET(request: NextRequest) {
   const minRating  = parseFloat(searchParams.get('minRating') || '0');
   const sort       = searchParams.get('sort') || 'smart';           // smart | release_date | popularity | rating
   const page       = Math.max(1, parseInt(searchParams.get('page') || '1'));
-  const pageSize   = Math.min(1000, Math.max(1, parseInt(searchParams.get('pageSize') || '200')));
+  const pageSize   = Math.max(1, parseInt(searchParams.get('pageSize') || '999999'));  // 默认一次拉完所有（不分段）
   const linkType   = searchParams.get('linkType') || 'all';         // all | 115 | baidu | ...
   const keyword    = (searchParams.get('q') || '').trim();
 

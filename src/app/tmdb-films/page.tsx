@@ -269,24 +269,10 @@ export default function TmdbFilmsPage() {
           </div>
         )}
 
-        {/* 分页 */}
+        {/* 总数提示（一次拉完所有） */}
         {items.length > 0 && (
-          <div className="mt-8 flex items-center justify-center gap-2">
-            <button
-              onClick={() => setPage(Math.max(1, page - 1))}
-              disabled={page === 1}
-              className="px-4 py-2 rounded-lg bg-white/5 text-white/60 hover:bg-white/10 disabled:opacity-30"
-            >
-              上一页
-            </button>
-            <span className="px-4 py-2 text-sm text-white/60">第 {page} 页</span>
-            <button
-              onClick={() => setPage(page + 1)}
-              disabled={items.length < 24}
-              className="px-4 py-2 rounded-lg bg-white/5 text-white/60 hover:bg-white/10 disabled:opacity-30"
-            >
-              下一页
-            </button>
+          <div className="mt-8 text-center text-sm text-white/40">
+            共 {items.length} 条 · 滚动浏览全部
           </div>
         )}
       </div>
