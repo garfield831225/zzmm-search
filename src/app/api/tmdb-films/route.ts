@@ -44,7 +44,7 @@ async function _GET(request: NextRequest) {
   const minRating  = parseFloat(searchParams.get('minRating') || '0');
   const sort       = searchParams.get('sort') || 'smart';           // smart | release_date | popularity | rating
   const page       = Math.max(1, parseInt(searchParams.get('page') || '1'));
-  const pageSize   = Math.min(60, Math.max(1, parseInt(searchParams.get('pageSize') || '24')));
+  const pageSize   = Math.min(60, Math.max(1, parseInt(searchParams.get('pageSize') || '36')));
   const linkType   = searchParams.get('linkType') || 'all';         // all | 115 | baidu | ...
   const keyword    = (searchParams.get('q') || '').trim();
 
@@ -83,7 +83,8 @@ async function _GET(request: NextRequest) {
   if (type === 'tv') resourceConditions.push(`r.category IN ('剧集','连载','动漫','少儿频道','综艺','纪录片')`);
   else if (type === 'movie') resourceConditions.push(`r.category IN ('电影','华语电影','外语电影','动画电影','演唱会','REMUX','系列电影')`);
 
-  // 1 块 SQL：用户已导入 + 已匹配（distinct，tmdb_type 从 d 拿）
+  // 1 块 SQL：用户已导入 + 已匹配（distinct，tmdb_type 从 d 拿，加 OFFSET 翻页）
+  const offset1 = (page - 1) * perBlock;
   const block1 = await sql(`
     WITH matched AS (
       SELECT r.tmdb_id::int as tmdb_id, MAX(r.updated_at) as updated_at,
@@ -97,6 +98,7 @@ async function _GET(request: NextRequest) {
         AND ${resourceWhere}
       GROUP BY r.tmdb_id
       ORDER BY MAX(r.updated_at) DESC
+      LIMIT $${params.length + 3} OFFSET $${params.length + 4}
     )
     SELECT m.tmdb_id, m.view_count, m.link_count, m.updated_at,
            d.tmdb_type, d.title, d.original_title, d.poster_path, d.backdrop_path,
@@ -109,9 +111,10 @@ async function _GET(request: NextRequest) {
     LEFT JOIN xx_tmdb_cache c ON c.tmdb_id = m.tmdb_id::text
     ORDER BY m.updated_at DESC
     LIMIT $${params.length + 2}
-  `, [...params, type, pageSize * 2]) as any[];
+  `, [...params, type, pageSize * 2, perBlock, offset1]) as any[];
 
-  // 2 块 SQL：用户已导入 + 未匹配（按 name + link 排序，取 2 倍 pageSize 留空间）
+  // 2 块 SQL：用户已导入 + 未匹配（按 view_count + created_at 排序，加 OFFSET 翻页）
+  const offset2 = (page - 1) * perBlock;
   const block2 = await sql(`
     SELECT id, name, link, link_code, source, category, size, view_count, created_at
     FROM xx_resources r
@@ -119,11 +122,11 @@ async function _GET(request: NextRequest) {
       AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')
       AND ${resourceWhere}
     ORDER BY r.view_count DESC, r.created_at DESC
-    LIMIT $${params.length + 1}
-  `, [...params, pageSize * 2]) as any[];
+    LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+  `, [...params, perBlock, offset2]) as any[];
 
-  // 3 块 SQL：TMDB 全量 ∖ 用户已导入（先拿所有用户已导入的 tmdb_id）
-  // 第 1 块用 distinct ON 没法直接做子查询，改为 NOT IN
+  // 3 块 SQL：TMDB 全量 ∖ 用户已导入（加 OFFSET 翻页）
+  const offset3 = (page - 1) * perBlock;
   const block3 = await sql(`
     SELECT tmdb_id, tmdb_type, title, original_title, poster_path, backdrop_path,
            release_date, first_air_date, vote_average, popularity,
@@ -138,8 +141,33 @@ async function _GET(request: NextRequest) {
           AND r.status = 'active'
       )
     ORDER BY popularity DESC NULLS LAST
-    LIMIT $${params.length + 2}
-  `, [...params, type, pageSize * 2]) as any[];
+    LIMIT $${params.length + 2} OFFSET $${params.length + 3}
+  `, [...params, type, perBlock, offset3]) as any[];
+
+  // 真实总数（不带 LIMIT，3 个独立 COUNT）
+  const count1 = await sql`
+    SELECT COUNT(DISTINCT r.tmdb_id)::int as cnt
+    FROM xx_resources r
+    WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH'
+      AND r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000
+      AND r.status = 'active' AND ${resourceWhere}
+  ` as any[];
+  const count2 = await sql`
+    SELECT COUNT(*)::int as cnt FROM xx_resources r
+    WHERE r.status = 'active'
+      AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')
+      AND ${resourceWhere}
+  ` as any[];
+  const count3 = await sql`
+    SELECT COUNT(*)::int as cnt FROM xx_tmdb_discover
+    WHERE tmdb_type = ${type} AND poster_path IS NOT NULL
+      AND tmdb_id NOT IN (
+        SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r
+        WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH'
+          AND r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000
+          AND r.status = 'active'
+      )
+  ` as any[];
 
   // ─── 关键词过滤（在内存中做）──────────────────────────────────────
   let b1 = block1, b2 = block2, b3 = block3;
@@ -250,11 +278,18 @@ async function _GET(request: NextRequest) {
   ];
 
   return NextResponse.json({
-    debug: { cats, params, paramsLen: params.length, type, year, genre, linkType, sort, page, pageSize, keyword, perBlock },
+    debug: { cats, params, paramsLen: params.length, type, year, genre, linkType, sort, page, pageSize, keyword, perBlock, offset1, offset2, offset3 },
     page,
     pageSize,
     items,
-    counts: { block1: b1.length, block2: b2.length, block3: b3.length },
+    counts: {
+      block1: count1[0]?.cnt || 0,
+      block2: count2[0]?.cnt || 0,
+      block3: count3[0]?.cnt || 0,
+      hasMore1: b1.length === perBlock,
+      hasMore2: b2.length === perBlock,
+      hasMore3: b3.length === perBlock,
+    },
     user: { group: userGroup, isVipPlus },
     poster_base: TMDB_IMG,
   });
