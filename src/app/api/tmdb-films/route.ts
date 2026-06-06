@@ -159,7 +159,7 @@ async function _GET(request: NextRequest) {
       )${b3Search}
     ORDER BY release_date DESC NULLS LAST, first_air_date DESC NULLS LAST
     LIMIT $${params.length + 2} OFFSET $${params.length + 3}
-  `, isSearch ? [...params, type, kwLike, limit3, offset3] : [...params, type, limit3, offset3]) as any[];
+  `, isSearch ? [...params, type, limit3, offset3, kwLike] : [...params, type, limit3, offset3]) as any[];
 
   // 真实总数（不带 LIMIT，3 个独立 COUNT；resourceWhere 是字符串拼接，不用 ${}）
   const resourceBase = `r.status = 'active'${cats.length ? ` AND r.category IN (${cats.map((_, i) => `'${cats[i].replace(/'/g, "''")}'`).join(',')})` : ''}${linkType === '115' ? ` AND r.source = '115'` : linkType === 'baidu' ? ` AND r.source = 'baidu'` : linkType === 'other' ? ` AND r.source NOT IN ('115','baidu','aliyun','quark')` : ''}`;
