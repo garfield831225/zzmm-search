@@ -39,6 +39,7 @@ const PUBLIC_PATHS = [
   '/api/admin/reset-yuancategory',
   '/api/tmdb-films',
   '/tmdb-films',
+  '/vip-videos',
 ];
 
 export function middleware(request: NextRequest) {
