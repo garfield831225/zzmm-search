@@ -163,10 +163,16 @@ export default function TmdbFilmDetailPage() {
                     <span>{(tmdb.release_date || tmdb.first_air_date).slice(0, 4)}</span>
                   </div>
                 )}
-                {tmdb.origin_country && tmdb.origin_country.length > 0 && (
+                {tmdb.origin_country && Array.isArray(tmdb.origin_country) && tmdb.origin_country.length > 0 && (
                   <div className="flex items-center gap-1 text-white/70">
                     <Globe className="w-4 h-4" />
                     <span>{tmdb.origin_country.join(' / ')}</span>
+                  </div>
+                )}
+                {tmdb.origin_country && typeof tmdb.origin_country === 'string' && tmdb.origin_country && (
+                  <div className="flex items-center gap-1 text-white/70">
+                    <Globe className="w-4 h-4" />
+                    <span>{tmdb.origin_country}</span>
                   </div>
                 )}
                 {tmdb.runtime && (

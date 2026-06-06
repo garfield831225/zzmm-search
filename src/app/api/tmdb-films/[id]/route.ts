@@ -44,6 +44,17 @@ export async function GET(
     if (cache[0]) tmdb = cache[0];
   }
 
+  // 兼容 origin_country 字符串/数组
+  if (tmdb && typeof tmdb.origin_country === 'string') {
+    tmdb.origin_country = tmdb.origin_country ? tmdb.origin_country.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+  }
+  if (tmdb && !Array.isArray(tmdb.origin_country)) {
+    tmdb.origin_country = [];
+  }
+  if (tmdb && !Array.isArray(tmdb.genres)) {
+    tmdb.genres = [];
+  }
+
   // 2) 当前用户
   const user = await getUser(request);
   const userGroup = user?.group || 'user';
