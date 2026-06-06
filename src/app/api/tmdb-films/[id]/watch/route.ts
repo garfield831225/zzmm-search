@@ -7,9 +7,16 @@ export const dynamic = 'force-dynamic';
 
 async function getUser(req: NextRequest) {
   try {
+    let token: string | null = null;
+    // 1) Bearer header（前端主动传）
     const auth = req.headers.get('authorization');
-    if (!auth?.startsWith('Bearer ')) return null;
-    const token = auth.replace('Bearer ', '');
+    if (auth?.startsWith('Bearer ')) token = auth.replace('Bearer ', '');
+    // 2) Cookie 兜底（httpOnly，middleware 能读，前端 JS 读不到）
+    if (!token) {
+      const c = req.cookies.get('zzmm_token')?.value || req.cookies.get('token')?.value;
+      if (c) token = c;
+    }
+    if (!token) return null;
     const payload = jwt.verify(token, (process.env.JWT_SECRET || 'cLWhs2015')) as any;
     const userId = String(payload.id);
     const sql = neon(process.env.DATABASE_URL || '');

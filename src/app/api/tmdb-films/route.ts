@@ -83,12 +83,10 @@ async function _GET(request: NextRequest) {
   if (type === 'tv') resourceConditions.push(`r.category IN ('剧集','连载','动漫','少儿频道','综艺','纪录片')`);
   else if (type === 'movie') resourceConditions.push(`r.category IN ('电影','华语电影','外语电影','动画电影','演唱会','REMUX','系列电影')`);
 
-  // ─── 拼装结果（标记块）──────────────────────────────────────
-  // 3 块各 1/3（确保用户能同时看到 3 块内容）
-  const perBlock = Math.max(4, Math.floor(pageSize / 3));
+  // ─── 拼装结果（整体排序：1 块 → 2 块 → 3 块，各自按自己规则排满 pageSize 条）──
 
   // 1 块 SQL：用户已导入 + 已匹配（distinct，tmdb_type 从 d 拿，加 OFFSET 翻页）
-  const offset1 = (page - 1) * perBlock;
+  const offset1 = (page - 1) * pageSize;
   const block1 = await sql(`
     WITH matched AS (
       SELECT r.tmdb_id::int as tmdb_id, MAX(r.updated_at) as updated_at,
@@ -115,10 +113,10 @@ async function _GET(request: NextRequest) {
     LEFT JOIN xx_tmdb_cache c ON c.tmdb_id = m.tmdb_id::text
     ORDER BY m.updated_at DESC
     LIMIT $${params.length + 2}
-  `, [...params, type, pageSize * 2, perBlock, offset1]) as any[];
+  `, [...params, type, pageSize, pageSize, offset1]) as any[];
 
   // 2 块 SQL：用户已导入 + 未匹配（按 view_count + created_at 排序，加 OFFSET 翻页）
-  const offset2 = (page - 1) * perBlock;
+  const offset2 = (page - 1) * pageSize;
   const block2 = await sql(`
     SELECT id, name, link, link_code, source, category, size, view_count, created_at
     FROM xx_resources r
@@ -127,10 +125,10 @@ async function _GET(request: NextRequest) {
       AND ${resourceWhere}
     ORDER BY r.view_count DESC, r.created_at DESC
     LIMIT $${params.length + 1} OFFSET $${params.length + 2}
-  `, [...params, perBlock, offset2]) as any[];
+  `, [...params, pageSize, offset2]) as any[];
 
   // 3 块 SQL：TMDB 全量 ∖ 用户已导入（加 OFFSET 翻页）
-  const offset3 = (page - 1) * perBlock;
+  const offset3 = (page - 1) * pageSize;
   const block3 = await sql(`
     SELECT tmdb_id, tmdb_type, title, original_title, poster_path, backdrop_path,
            release_date, first_air_date, vote_average, popularity,
@@ -146,7 +144,7 @@ async function _GET(request: NextRequest) {
       )
     ORDER BY popularity DESC NULLS LAST
     LIMIT $${params.length + 2} OFFSET $${params.length + 3}
-  `, [...params, type, perBlock, offset3]) as any[];
+  `, [...params, type, pageSize, offset3]) as any[];
 
   // 真实总数（不带 LIMIT，3 个独立 COUNT；resourceWhere 是字符串拼接，不用 ${}）
   const resourceBase = `r.status = 'active'${cats.length ? ` AND r.category IN (${cats.map((_, i) => `'${cats[i].replace(/'/g, "''")}'`).join(',')})` : ''}${linkType === '115' ? ` AND r.source = '115'` : linkType === 'baidu' ? ` AND r.source = 'baidu'` : linkType === 'other' ? ` AND r.source NOT IN ('115','baidu','aliyun','quark')` : ''}`;
@@ -207,9 +205,9 @@ async function _GET(request: NextRequest) {
     b3.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
   }
 
-  // ─── 拼装结果（标记块）──────────────────────────────────────
+  // ─── 拼装结果（整体排序：1 块 → 2 块 → 3 块，各自按自己规则排满 pageSize 条）──
   const items = [
-    ...b1.slice(0, perBlock).map((r: any) => ({
+    ...b1.slice(0, pageSize).map((r: any) => ({
       block: 1,
       tmdb_id: Number(r.tmdb_id),
       tmdb_type: r.tmdb_type,
@@ -228,7 +226,7 @@ async function _GET(request: NextRequest) {
       link_count: Number(r.link_count || 1),
       view_count: Number(r.view_count || 0),
     })),
-    ...b2.slice(0, perBlock).map((r: any) => ({
+    ...b2.slice(0, pageSize).map((r: any) => ({
       block: 2,
       id: r.id,
       name: r.name,
@@ -241,7 +239,7 @@ async function _GET(request: NextRequest) {
       has_resource: true,
       has_tmdb: false,
     })),
-    ...b3.slice(0, perBlock).map((r: any) => ({
+    ...b3.slice(0, pageSize).map((r: any) => ({
       block: 3,
       tmdb_id: r.tmdb_id,
       tmdb_type: r.tmdb_type,
@@ -261,7 +259,7 @@ async function _GET(request: NextRequest) {
   ];
 
   return NextResponse.json({
-    debug: { cats, params, paramsLen: params.length, type, year, genre, linkType, sort, page, pageSize, keyword, perBlock, offset1, offset2, offset3 },
+    debug: { cats, params, paramsLen: params.length, type, year, genre, linkType, sort, page, pageSize, keyword, offset1, offset2, offset3 },
     page,
     pageSize,
     items,
@@ -269,9 +267,9 @@ async function _GET(request: NextRequest) {
       block1: count1[0]?.cnt || 0,
       block2: count2[0]?.cnt || 0,
       block3: count3[0]?.cnt || 0,
-      hasMore1: b1.length === perBlock,
-      hasMore2: b2.length === perBlock,
-      hasMore3: b3.length === perBlock,
+      hasMore1: b1.length === pageSize,
+      hasMore2: b2.length === pageSize,
+      hasMore3: b3.length === pageSize,
     },
     user: { group: userGroup, isVipPlus },
     poster_base: TMDB_IMG,
