@@ -279,12 +279,10 @@ async function _GET(request: NextRequest) {
     }),
   ];
 
-  // 整体 list 统一按 sort_key DESC 排（不按块分；Date 转字符串）
-  items.sort((a, b) => {
-    const sa = typeof a.sort_key === 'string' ? a.sort_key : (a.sort_key ? new Date(a.sort_key).toISOString().slice(0, 10) : '1900-01-01');
-    const sb = typeof b.sort_key === 'string' ? b.sort_key : (b.sort_key ? new Date(b.sort_key).toISOString().slice(0, 10) : '1900-01-01');
-    return sb.localeCompare(sa);
-  });
+  // 整体按块优先级拼接：1 块（8981）→ 2 块（25501）→ 3 块（26644）
+  // 不再混排——每块内部按各自规则排好（b1 release_date DESC, b2 created_at DESC, b3 release_date DESC）
+  // "挪位置"是 v3 match 自动做的：写 xx_resources.tmdb_id 后下次 query 自动从 25501 进 8981
+  // 块 3 26644 = xx_tmdb_discover ∖ xx_resources（自动 NOT IN）
 
   return NextResponse.json({
     debug: { cats, params, paramsLen: params.length, type, year, genre, linkType, sort, page, pageSize, keyword, offset1, offset2, offset3 },
