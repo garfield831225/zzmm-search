@@ -83,12 +83,11 @@ async function _GET(request: NextRequest) {
   if (type === 'tv') resourceConditions.push(`r.category IN ('剧集','连载','动漫','少儿频道','综艺','纪录片')`);
   else if (type === 'movie') resourceConditions.push(`r.category IN ('电影','华语电影','外语电影','动画电影','演唱会','REMUX','系列电影')`);
 
-  // 1 块 SQL：用户已导入 + 已匹配（distinct）
+  // 1 块 SQL：用户已导入 + 已匹配（distinct，tmdb_type 从 d 拿）
   const block1 = await sql(`
     WITH matched AS (
-      SELECT DISTINCT ON (r.tmdb_id, r.tmdb_type)
-        r.tmdb_id, r.tmdb_type, r.updated_at, MAX(r.view_count) as view_count,
-        COUNT(*) as link_count
+      SELECT r.tmdb_id::int as tmdb_id, MAX(r.updated_at) as updated_at,
+             MAX(r.view_count) as view_count, COUNT(*) as link_count
       FROM xx_resources r
       WHERE r.tmdb_id IS NOT NULL
         AND r.tmdb_id != ''
@@ -96,21 +95,21 @@ async function _GET(request: NextRequest) {
         AND r.tmdb_id ~ '^[0-9]+$'
         AND (r.tmdb_id)::int > 10000
         AND ${resourceWhere}
-      GROUP BY r.tmdb_id, r.tmdb_type, r.updated_at
-      ORDER BY r.tmdb_id, r.tmdb_type, r.updated_at DESC
+      GROUP BY r.tmdb_id
+      ORDER BY MAX(r.updated_at) DESC
     )
-    SELECT m.tmdb_id, m.tmdb_type, m.view_count, m.link_count, m.updated_at,
-           d.title, d.original_title, d.poster_path, d.backdrop_path,
+    SELECT m.tmdb_id, m.view_count, m.link_count, m.updated_at,
+           d.tmdb_type, d.title, d.original_title, d.poster_path, d.backdrop_path,
            d.release_date, d.first_air_date, d.vote_average, d.popularity,
            d.genres, d.origin_country, d.overview,
            c.cached_title, c.cached_poster, c.cached_overview,
            c.release_date as cache_release
     FROM matched m
-    LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = m.tmdb_type
+    LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = $${params.length + 1}
     LEFT JOIN xx_tmdb_cache c ON c.tmdb_id = m.tmdb_id
     ORDER BY m.updated_at DESC
-    LIMIT $${params.length + 1}
-  `, [...params, pageSize * 2]) as any[];
+    LIMIT $${params.length + 2}
+  `, [...params, type, pageSize * 2]) as any[];
 
   // 2 块 SQL：用户已导入 + 未匹配（按 name + link 排序，取 2 倍 pageSize 留空间）
   const block2 = await sql(`
