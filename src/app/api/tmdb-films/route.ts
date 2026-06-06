@@ -279,8 +279,12 @@ async function _GET(request: NextRequest) {
     }),
   ];
 
-  // 整体 list 统一按 sort_key DESC 排（不按块分）
-  items.sort((a, b) => (b.sort_key || '1900-01-01').localeCompare(a.sort_key || '1900-01-01'));
+  // 整体 list 统一按 sort_key DESC 排（不按块分；Date 转字符串）
+  items.sort((a, b) => {
+    const sa = typeof a.sort_key === 'string' ? a.sort_key : (a.sort_key ? new Date(a.sort_key).toISOString().slice(0, 10) : '1900-01-01');
+    const sb = typeof b.sort_key === 'string' ? b.sort_key : (b.sort_key ? new Date(b.sort_key).toISOString().slice(0, 10) : '1900-01-01');
+    return sb.localeCompare(sa);
+  });
 
   return NextResponse.json({
     debug: { cats, params, paramsLen: params.length, type, year, genre, linkType, sort, page, pageSize, keyword, offset1, offset2, offset3 },
