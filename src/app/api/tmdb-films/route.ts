@@ -106,7 +106,7 @@ async function _GET(request: NextRequest) {
            c.release_date as cache_release
     FROM matched m
     LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = $${params.length + 1}
-    LEFT JOIN xx_tmdb_cache c ON c.tmdb_id = m.tmdb_id
+    LEFT JOIN xx_tmdb_cache c ON c.tmdb_id = m.tmdb_id::text
     ORDER BY m.updated_at DESC
     LIMIT $${params.length + 2}
   `, [...params, type, pageSize * 2]) as any[];
