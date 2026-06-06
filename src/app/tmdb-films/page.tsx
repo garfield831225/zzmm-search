@@ -103,7 +103,7 @@ export default function TmdbFilmsPage() {
     setLoading(true);
     try {
       const params = new URLSearchParams({
-        type, category, sort, linkType, q: keyword, page: String(page), pageSize: '24',
+        type, category, sort, linkType, q: keyword, page: String(page), pageSize: '200',
       });
       if (year !== '全部') params.set('year', year);
       if (genre) params.set('genre', genre);
