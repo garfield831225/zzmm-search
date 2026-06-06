@@ -149,17 +149,17 @@ async function _GET(request: NextRequest) {
            release_date, first_air_date, vote_average, popularity,
            genres, origin_country, overview
     FROM xx_tmdb_discover
-    WHERE tmdb_type = $${params.length + 1}
+    WHERE tmdb_type = ${type}
       AND poster_path IS NOT NULL
       AND tmdb_id NOT IN (
         SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r
         WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH'
           AND r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000
           AND r.status = 'active'
-      )${b3Search}
+      ) ${b3Search}
     ORDER BY release_date DESC NULLS LAST, first_air_date DESC NULLS LAST
-    LIMIT $${params.length + 2} OFFSET $${params.length + 3}
-  `, isSearch ? [...params, type, limit3, offset3, kwLike] : [...params, type, limit3, offset3]) as any[];
+    LIMIT ${limit3} OFFSET ${offset3}
+  `) as any[];
 
   // 真实总数（不带 LIMIT，3 个独立 COUNT；resourceWhere 是字符串拼接，不用 ${}）
   const resourceBase = `r.status = 'active'${cats.length ? ` AND r.category IN (${cats.map((_, i) => `'${cats[i].replace(/'/g, "''")}'`).join(',')})` : ''}${linkType === '115' ? ` AND r.source = '115'` : linkType === 'baidu' ? ` AND r.source = 'baidu'` : linkType === 'other' ? ` AND r.source NOT IN ('115','baidu','aliyun','quark')` : ''}`;
