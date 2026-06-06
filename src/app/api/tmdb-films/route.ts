@@ -83,10 +83,22 @@ async function _GET(request: NextRequest) {
   if (type === 'tv') resourceConditions.push(`r.category IN ('剧集','连载','动漫','少儿频道','综艺','纪录片')`);
   else if (type === 'movie') resourceConditions.push(`r.category IN ('电影','华语电影','外语电影','动画电影','演唱会','REMUX','系列电影')`);
 
-  // ─── 拼装结果（整体排序：1 块 → 2 块 → 3 块，各自按自己规则排满 pageSize 条）──
+  // ─── 拼装结果（整体排序：1 块 → 2 块 → 3 块，整个 list 统一按 release_date DESC）──
+  // 搜索模式（keyword 非空）：跨 3 块全量搜，不分页，SQL 层 ILIKE
+  // 整体排序：每个 item 给一个 sort_key
+  //   b1: release_date || first_air_date || cache_release || '1900-01-01'
+  //   b2: created_at （没 release_date，用 created_at fallback）
+  //   b3: release_date || first_air_date || '1900-01-01'
+  // 然后整个 list 统一按 sort_key DESC 排（不分块）
 
-  // 1 块 SQL：用户已导入 + 已匹配（distinct，tmdb_type 从 d 拿，加 OFFSET 翻页）
-  const offset1 = (page - 1) * pageSize;
+  const isSearch = !!keyword;
+  const kwEsc = (keyword || '').replace(/[\\%_]/g, '\\$&').toLowerCase();
+  const kwLike = `%${kwEsc}%`;
+
+  // 1 块 SQL：用户已导入 + 已匹配（按 release_date DESC 排，搜索时加 ILIKE）
+  const offset1 = isSearch ? 0 : (page - 1) * pageSize;
+  const limit1 = isSearch ? 200 : pageSize;
+  const b1Search = isSearch ? ` AND (LOWER(COALESCE(d.title, c.title, '')) LIKE LOWER($${params.length + 5}) ESCAPE '\\' OR LOWER(COALESCE(d.original_title, '')) LIKE LOWER($${params.length + 5}) ESCAPE '\\')` : '';
   const block1 = await sql(`
     WITH matched AS (
       SELECT r.tmdb_id::int as tmdb_id, MAX(r.updated_at) as updated_at,
@@ -99,8 +111,6 @@ async function _GET(request: NextRequest) {
         AND (r.tmdb_id)::int > 10000
         AND ${resourceWhere}
       GROUP BY r.tmdb_id
-      ORDER BY MAX(r.updated_at) DESC
-      LIMIT $${params.length + 3} OFFSET $${params.length + 4}
     )
     SELECT m.tmdb_id, m.view_count, m.link_count, m.updated_at,
            d.tmdb_type, d.title, d.original_title, d.poster_path, d.backdrop_path,
@@ -111,24 +121,29 @@ async function _GET(request: NextRequest) {
     FROM matched m
     LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = $${params.length + 1}
     LEFT JOIN xx_tmdb_cache c ON c.tmdb_id = m.tmdb_id::text
-    ORDER BY m.updated_at DESC
-    LIMIT $${params.length + 2}
-  `, [...params, type, pageSize, pageSize, offset1]) as any[];
+    WHERE 1=1${b1Search}
+    ORDER BY COALESCE(c.release_date, d.release_date, d.first_air_date, '1900-01-01') DESC NULLS LAST
+    LIMIT $${params.length + 2} OFFSET $${params.length + 3}
+  `, isSearch ? [...params, type, limit1, offset1, kwLike] : [...params, type, limit1, offset1]) as any[];
 
-  // 2 块 SQL：用户已导入 + 未匹配（按 view_count + created_at 排序，加 OFFSET 翻页）
-  const offset2 = (page - 1) * pageSize;
+  // 2 块 SQL：用户已导入 + 未匹配（按 created_at DESC，搜索时 ILIKE name）
+  const offset2 = isSearch ? 0 : (page - 1) * pageSize;
+  const limit2 = isSearch ? 200 : pageSize;
+  const b2Search = isSearch ? ` AND LOWER(r.name) LIKE LOWER($${params.length + 3}) ESCAPE '\\'` : '';
   const block2 = await sql(`
     SELECT id, name, link, link_code, source, category, size, view_count, created_at
     FROM xx_resources r
     WHERE r.status = 'active'
       AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')
-      AND ${resourceWhere}
-    ORDER BY r.view_count DESC, r.created_at DESC
+      AND ${resourceWhere}${b2Search}
+    ORDER BY r.created_at DESC
     LIMIT $${params.length + 1} OFFSET $${params.length + 2}
-  `, [...params, pageSize, offset2]) as any[];
+  `, isSearch ? [...params, limit2, offset2, kwLike] : [...params, limit2, offset2]) as any[];
 
-  // 3 块 SQL：TMDB 全量 ∖ 用户已导入（加 OFFSET 翻页）
-  const offset3 = (page - 1) * pageSize;
+  // 3 块 SQL：TMDB 全量 ∖ 用户已导入（按 release_date DESC，搜索时 ILIKE）
+  const offset3 = isSearch ? 0 : (page - 1) * pageSize;
+  const limit3 = isSearch ? 200 : pageSize;
+  const b3Search = isSearch ? ` AND (LOWER(title) LIKE LOWER($${params.length + 4}) ESCAPE '\\' OR LOWER(original_title) LIKE LOWER($${params.length + 4}) ESCAPE '\\')` : '';
   const block3 = await sql(`
     SELECT tmdb_id, tmdb_type, title, original_title, poster_path, backdrop_path,
            release_date, first_air_date, vote_average, popularity,
@@ -141,10 +156,10 @@ async function _GET(request: NextRequest) {
         WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH'
           AND r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000
           AND r.status = 'active'
-      )
-    ORDER BY popularity DESC NULLS LAST
+      )${b3Search}
+    ORDER BY release_date DESC NULLS LAST, first_air_date DESC NULLS LAST
     LIMIT $${params.length + 2} OFFSET $${params.length + 3}
-  `, [...params, type, pageSize, offset3]) as any[];
+  `, isSearch ? [...params, type, kwLike, limit3, offset3] : [...params, type, limit3, offset3]) as any[];
 
   // 真实总数（不带 LIMIT，3 个独立 COUNT；resourceWhere 是字符串拼接，不用 ${}）
   const resourceBase = `r.status = 'active'${cats.length ? ` AND r.category IN (${cats.map((_, i) => `'${cats[i].replace(/'/g, "''")}'`).join(',')})` : ''}${linkType === '115' ? ` AND r.source = '115'` : linkType === 'baidu' ? ` AND r.source = 'baidu'` : linkType === 'other' ? ` AND r.source NOT IN ('115','baidu','aliyun','quark')` : ''}`;
@@ -152,14 +167,8 @@ async function _GET(request: NextRequest) {
   const count2 = await sql(`SELECT COUNT(*)::int as cnt FROM xx_resources r WHERE ${resourceBase} AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')`) as any[];
   const count3 = await sql(`SELECT COUNT(*)::int as cnt FROM xx_tmdb_discover WHERE tmdb_type = $1 AND poster_path IS NOT NULL AND tmdb_id NOT IN (SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH' AND r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000 AND r.status = 'active')`, [type]) as any[];
 
-  // ─── 关键词过滤（在内存中做）──────────────────────────────────────
+  // ─── 关键词过滤（已在 SQL 层做，b1/b2/b3 各自 ILIKE）────────
   let b1 = block1, b2 = block2, b3 = block3;
-  if (keyword) {
-    const kw = keyword.toLowerCase();
-    b1 = b1.filter(r => (r.title || '').toLowerCase().includes(kw) || (r.cached_title || '').toLowerCase().includes(kw) || (r.original_title || '').toLowerCase().includes(kw));
-    b2 = b2.filter(r => (r.name || '').toLowerCase().includes(kw));
-    b3 = b3.filter(r => (r.title || '').toLowerCase().includes(kw) || (r.original_title || '').toLowerCase().includes(kw));
-  }
 
   // 年份过滤
   if (year) {
@@ -207,56 +216,71 @@ async function _GET(request: NextRequest) {
 
   // ─── 拼装结果（整体排序：1 块 → 2 块 → 3 块，各自按自己规则排满 pageSize 条）──
   const items = [
-    ...b1.slice(0, pageSize).map((r: any) => ({
-      block: 1,
-      tmdb_id: Number(r.tmdb_id),
-      tmdb_type: r.tmdb_type,
-      title: r.cached_title || r.title || '',
-      original_title: r.original_title,
-      poster_path: r.cached_poster || r.poster_path,
-      backdrop_path: r.backdrop_path,
-      release_date: r.release_date || r.cache_release,
-      first_air_date: r.first_air_date,
-      vote_average: Number(r.vote_average || 0),
-      popularity: Number(r.popularity || 0),
-      genres: r.genres || [],
-      origin_country: r.origin_country || [],
-      overview: r.cached_overview || r.overview,
-      has_resource: true,
-      link_count: Number(r.link_count || 1),
-      view_count: Number(r.view_count || 0),
-    })),
-    ...b2.slice(0, pageSize).map((r: any) => ({
-      block: 2,
-      id: r.id,
-      name: r.name,
-      link: r.link,
-      link_code: r.link_code,
-      source: r.source,
-      category: r.category,
-      size: r.size,
-      view_count: Number(r.view_count || 0),
-      has_resource: true,
-      has_tmdb: false,
-    })),
-    ...b3.slice(0, pageSize).map((r: any) => ({
-      block: 3,
-      tmdb_id: r.tmdb_id,
-      tmdb_type: r.tmdb_type,
-      title: r.title,
-      original_title: r.original_title,
-      poster_path: r.poster_path,
-      backdrop_path: r.backdrop_path,
-      release_date: r.release_date,
-      first_air_date: r.first_air_date,
-      vote_average: Number(r.vote_average || 0),
-      popularity: Number(r.popularity || 0),
-      genres: r.genres || [],
-      origin_country: r.origin_country || [],
-      overview: r.overview,
-      has_resource: false,
-    })),
+    ...b1.slice(0, pageSize).map((r: any) => {
+      const sk = r.release_date || r.first_air_date || r.cache_release || '1900-01-01';
+      return {
+        block: 1,
+        tmdb_id: Number(r.tmdb_id),
+        tmdb_type: r.tmdb_type,
+        title: r.cached_title || r.title || '',
+        original_title: r.original_title,
+        poster_path: r.cached_poster || r.poster_path,
+        backdrop_path: r.backdrop_path,
+        release_date: r.release_date || r.cache_release,
+        first_air_date: r.first_air_date,
+        vote_average: Number(r.vote_average || 0),
+        popularity: Number(r.popularity || 0),
+        genres: r.genres || [],
+        origin_country: r.origin_country || [],
+        overview: r.cached_overview || r.overview,
+        has_resource: true,
+        link_count: Number(r.link_count || 1),
+        view_count: Number(r.view_count || 0),
+        sort_key: sk,
+      };
+    }),
+    ...b2.slice(0, pageSize).map((r: any) => {
+      const sk = r.created_at || '1900-01-01';
+      return {
+        block: 2,
+        id: r.id,
+        name: r.name,
+        link: r.link,
+        link_code: r.link_code,
+        source: r.source,
+        category: r.category,
+        size: r.size,
+        view_count: Number(r.view_count || 0),
+        has_resource: true,
+        has_tmdb: false,
+        sort_key: sk,
+      };
+    }),
+    ...b3.slice(0, pageSize).map((r: any) => {
+      const sk = r.release_date || r.first_air_date || '1900-01-01';
+      return {
+        block: 3,
+        tmdb_id: r.tmdb_id,
+        tmdb_type: r.tmdb_type,
+        title: r.title,
+        original_title: r.original_title,
+        poster_path: r.poster_path,
+        backdrop_path: r.backdrop_path,
+        release_date: r.release_date,
+        first_air_date: r.first_air_date,
+        vote_average: Number(r.vote_average || 0),
+        popularity: Number(r.popularity || 0),
+        genres: r.genres || [],
+        origin_country: r.origin_country || [],
+        overview: r.overview,
+        has_resource: false,
+        sort_key: sk,
+      };
+    }),
   ];
+
+  // 整体 list 统一按 sort_key DESC 排（不按块分）
+  items.sort((a, b) => (b.sort_key || '1900-01-01').localeCompare(a.sort_key || '1900-01-01'));
 
   return NextResponse.json({
     debug: { cats, params, paramsLen: params.length, type, year, genre, linkType, sort, page, pageSize, keyword, offset1, offset2, offset3 },
