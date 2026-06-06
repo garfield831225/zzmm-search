@@ -38,6 +38,7 @@ const PUBLIC_PATHS = [
   '/api/admin/add-sub-type',
   '/api/admin/reset-yuancategory',
   '/api/tmdb-films',
+  '/tmdb-films',
 ];
 
 export function middleware(request: NextRequest) {
