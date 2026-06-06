@@ -83,6 +83,10 @@ async function _GET(request: NextRequest) {
   if (type === 'tv') resourceConditions.push(`r.category IN ('剧集','连载','动漫','少儿频道','综艺','纪录片')`);
   else if (type === 'movie') resourceConditions.push(`r.category IN ('电影','华语电影','外语电影','动画电影','演唱会','REMUX','系列电影')`);
 
+  // ─── 拼装结果（标记块）──────────────────────────────────────
+  // 3 块各 1/3（确保用户能同时看到 3 块内容）
+  const perBlock = Math.max(4, Math.floor(pageSize / 3));
+
   // 1 块 SQL：用户已导入 + 已匹配（distinct，tmdb_type 从 d 拿，加 OFFSET 翻页）
   const offset1 = (page - 1) * perBlock;
   const block1 = await sql(`
@@ -223,8 +227,6 @@ async function _GET(request: NextRequest) {
   }
 
   // ─── 拼装结果（标记块）──────────────────────────────────────
-  // 3 块各 1/3（确保用户能同时看到 3 块内容）
-  const perBlock = Math.max(4, Math.floor(pageSize / 3));
   const items = [
     ...b1.slice(0, perBlock).map((r: any) => ({
       block: 1,
