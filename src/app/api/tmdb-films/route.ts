@@ -102,7 +102,7 @@ async function _GET(request: NextRequest) {
            d.tmdb_type, d.title, d.original_title, d.poster_path, d.backdrop_path,
            d.release_date, d.first_air_date, d.vote_average, d.popularity,
            d.genres, d.origin_country, d.overview,
-           c.cached_title, c.cached_poster, c.cached_overview,
+           c.title as cached_title, c.poster_path as cached_poster, c.overview as cached_overview,
            c.release_date as cache_release
     FROM matched m
     LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = $${params.length + 1}
