@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Music, Library, LogOut, CreditCard, ShoppingCart } from 'lucide-react';
+import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Lock } from 'lucide-react';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
@@ -356,6 +356,14 @@ export default function HomePage() {
                     <Library size={14} className="transition-transform group-hover:scale-110" />
                     <span>文档资源库</span>
                   </Link>
+                  <Link href="/tmdb-films" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-600/30 to-pink-600/30 hover:from-violet-600/50 hover:to-pink-600/50 rounded-lg text-sm transition-all duration-200 text-white hover:shadow-[0_0_16px_rgba(167,139,250,0.5)] hover:scale-105 border border-violet-500/30">
+                    <Film size={14} className="transition-transform group-hover:scale-110" />
+                    <span>TMDB 影视</span>
+                  </Link>
+                  <Link href="/vip-videos" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-600/30 to-orange-600/30 hover:from-amber-600/50 hover:to-orange-600/50 rounded-lg text-sm transition-all duration-200 text-amber-200 hover:shadow-[0_0_16px_rgba(251,191,36,0.5)] hover:scale-105 border border-amber-500/30">
+                    <Lock size={14} className="transition-transform group-hover:scale-110" />
+                    <span>VIP 视频</span>
+                  </Link>
                   <button onClick={handleLogout} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">退出</button>
                   <Link href="/activate" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/30 hover:bg-pink-600/60 rounded-lg text-sm transition-all duration-200 text-pink-200 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
                     <ShoppingCart size={14} className="transition-transform group-hover:scale-110" />
@@ -370,6 +378,16 @@ export default function HomePage() {
                   </Link>
                   <Link href="/library" className="group flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/20 hover:bg-violet-600/50 rounded-lg text-sm transition-all duration-200 text-violet-300 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105">
                     <Library size={14} className="transition-transform group-hover:scale-110" />
+                    <span>文档资源库</span>
+                  </Link>
+                  <Link href="/tmdb-films" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-600/30 to-pink-600/30 hover:from-violet-600/50 hover:to-pink-600/50 rounded-lg text-sm transition-all duration-200 text-white hover:shadow-[0_0_16px_rgba(167,139,250,0.5)] hover:scale-105 border border-violet-500/30">
+                    <Film size={14} className="transition-transform group-hover:scale-110" />
+                    <span>TMDB 影视</span>
+                  </Link>
+                  <Link href="/vip-videos" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-600/30 to-orange-600/30 hover:from-amber-600/50 hover:to-orange-600/50 rounded-lg text-sm transition-all duration-200 text-amber-200 hover:shadow-[0_0_16px_rgba(251,191,36,0.5)] hover:scale-105 border border-amber-500/30">
+                    <Lock size={14} className="transition-transform group-hover:scale-110" />
+                    <span>VIP 视频</span>
+                  </Link>
                     <span>文档资源库</span>
                   </Link>
                   <Link href="/activate" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/30 hover:bg-pink-600/60 rounded-lg text-sm transition-all duration-200 text-pink-200 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
