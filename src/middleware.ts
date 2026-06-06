@@ -37,6 +37,7 @@ const PUBLIC_PATHS = [
   '/api/admin/migrate-tmdb-id',
   '/api/admin/add-sub-type',
   '/api/admin/reset-yuancategory',
+  '/api/tmdb-films',
 ];
 
 export function middleware(request: NextRequest) {
