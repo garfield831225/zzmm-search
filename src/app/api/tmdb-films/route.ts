@@ -195,8 +195,10 @@ async function _GET(request: NextRequest) {
   }
 
   // ─── 拼装结果（标记块）──────────────────────────────────────
+  // 3 块各 1/3（确保用户能同时看到 3 块内容）
+  const perBlock = Math.max(4, Math.floor(pageSize / 3));
   const items = [
-    ...b1.slice(0, pageSize).map((r: any) => ({
+    ...b1.slice(0, perBlock).map((r: any) => ({
       block: 1,
       tmdb_id: Number(r.tmdb_id),
       tmdb_type: r.tmdb_type,
@@ -215,7 +217,7 @@ async function _GET(request: NextRequest) {
       link_count: Number(r.link_count || 1),
       view_count: Number(r.view_count || 0),
     })),
-    ...b2.slice(0, Math.max(0, pageSize - b1.length)).map((r: any) => ({
+    ...b2.slice(0, perBlock).map((r: any) => ({
       block: 2,
       id: r.id,
       name: r.name,
@@ -228,7 +230,7 @@ async function _GET(request: NextRequest) {
       has_resource: true,
       has_tmdb: false,
     })),
-    ...b3.slice(0, Math.max(0, pageSize - b1.length - b2.length)).map((r: any) => ({
+    ...b3.slice(0, perBlock).map((r: any) => ({
       block: 3,
       tmdb_id: r.tmdb_id,
       tmdb_type: r.tmdb_type,
@@ -248,7 +250,7 @@ async function _GET(request: NextRequest) {
   ];
 
   return NextResponse.json({
-    debug: { cats, params, paramsLen: params.length, type, year, genre, linkType, sort, page, pageSize, keyword },
+    debug: { cats, params, paramsLen: params.length, type, year, genre, linkType, sort, page, pageSize, keyword, perBlock },
     page,
     pageSize,
     items,
