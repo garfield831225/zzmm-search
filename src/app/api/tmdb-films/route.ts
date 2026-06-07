@@ -144,17 +144,18 @@ async function _GET(request: NextRequest) {
   const block3 = await sql(`
     SELECT tmdb_id, tmdb_type, title, original_title, poster_path, backdrop_path,
            release_date, first_air_date, vote_average, popularity,
-           genres, origin_country, overview,
+            genres, origin_country, overview,
            COALESCE(release_date, first_air_date, '1900-01-01') as sort_key
-    FROM xx_tmdb_discover
+    FROM xx_tmdb_discover d
     WHERE tmdb_type IN (${typeInB3})
       AND poster_path IS NOT NULL
-      AND tmdb_id NOT IN (
-        SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r
+      AND NOT EXISTS (
+        SELECT 1 FROM xx_resources r
         WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH'
           AND (r.tmdb_id)::int > 10000
           AND r.tmdb_id NOT IN ('GARBLED','NOTFOUND','NULL','0','-1')
           AND r.status = 'active'
+          AND (r.tmdb_id)::int = d.tmdb_id
       )
     ORDER BY sort_key DESC NULLS LAST
     LIMIT ${limit3} OFFSET ${offset3}
@@ -174,15 +175,16 @@ async function _GET(request: NextRequest) {
       AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')
   `) as any[];
   const count3 = await sql(`
-    SELECT COUNT(*)::int as cnt FROM xx_tmdb_discover
+    SELECT COUNT(*)::int as cnt FROM xx_tmdb_discover d
     WHERE tmdb_type IN (${typeInB3})
       AND poster_path IS NOT NULL
-      AND tmdb_id NOT IN (
-        SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r
+      AND NOT EXISTS (
+        SELECT 1 FROM xx_resources r
         WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH'
           AND (r.tmdb_id)::int > 10000
           AND r.tmdb_id NOT IN ('GARBLED','NOTFOUND','NULL','0','-1')
           AND r.status = 'active'
+          AND (r.tmdb_id)::int = d.tmdb_id
       )
   `) as any[];
 
