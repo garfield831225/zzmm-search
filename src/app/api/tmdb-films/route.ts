@@ -44,7 +44,7 @@ async function _GET(request: NextRequest) {
   const minRating  = parseFloat(searchParams.get('minRating') || '0');
   const sort       = searchParams.get('sort') || 'smart';           // smart | release_date | popularity | rating
   const page       = Math.max(1, parseInt(searchParams.get('page') || '1'));
-  const pageSize   = Math.max(1, Math.min(parseInt(searchParams.get('pageSize') || '50'), 500));  // 默认 50 条/页（避免 Vercel 60s 超时）
+  const pageSize   = Math.max(1, Math.min(parseInt(searchParams.get('pageSize') || '200'), 1000));  // 默认 200/块 × 3 块 = 600 条/页
   const linkType   = searchParams.get('linkType') || 'all';         // all | 115 | baidu | ...
   const keyword    = (searchParams.get('q') || '').trim();
 
@@ -298,9 +298,9 @@ async function _GET(request: NextRequest) {
     }),
   ];
 
-  // 整体按 sort_key DESC 统一重排（b1/b2/b3 混排，不再分块）
-  // sort_key 来自 SQL（b1=release_date||first_air_date, b2=created_at, b3=release_date||first_air_date）
-  items.sort((a, b) => String(b.sort_key || '').localeCompare(String(a.sort_key || '')));
+  // 整体顺序：b1 全部排前 → b2 全部接后 → b3 全部末尾
+  // **不做任何混排 / sort_key 重排**——只做块间拼接
+  // 每块内部：b1 按 release_date DESC, b2 按 created_at DESC, b3 按 release_date DESC（SQL 层排好）
 
   return NextResponse.json({
     debug: { cats, type, year, genre, linkType, sort, page, pageSize, keyword, offset1, offset2, offset3 },
