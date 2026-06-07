@@ -300,7 +300,7 @@ async function _GET(request: NextRequest) {
 
   // 整体按 sort_key DESC 统一重排（b1/b2/b3 混排，不再分块）
   // sort_key 来自 SQL（b1=release_date||first_air_date, b2=created_at, b3=release_date||first_air_date）
-  items.sort((a, b) => (b.sort_key || '').localeCompare(a.sort_key || ''));
+  items.sort((a, b) => String(b.sort_key || '').localeCompare(String(a.sort_key || '')));
 
   return NextResponse.json({
     debug: { cats, type, year, genre, linkType, sort, page, pageSize, keyword, offset1, offset2, offset3 },
