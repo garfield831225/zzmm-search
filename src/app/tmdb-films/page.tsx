@@ -43,6 +43,7 @@ function Sparkles(props: any) { return <span {...props}>✨</span>; }
 
 interface Block1Item {
   block: 1;
+  sub_types?: string[];
   tmdb_id: number;
   tmdb_type: string;
   title: string;
