@@ -287,9 +287,7 @@ function Card({ item, idx, router }: { item: Item; idx: number; router: any }) {
     const r = item;
     return (
       <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: idx * 0.02 }}
+        initial={false}
         onClick={() => router.push(`/tmdb-films/${r.tmdb_id}?type=${r.tmdb_type}`)}
         className="group cursor-pointer"
       >
@@ -336,9 +334,7 @@ function Card({ item, idx, router }: { item: Item; idx: number; router: any }) {
     const r = item;
     return (
       <motion.div
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: idx * 0.02 }}
+        initial={false}
         onClick={() => router.push(`/tmdb-films/b2/${r.id}`)}
         className="group cursor-pointer"
       >
@@ -369,9 +365,7 @@ function Card({ item, idx, router }: { item: Item; idx: number; router: any }) {
   const r = item;
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: idx * 0.02 }}
+      initial={false}
       onClick={() => router.push(`/tmdb-films/${r.tmdb_id}?type=${r.tmdb_type}`)}
       className="group cursor-pointer"
     >
