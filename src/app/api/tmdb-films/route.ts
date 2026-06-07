@@ -241,6 +241,8 @@ async function _GET(request: NextRequest) {
   }
 
   // ─── 拼装结果（整体排序：1 块 → 2 块 → 3 块，各自按自己规则排满 pageSize 条）──
+  // **精简版**：删 overview/backdrop/original_title/genres/origin_country（详情页用），减少 body 80%
+  // 前端列表只显示：海报 + 标题 + 评分 + block 角标
   const items = [
     ...b1.slice(0, pageSize).map((r: any) => {
       const sk = r.sort_key || r.release_date || r.first_air_date || r.cache_release || '1900-01-01';
@@ -249,19 +251,11 @@ async function _GET(request: NextRequest) {
         tmdb_id: Number(r.tmdb_id),
         tmdb_type: r.tmdb_type,
         title: r.cached_title || r.title || '',
-        original_title: r.original_title,
         poster_path: r.cached_poster || r.poster_path,
-        backdrop_path: r.backdrop_path,
         release_date: r.release_date || r.cache_release,
         first_air_date: r.first_air_date,
         vote_average: Number(r.vote_average || 0),
-        popularity: Number(r.popularity || 0),
-        genres: r.genres || [],
-        origin_country: r.origin_country || [],
-        overview: r.cached_overview || r.overview,
-        has_resource: true,
         link_count: Number(r.link_count || 1),
-        view_count: Number(r.view_count || 0),
         sub_types: r.sub_types || [],  // 原 category 数组（如 ['连载','剧集']），前端展示
         sort_key: sk,
       };
@@ -272,14 +266,10 @@ async function _GET(request: NextRequest) {
         block: 2,
         id: r.id,
         name: r.name,
-        link: r.link,
-        link_code: r.link_code,
         source: r.source,
         category: r.category,
         size: r.size,
         view_count: Number(r.view_count || 0),
-        has_resource: true,
-        has_tmdb: false,
         sort_key: sk,
       };
     }),
@@ -290,17 +280,11 @@ async function _GET(request: NextRequest) {
         tmdb_id: r.tmdb_id,
         tmdb_type: r.tmdb_type,
         title: r.title,
-        original_title: r.original_title,
         poster_path: r.poster_path,
-        backdrop_path: r.backdrop_path,
         release_date: r.release_date,
         first_air_date: r.first_air_date,
         vote_average: Number(r.vote_average || 0),
         popularity: Number(r.popularity || 0),
-        genres: r.genres || [],
-        origin_country: r.origin_country || [],
-        overview: r.overview,
-        has_resource: false,
         sort_key: sk,
       };
     }),

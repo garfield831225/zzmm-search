@@ -467,8 +467,14 @@ function WatchSection({ tmdbId, type, title }: { tmdbId: string; type: string; t
     setLoading(true);
     setError(null);
     setData(null);
-    const token = (typeof document !== 'undefined' && (document.cookie.match(/zzmm_token=([^;]+)/)?.[1] || document.cookie.match(/(?:^|;\s*)token=([^;]+)/)?.[1])) || '';
+    // 1) 优先 localStorage.token（登录时存的非 httpOnly）
+    // 2) 兜底 document.cookie 里的非 httpOnly token
+    // 3) 都拿不到就让 fetch 自动带 httpOnly cookie（API getUser 会从 cookie 读）
+    const lsToken = typeof window !== 'undefined' ? (localStorage.getItem('token') || localStorage.getItem('zzmm_token') || '') : '';
+    const cookieToken = typeof document !== 'undefined' ? (document.cookie.match(/(?:^|;\s*)token=([^;]+)/)?.[1] || '') : '';
+    const token = lsToken || cookieToken;
     fetch(`/api/tmdb-films/${tmdbId}/watch?type=${type}`, {
+      credentials: 'include',  // 同源自动带 httpOnly cookie
       headers: token ? { 'Authorization': `Bearer ${decodeURIComponent(token)}` } : {},
     })
       .then(r => r.json().then(j => ({ status: r.status, json: j })))
