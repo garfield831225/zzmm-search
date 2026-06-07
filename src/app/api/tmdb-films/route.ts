@@ -158,17 +158,16 @@ async function _GET(request: NextRequest) {
 
   // 真实总数（不带 LIMIT，3 个独立 COUNT；resourceWhere 是字符串拼接，不用 ${}）
   const resourceBase = `r.status = 'active'${cats.length ? ` AND r.category IN (${cats.map((_, i) => `'${cats[i].replace(/'/g, "''")}'`).join(',')})` : ''}${linkType === '115' ? ` AND r.source = '115'` : linkType === 'baidu' ? ` AND r.source = 'baidu'` : linkType === 'other' ? ` AND r.source NOT IN ('115','baidu','aliyun','quark')` : ''}`;
-  // 3 个 COUNT 真值：sql("...") 字符串调用 + sql\`\` 模板混合
-  // linkType 拼到 SQL 字符串（不是参数），cat 拼字符串
-  const linkSql = linkType === '115' ? `AND r.source = '115'`
-    : linkType === 'baidu' ? `AND r.source = 'baidu'`
-    : linkType === 'other' ? `AND r.source NOT IN ('115','baidu','aliyun','quark')`
-    : '';
-  const catIn = cats.length ? `AND r.category IN (${cats.map(c => `'${c.replace(/'/g, "''")}'`).join(',')})` : '';
+  // 3 个 COUNT 真值：全部用 sql\`\` 模板 + fragment 嵌套（Neon 模板能传 SQL 片段）
+  const catFragment = cats.length ? sql`AND r.category = ANY(${cats})` : sql``;
+  const linkFragment = linkType === '115' ? sql`AND r.source = '115'`
+    : linkType === 'baidu' ? sql`AND r.source = 'baidu'`
+    : linkType === 'other' ? sql`AND r.source NOT IN ('115','baidu','aliyun','quark')`
+    : sql``;
 
-  const count1 = await sql(`SELECT COUNT(DISTINCT r.tmdb_id)::int as cnt FROM xx_resources r WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH' AND r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000 AND r.status = 'active' ${catIn} ${linkSql}`) as any[];
-  const count2 = await sql(`SELECT COUNT(*)::int as cnt FROM xx_resources r WHERE r.status = 'active' AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH') ${catIn} ${linkSql}`) as any[];
-  const count3 = await sql(`SELECT COUNT(*)::int as cnt FROM xx_tmdb_discover WHERE tmdb_type = $1::text AND poster_path IS NOT NULL AND tmdb_id NOT IN (SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH' AND r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000 AND r.status = 'active')`, [type]) as any[];
+  const count1 = await sql`SELECT COUNT(DISTINCT r.tmdb_id)::int as cnt FROM xx_resources r WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH' AND r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000 AND r.status = 'active' ${catFragment} ${linkFragment}` as any[];
+  const count2 = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources r WHERE r.status = 'active' AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH') ${catFragment} ${linkFragment}` as any[];
+  const count3 = await sql`SELECT COUNT(*)::int as cnt FROM xx_tmdb_discover WHERE tmdb_type = ${type} AND poster_path IS NOT NULL AND tmdb_id NOT IN (SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH' AND r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000 AND r.status = 'active')` as any[];
 
   // ─── 关键词过滤（搜索时在内存做，避免 SQL 模板与字符串拼接冲突）────────
   let b1 = block1, b2 = block2, b3 = block3;
