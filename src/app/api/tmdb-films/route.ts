@@ -91,6 +91,7 @@ async function _GET(request: NextRequest) {
   // 1 块 SQL：用户已导入 + 已匹配（按 release_date DESC，搜索时多拉后内存 ILIKE）
   // **关键**：type/limit/offset 全字面拼，**SQL 字符串里 0 个 $N 占位符**，params = []
   // 之前报错"could not determine $1"是 Neon v3 对 LIMIT/JOIN ON 子句里的 $N 推断有问题
+  // **统一 sort_key**：release_date || first_air_date || '1900-01-01'（3 块都用同一字段对齐）
   const block1 = await sql(`
     WITH matched AS (
       SELECT r.tmdb_id::int as tmdb_id, MAX(r.updated_at) as updated_at,
@@ -100,6 +101,7 @@ async function _GET(request: NextRequest) {
         AND r.tmdb_id != ''
         AND r.tmdb_id != 'NOMATCH'
         AND (r.tmdb_id)::int > 10000
+        AND r.tmdb_id NOT IN ('GARBLED','NOTFOUND','NULL','0','-1')
         AND ${resourceWhere}
       GROUP BY r.tmdb_id
     )
@@ -108,19 +110,22 @@ async function _GET(request: NextRequest) {
            d.release_date, d.first_air_date, d.vote_average, d.popularity,
            d.genres, d.origin_country, d.overview,
            c.title as cached_title, c.poster_path as cached_poster, c.overview as cached_overview,
-           c.release_date as cache_release
+           c.release_date as cache_release,
+           COALESCE(c.release_date, d.release_date, d.first_air_date, '1900-01-01') as sort_key
     FROM matched m
     LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = '${type.replace(/'/g, "''")}'
     LEFT JOIN xx_tmdb_cache c ON c.tmdb_id = m.tmdb_id::text
-    ORDER BY COALESCE(c.release_date, d.release_date, d.first_air_date, '1900-01-01') DESC NULLS LAST
+    ORDER BY sort_key DESC NULLS LAST
     LIMIT ${limit1} OFFSET ${offset1}
   `) as any[];
 
   // 2 块 SQL：用户已导入 + 未匹配（按 created_at DESC，搜索时多拉后内存 ILIKE）
+  // sort_key = r.created_at::text 跟 b1/b3 的 release_date string 维度对齐
   const offset2 = isSearch ? 0 : (page - 1) * pageSize;
   const limit2 = isSearch ? 500 : pageSize;
   const block2 = await sql(`
-    SELECT id, name, link, link_code, source, category, size, view_count, created_at
+    SELECT id, name, link, link_code, source, category, size, view_count, created_at,
+           to_char(r.created_at, 'YYYY-MM-DD') as sort_key
     FROM xx_resources r
     WHERE ${resourceWhere}
       AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')
@@ -134,7 +139,8 @@ async function _GET(request: NextRequest) {
   const block3 = await sql(`
     SELECT tmdb_id, tmdb_type, title, original_title, poster_path, backdrop_path,
            release_date, first_air_date, vote_average, popularity,
-           genres, origin_country, overview
+           genres, origin_country, overview,
+           COALESCE(release_date, first_air_date, '1900-01-01') as sort_key
     FROM xx_tmdb_discover
     WHERE tmdb_type = '${type.replace(/'/g, "''")}'
       AND poster_path IS NOT NULL
@@ -142,9 +148,10 @@ async function _GET(request: NextRequest) {
         SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r
         WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH'
           AND (r.tmdb_id)::int > 10000
+          AND r.tmdb_id NOT IN ('GARBLED','NOTFOUND','NULL','0','-1')
           AND r.status = 'active'
       )
-    ORDER BY release_date DESC NULLS LAST, first_air_date DESC NULLS LAST
+    ORDER BY sort_key DESC NULLS LAST
     LIMIT ${limit3} OFFSET ${offset3}
   `) as any[];
 
@@ -153,6 +160,7 @@ async function _GET(request: NextRequest) {
     SELECT COUNT(DISTINCT r.tmdb_id)::int as cnt FROM xx_resources r
     WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH'
       AND (r.tmdb_id)::int > 10000
+      AND r.tmdb_id NOT IN ('GARBLED','NOTFOUND','NULL','0','-1')
       AND ${resourceWhere}
   `) as any[];
   const count2 = await sql(`
@@ -168,6 +176,7 @@ async function _GET(request: NextRequest) {
         SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r
         WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH'
           AND (r.tmdb_id)::int > 10000
+          AND r.tmdb_id NOT IN ('GARBLED','NOTFOUND','NULL','0','-1')
           AND r.status = 'active'
       )
   `) as any[];
@@ -289,10 +298,9 @@ async function _GET(request: NextRequest) {
     }),
   ];
 
-  // 整体按块优先级拼接：1 块（8981）→ 2 块（25501）→ 3 块（26644）
-  // 不再混排——每块内部按各自规则排好（b1 release_date DESC, b2 created_at DESC, b3 release_date DESC）
-  // "挪位置"是 v3 match 自动做的：写 xx_resources.tmdb_id 后下次 query 自动从 25501 进 8981
-  // 块 3 26644 = xx_tmdb_discover ∖ xx_resources（自动 NOT IN）
+  // 整体按 sort_key DESC 统一重排（b1/b2/b3 混排，不再分块）
+  // sort_key 来自 SQL（b1=release_date||first_air_date, b2=created_at, b3=release_date||first_air_date）
+  items.sort((a, b) => (b.sort_key || '').localeCompare(a.sort_key || ''));
 
   return NextResponse.json({
     debug: { cats, type, year, genre, linkType, sort, page, pageSize, keyword, offset1, offset2, offset3 },
