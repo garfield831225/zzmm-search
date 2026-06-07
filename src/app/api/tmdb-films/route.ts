@@ -95,7 +95,8 @@ async function _GET(request: NextRequest) {
   const block1 = await sql(`
     WITH matched AS (
       SELECT r.tmdb_id::int as tmdb_id, MAX(r.updated_at) as updated_at,
-             MAX(r.view_count) as view_count, COUNT(*) as link_count
+             MAX(r.view_count) as view_count, COUNT(*) as link_count,
+             array_agg(DISTINCT r.category) as sub_types
       FROM xx_resources r
       WHERE r.tmdb_id IS NOT NULL
         AND r.tmdb_id != ''
@@ -105,7 +106,7 @@ async function _GET(request: NextRequest) {
         AND ${resourceWhere}
       GROUP BY r.tmdb_id
     )
-    SELECT m.tmdb_id, m.view_count, m.link_count, m.updated_at,
+    SELECT m.tmdb_id, m.view_count, m.link_count, m.updated_at, m.sub_types,
            d.tmdb_type, d.title, d.original_title, d.poster_path, d.backdrop_path,
            d.release_date, d.first_air_date, d.vote_average, d.popularity,
            d.genres, d.origin_country, d.overview,
@@ -255,6 +256,7 @@ async function _GET(request: NextRequest) {
         has_resource: true,
         link_count: Number(r.link_count || 1),
         view_count: Number(r.view_count || 0),
+        sub_types: r.sub_types || [],  // 原 category 数组（如 ['连载','剧集']），前端展示
         sort_key: sk,
       };
     }),

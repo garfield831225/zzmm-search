@@ -314,6 +314,14 @@ function Card({ item, idx, router }: { item: Item; idx: number; router: any }) {
           <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-green-500/30 text-green-300 rounded text-[10px] font-medium">
             ⭐ 您的导入
           </div>
+          {/* sub_types 标签（如 连载/剧集） */}
+          {r.sub_types && r.sub_types.length > 0 && (
+            <div className="absolute bottom-2 right-2 flex flex-wrap gap-1 max-w-[60%] justify-end">
+              {r.sub_types.filter((s: string) => s !== '剧集' && s !== '电影').map((s: string) => (
+                <span key={s} className="px-1.5 py-0.5 bg-cyan-500/40 text-cyan-200 rounded text-[10px] font-medium">{s}</span>
+              ))}
+            </div>
+          )}
         </div>
         <div className="mt-2">
           <h3 className="text-white text-sm font-medium line-clamp-2 group-hover:text-violet-300 transition">{r.title}</h3>
