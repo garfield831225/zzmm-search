@@ -294,7 +294,7 @@ async function _GET(request: NextRequest) {
   // 块 3 26644 = xx_tmdb_discover ∖ xx_resources（自动 NOT IN）
 
   return NextResponse.json({
-    debug: { cats, params: _params, paramsLen: _params.length, type, year, genre, linkType, sort, page, pageSize, keyword, offset1, offset2, offset3 },
+    debug: { cats, type, year, genre, linkType, sort, page, pageSize, keyword, offset1, offset2, offset3 },
     page,
     pageSize,
     items,
