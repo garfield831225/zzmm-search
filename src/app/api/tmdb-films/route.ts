@@ -44,7 +44,7 @@ async function _GET(request: NextRequest) {
   const minRating  = parseFloat(searchParams.get('minRating') || '0');
   const sort       = searchParams.get('sort') || 'smart';           // smart | release_date | popularity | rating
   const page       = Math.max(1, parseInt(searchParams.get('page') || '1'));
-  const pageSize   = Math.max(1, parseInt(searchParams.get('pageSize') || '999999'));  // 默认一次拉完所有（不分段）
+  const pageSize   = Math.max(1, Math.min(parseInt(searchParams.get('pageSize') || '50'), 500));  // 默认 50 条/页（避免 Vercel 60s 超时）
   const linkType   = searchParams.get('linkType') || 'all';         // all | 115 | baidu | ...
   const keyword    = (searchParams.get('q') || '').trim();
 
@@ -236,7 +236,7 @@ async function _GET(request: NextRequest) {
   // ─── 拼装结果（整体排序：1 块 → 2 块 → 3 块，各自按自己规则排满 pageSize 条）──
   const items = [
     ...b1.slice(0, pageSize).map((r: any) => {
-      const sk = r.release_date || r.first_air_date || r.cache_release || '1900-01-01';
+      const sk = r.sort_key || r.release_date || r.first_air_date || r.cache_release || '1900-01-01';
       return {
         block: 1,
         tmdb_id: Number(r.tmdb_id),
@@ -259,7 +259,7 @@ async function _GET(request: NextRequest) {
       };
     }),
     ...b2.slice(0, pageSize).map((r: any) => {
-      const sk = r.created_at || '1900-01-01';
+      const sk = r.sort_key || '1900-01-01';
       return {
         block: 2,
         id: r.id,
@@ -276,7 +276,7 @@ async function _GET(request: NextRequest) {
       };
     }),
     ...b3.slice(0, pageSize).map((r: any) => {
-      const sk = r.release_date || r.first_air_date || '1900-01-01';
+      const sk = r.sort_key || r.release_date || r.first_air_date || '1900-01-01';
       return {
         block: 3,
         tmdb_id: r.tmdb_id,
