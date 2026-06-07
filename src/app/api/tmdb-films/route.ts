@@ -89,7 +89,8 @@ async function _GET(request: NextRequest) {
   const resourceWhere = `r.status = 'active'${catsIn}${linkIn}${typeIn}`;
 
   // 1 块 SQL：用户已导入 + 已匹配（按 release_date DESC，搜索时多拉后内存 ILIKE）
-  // **关键**：type 字面拼（不用 $1，Neon v3 对 JOIN ON 里 $1 推断有问题）
+  // **关键**：type/limit/offset 全字面拼，**SQL 字符串里 0 个 $N 占位符**，params = []
+  // 之前报错"could not determine $1"是 Neon v3 对 LIMIT/JOIN ON 子句里的 $N 推断有问题
   const block1 = await sql(`
     WITH matched AS (
       SELECT r.tmdb_id::int as tmdb_id, MAX(r.updated_at) as updated_at,
@@ -113,8 +114,8 @@ async function _GET(request: NextRequest) {
     LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = '${type.replace(/'/g, "''")}'
     LEFT JOIN xx_tmdb_cache c ON c.tmdb_id = m.tmdb_id::text
     ORDER BY COALESCE(c.release_date, d.release_date, d.first_air_date, '1900-01-01') DESC NULLS LAST
-    LIMIT $1 OFFSET $2
-  `, [limit1, offset1]) as any[];
+    LIMIT ${limit1} OFFSET ${offset1}
+  `) as any[];
 
   // 2 块 SQL：用户已导入 + 未匹配（按 created_at DESC，搜索时多拉后内存 ILIKE）
   const offset2 = isSearch ? 0 : (page - 1) * pageSize;
@@ -125,8 +126,8 @@ async function _GET(request: NextRequest) {
     WHERE ${resourceWhere}
       AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')
     ORDER BY r.created_at DESC
-    LIMIT $1 OFFSET $2
-  `, [limit2, offset2]) as any[];
+    LIMIT ${limit2} OFFSET ${offset2}
+  `) as any[];
 
   // 3 块 SQL：TMDB 全量 ∖ 用户已导入（按 release_date DESC，搜索时多拉后内存 ILIKE）
   const offset3 = isSearch ? 0 : (page - 1) * pageSize;
@@ -145,8 +146,8 @@ async function _GET(request: NextRequest) {
           AND r.status = 'active'
       )
     ORDER BY release_date DESC NULLS LAST, first_air_date DESC NULLS LAST
-    LIMIT $1 OFFSET $2
-  `, [limit3, offset3]) as any[];
+    LIMIT ${limit3} OFFSET ${offset3}
+  `) as any[];
 
   // 真实总数（不带 LIMIT，3 个独立 COUNT；**字面拼，无 $N**，跟 b1/b2/b3 一致）
   const count1 = await sql(`
