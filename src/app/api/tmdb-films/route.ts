@@ -116,7 +116,7 @@ async function _GET(request: NextRequest) {
            d.genres, d.origin_country, d.overview,
            c.title as cached_title, c.poster_path as cached_poster, c.overview as cached_overview,
            c.release_date as cache_release,
-           COALESCE(c.release_date, d.release_date, d.first_air_date, '1900-01-01') as sort_key
+           to_char(COALESCE(c.release_date, d.release_date, d.first_air_date, '1900-01-01'::date), 'YYYY-MM-DD') as sort_key
     FROM matched m
     LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type ${type === 'all' ? `IN ('movie','tv')` : `= '${type.replace(/'/g, "''")}'`}
     LEFT JOIN xx_tmdb_cache c ON c.tmdb_id = m.tmdb_id::text
@@ -145,7 +145,7 @@ async function _GET(request: NextRequest) {
     SELECT tmdb_id, tmdb_type, title, original_title, poster_path, backdrop_path,
            release_date, first_air_date, vote_average, popularity,
             genres, origin_country, overview,
-           COALESCE(release_date, first_air_date, '1900-01-01') as sort_key
+           to_char(COALESCE(release_date, first_air_date, '1900-01-01'::date), 'YYYY-MM-DD') as sort_key
     FROM xx_tmdb_discover d
     WHERE tmdb_type IN (${typeInB3})
       AND poster_path IS NOT NULL
