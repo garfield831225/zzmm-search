@@ -37,14 +37,14 @@ export async function GET(request: NextRequest) {
 async function _GET(request: NextRequest) {
   const sql = neon(process.env.DATABASE_URL || '');
   const { searchParams } = new URL(request.url);
-  const type       = searchParams.get('type') || 'movie';          // movie | tv
+  const type       = searchParams.get('type') || 'all';            // all | movie | tv（首页 = all）
   const category   = searchParams.get('category') || 'all';        // all | movie | tv | anime | doc | variety
   const year       = searchParams.get('year') || '';                // 2025 | 2010-2019 | ...
   const genre      = searchParams.get('genre') || '';                // 中文名
   const minRating  = parseFloat(searchParams.get('minRating') || '0');
   const sort       = searchParams.get('sort') || 'smart';           // smart | release_date | popularity | rating
   const page       = Math.max(1, parseInt(searchParams.get('page') || '1'));
-  const pageSize   = Math.max(1, Math.min(parseInt(searchParams.get('pageSize') || '200'), 1000));  // 默认 200/块 × 3 块 = 600 条/页
+  const pageSize   = Math.max(1, Math.min(parseInt(searchParams.get('pageSize') || '999999'), 999999));  // 一次拉完所有（不分段）
   const linkType   = searchParams.get('linkType') || 'all';         // all | 115 | baidu | ...
   const keyword    = (searchParams.get('q') || '').trim();
 
@@ -85,7 +85,11 @@ async function _GET(request: NextRequest) {
     : '';
   const typeIn = type === 'tv' ? ` AND r.category IN ('剧集','连载','动漫','少儿频道','综艺','纪录片')`
     : type === 'movie' ? ` AND r.category IN ('电影','华语电影','外语电影','动画电影','演唱会','REMUX','系列电影')`
-    : '';
+    : '';  // type='all'：不加 category 过滤（电影+剧集一起）
+  // b3 的 tmdb_type 条件
+  const typeInB3 = type === 'tv' ? `'tv'`
+    : type === 'movie' ? `'movie'`
+    : `'movie','tv'`;  // type='all'：movie + tv 都要
   const resourceWhere = `r.status = 'active'${catsIn}${linkIn}${typeIn}`;
 
   // 1 块 SQL：用户已导入 + 已匹配（按 release_date DESC，搜索时多拉后内存 ILIKE）
@@ -114,7 +118,7 @@ async function _GET(request: NextRequest) {
            c.release_date as cache_release,
            COALESCE(c.release_date, d.release_date, d.first_air_date, '1900-01-01') as sort_key
     FROM matched m
-    LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = '${type.replace(/'/g, "''")}'
+    LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type ${type === 'all' ? `IN ('movie','tv')` : `= '${type.replace(/'/g, "''")}'`}
     LEFT JOIN xx_tmdb_cache c ON c.tmdb_id = m.tmdb_id::text
     ORDER BY sort_key DESC NULLS LAST
     LIMIT ${limit1} OFFSET ${offset1}
@@ -143,7 +147,7 @@ async function _GET(request: NextRequest) {
            genres, origin_country, overview,
            COALESCE(release_date, first_air_date, '1900-01-01') as sort_key
     FROM xx_tmdb_discover
-    WHERE tmdb_type = '${type.replace(/'/g, "''")}'
+    WHERE tmdb_type IN (${typeInB3})
       AND poster_path IS NOT NULL
       AND tmdb_id NOT IN (
         SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r
@@ -171,7 +175,7 @@ async function _GET(request: NextRequest) {
   `) as any[];
   const count3 = await sql(`
     SELECT COUNT(*)::int as cnt FROM xx_tmdb_discover
-    WHERE tmdb_type = '${type.replace(/'/g, "''")}'
+    WHERE tmdb_type IN (${typeInB3})
       AND poster_path IS NOT NULL
       AND tmdb_id NOT IN (
         SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r

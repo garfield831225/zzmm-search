@@ -87,7 +87,7 @@ type Item = Block1Item | Block2Item | Block3Item;
 
 export default function TmdbFilmsPage() {
   const router = useRouter();
-  const [type, setType] = useState('movie');  // movie | tv
+  const [type, setType] = useState('all');  // all | movie | tv（首页 = all）
   const [category, setCategory] = useState('all');
   const [sort, setSort] = useState('smart');
   const [year, setYear] = useState('全部');
@@ -104,7 +104,7 @@ export default function TmdbFilmsPage() {
     setLoading(true);
     try {
       const params = new URLSearchParams({
-        type, category, sort, linkType, q: keyword, page: String(page), pageSize: '200',
+        type, category, sort, linkType, q: keyword, page: String(page), pageSize: '999999',
       });
       if (year !== '全部') params.set('year', year);
       if (genre) params.set('genre', genre);
@@ -172,7 +172,7 @@ export default function TmdbFilmsPage() {
             {CATS.map(c => (
               <button
                 key={c.key}
-                onClick={() => { resetPage(() => setCategory(c.key)); setType(c.key === 'tv' || c.key === 'anime' || c.key === 'doc' || c.key === 'variety' ? 'tv' : 'movie'); setGenre(''); }}
+                onClick={() => { resetPage(() => setCategory(c.key)); setType(c.key === 'movie' ? 'movie' : c.key === 'tv' || c.key === 'anime' || c.key === 'doc' || c.key === 'variety' ? 'tv' : 'all'); setGenre(''); }}
                 className={`flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition ${
                   category === c.key
                     ? 'bg-gradient-to-r from-violet-600 to-pink-600 text-white shadow-lg shadow-violet-500/30'
