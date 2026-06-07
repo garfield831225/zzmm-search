@@ -52,12 +52,7 @@ async function _GET(request: NextRequest) {
   const userGroup = user?.group || 'user';
   const isVipPlus = ['vip', 'admin'].includes(userGroup);
 
-  // ─── 1 块：用户已导入 + 已匹配（distinct tmdb_id, type）────────────────
-  // 拼资源 query 条件
-  const resourceConditions: string[] = [`r.status = 'active'`];
-  const params: any[] = [];
-
-  // 类别映射（前端 category → resources.category）
+  // ─── 类别映射（前端 category → resources.category）────────────────
   const catMap: Record<string, string[]> = {
     all: [],
     movie: ['电影', '华语电影', '外语电影', '动画电影', '演唱会', 'REMUX', '系列电影'],
@@ -67,21 +62,6 @@ async function _GET(request: NextRequest) {
     variety: ['综艺'],
   };
   const cats = catMap[category] || [];
-  let resourceFilter = '';
-  if (cats.length) {
-    const placeholders = cats.map((_, i) => `$${params.length + i + 1}`).join(',');
-    resourceConditions.push(`r.category IN (${placeholders})`);
-    params.push(...cats);
-  }
-  if (linkType === '115') resourceConditions.push(`r.source = '115'`);
-  else if (linkType === 'baidu') resourceConditions.push(`r.source = 'baidu'`);
-  else if (linkType === 'other') resourceConditions.push(`r.source NOT IN ('115','baidu','aliyun','quark')`);
-
-  const resourceWhere = resourceConditions.join(' AND ');
-
-  // 类型过滤
-  if (type === 'tv') resourceConditions.push(`r.category IN ('剧集','连载','动漫','少儿频道','综艺','纪录片')`);
-  else if (type === 'movie') resourceConditions.push(`r.category IN ('电影','华语电影','外语电影','动画电影','演唱会','REMUX','系列电影')`);
 
   // ─── 拼装结果（整体排序：1 块 → 2 块 → 3 块，整个 list 统一按 release_date DESC）──
   // 搜索模式（keyword 非空）：跨 3 块全量搜，不分页，SQL 层 ILIKE
@@ -320,7 +300,7 @@ async function _GET(request: NextRequest) {
   // 块 3 26644 = xx_tmdb_discover ∖ xx_resources（自动 NOT IN）
 
   return NextResponse.json({
-    debug: { cats, params, paramsLen: params.length, type, year, genre, linkType, sort, page, pageSize, keyword, offset1, offset2, offset3 },
+    debug: { cats, params: _params, paramsLen: _params.length, type, year, genre, linkType, sort, page, pageSize, keyword, offset1, offset2, offset3 },
     page,
     pageSize,
     items,
