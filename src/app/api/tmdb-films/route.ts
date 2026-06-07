@@ -76,23 +76,17 @@ async function _GET(request: NextRequest) {
   const offset1 = isSearch ? 0 : (page - 1) * pageSize;
   const limit1 = isSearch ? 500 : pageSize;
 
-  // ─── b1/b2/b3 块 SQL：sql("...") 字符串调用 + $N 占位符 + params 数组 ──
-  // 关键：所有动态条件（cats/linkType/type）都用 $N 占位符，**不要字面拼**
-  // 这样 params 数组里的每个值都对应 SQL 里的 $N，不会"could not determine $1"
-  const _params: any[] = [];
-  const _cond: string[] = [`r.status = 'active'`];
-  if (cats.length) {
-    const ph = cats.map((_, i) => `$${_params.length + i + 1}`).join(',');
-    _cond.push(`r.category IN (${ph})`);
-    _params.push(...cats);
-  }
-  if (linkType === '115') _cond.push(`r.source = '115'`);
-  else if (linkType === 'baidu') _cond.push(`r.source = 'baidu'`);
-  else if (linkType === 'other') _cond.push(`r.source NOT IN ('115','baidu','aliyun','quark')`);
-  if (type === 'tv') _cond.push(`r.category IN ('剧集','连载','动漫','少儿频道','综艺','纪录片')`);
-  else if (type === 'movie') _cond.push(`r.category IN ('电影','华语电影','外语电影','动画电影','演唱会','REMUX','系列电影')`);
-  const resourceWhere = _cond.join(' AND ');
-  const baseLen = _params.length;
+  // ─── b1/b2/b3 块 SQL：cats/linkType/type **字面拼**（不参数化），只用 $1/$2/$3 给 type/limit/offset ──
+  // **关键**：Neon v3 按最大 $N 编号推断 params 数量，字面拼避免 $N 错位
+  const catsIn = cats.length ? ` AND r.category IN (${cats.map(c => `'${c.replace(/'/g, "''")}'`).join(',')})` : '';
+  const linkIn = linkType === '115' ? ` AND r.source = '115'`
+    : linkType === 'baidu' ? ` AND r.source = 'baidu'`
+    : linkType === 'other' ? ` AND r.source NOT IN ('115','baidu','aliyun','quark')`
+    : '';
+  const typeIn = type === 'tv' ? ` AND r.category IN ('剧集','连载','动漫','少儿频道','综艺','纪录片')`
+    : type === 'movie' ? ` AND r.category IN ('电影','华语电影','外语电影','动画电影','演唱会','REMUX','系列电影')`
+    : '';
+  const resourceWhere = `r.status = 'active'${catsIn}${linkIn}${typeIn}`;
 
   // 1 块 SQL：用户已导入 + 已匹配（按 release_date DESC，搜索时多拉后内存 ILIKE）
   const block1 = await sql(`
@@ -115,11 +109,11 @@ async function _GET(request: NextRequest) {
            c.title as cached_title, c.poster_path as cached_poster, c.overview as cached_overview,
            c.release_date as cache_release
     FROM matched m
-    LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = $${baseLen + 1}
+    LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = $1
     LEFT JOIN xx_tmdb_cache c ON c.tmdb_id = m.tmdb_id::text
     ORDER BY COALESCE(c.release_date, d.release_date, d.first_air_date, '1900-01-01') DESC NULLS LAST
-    LIMIT $${baseLen + 2} OFFSET $${baseLen + 3}
-  `, [..._params, type, limit1, offset1]) as any[];
+    LIMIT $2 OFFSET $3
+  `, [type, limit1, offset1]) as any[];
 
   // 2 块 SQL：用户已导入 + 未匹配（按 created_at DESC，搜索时多拉后内存 ILIKE）
   const offset2 = isSearch ? 0 : (page - 1) * pageSize;
@@ -130,8 +124,8 @@ async function _GET(request: NextRequest) {
     WHERE ${resourceWhere}
       AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')
     ORDER BY r.created_at DESC
-    LIMIT $${baseLen + 1} OFFSET $${baseLen + 2}
-  `, [..._params, limit2, offset2]) as any[];
+    LIMIT $1 OFFSET $2
+  `, [limit2, offset2]) as any[];
 
   // 3 块 SQL：TMDB 全量 ∖ 用户已导入（按 release_date DESC，搜索时多拉后内存 ILIKE）
   const offset3 = isSearch ? 0 : (page - 1) * pageSize;
@@ -141,7 +135,7 @@ async function _GET(request: NextRequest) {
            release_date, first_air_date, vote_average, popularity,
            genres, origin_country, overview
     FROM xx_tmdb_discover
-    WHERE tmdb_type = $${baseLen + 1}
+    WHERE tmdb_type = $1
       AND poster_path IS NOT NULL
       AND tmdb_id NOT IN (
         SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r
@@ -150,24 +144,24 @@ async function _GET(request: NextRequest) {
           AND r.status = 'active'
       )
     ORDER BY release_date DESC NULLS LAST, first_air_date DESC NULLS LAST
-    LIMIT $${baseLen + 2} OFFSET $${baseLen + 3}
-  `, [..._params, type, limit3, offset3]) as any[];
+    LIMIT $2 OFFSET $3
+  `, [type, limit3, offset3]) as any[];
 
-  // 真实总数（不带 LIMIT，3 个独立 COUNT；**全部用 $N 占位符**，跟 b1/b2/b3 一致）
+  // 真实总数（不带 LIMIT，3 个独立 COUNT；**字面拼，无 $N**，跟 b1/b2/b3 一致）
   const count1 = await sql(`
     SELECT COUNT(DISTINCT r.tmdb_id)::int as cnt FROM xx_resources r
     WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH'
       AND r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000
       AND ${resourceWhere}
-  `, [..._params]) as any[];
+  `) as any[];
   const count2 = await sql(`
     SELECT COUNT(*)::int as cnt FROM xx_resources r
     WHERE ${resourceWhere}
       AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')
-  `, [..._params]) as any[];
+  `) as any[];
   const count3 = await sql(`
     SELECT COUNT(*)::int as cnt FROM xx_tmdb_discover
-    WHERE tmdb_type = $${baseLen + 1}
+    WHERE tmdb_type = '${type.replace(/'/g, "''")}'
       AND poster_path IS NOT NULL
       AND tmdb_id NOT IN (
         SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r
@@ -175,7 +169,7 @@ async function _GET(request: NextRequest) {
           AND r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000
           AND r.status = 'active'
       )
-  `, [..._params, type]) as any[];
+  `) as any[];
 
   // ─── 关键词过滤（搜索时在内存做，避免 SQL 模板与字符串拼接冲突）────────
   let b1 = block1, b2 = block2, b3 = block3;
