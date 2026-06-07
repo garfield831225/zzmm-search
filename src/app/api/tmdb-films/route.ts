@@ -89,6 +89,7 @@ async function _GET(request: NextRequest) {
   const resourceWhere = `r.status = 'active'${catsIn}${linkIn}${typeIn}`;
 
   // 1 块 SQL：用户已导入 + 已匹配（按 release_date DESC，搜索时多拉后内存 ILIKE）
+  // **关键**：type 字面拼（不用 $1，Neon v3 对 JOIN ON 里 $1 推断有问题）
   const block1 = await sql(`
     WITH matched AS (
       SELECT r.tmdb_id::int as tmdb_id, MAX(r.updated_at) as updated_at,
@@ -109,11 +110,11 @@ async function _GET(request: NextRequest) {
            c.title as cached_title, c.poster_path as cached_poster, c.overview as cached_overview,
            c.release_date as cache_release
     FROM matched m
-    LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = $1
+    LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = '${type.replace(/'/g, "''")}'
     LEFT JOIN xx_tmdb_cache c ON c.tmdb_id = m.tmdb_id::text
     ORDER BY COALESCE(c.release_date, d.release_date, d.first_air_date, '1900-01-01') DESC NULLS LAST
-    LIMIT $2 OFFSET $3
-  `, [type, limit1, offset1]) as any[];
+    LIMIT $1 OFFSET $2
+  `, [limit1, offset1]) as any[];
 
   // 2 块 SQL：用户已导入 + 未匹配（按 created_at DESC，搜索时多拉后内存 ILIKE）
   const offset2 = isSearch ? 0 : (page - 1) * pageSize;
@@ -135,7 +136,7 @@ async function _GET(request: NextRequest) {
            release_date, first_air_date, vote_average, popularity,
            genres, origin_country, overview
     FROM xx_tmdb_discover
-    WHERE tmdb_type = $1
+    WHERE tmdb_type = '${type.replace(/'/g, "''")}'
       AND poster_path IS NOT NULL
       AND tmdb_id NOT IN (
         SELECT DISTINCT (r.tmdb_id)::int FROM xx_resources r
@@ -144,8 +145,8 @@ async function _GET(request: NextRequest) {
           AND r.status = 'active'
       )
     ORDER BY release_date DESC NULLS LAST, first_air_date DESC NULLS LAST
-    LIMIT $2 OFFSET $3
-  `, [type, limit3, offset3]) as any[];
+    LIMIT $1 OFFSET $2
+  `, [limit3, offset3]) as any[];
 
   // 真实总数（不带 LIMIT，3 个独立 COUNT；**字面拼，无 $N**，跟 b1/b2/b3 一致）
   const count1 = await sql(`
