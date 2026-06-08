@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { FixedSizeGrid as Grid } from 'react-window';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Search, Filter, Star, Calendar, Flame, ChevronDown, X, Library } from 'lucide-react';
@@ -259,15 +259,7 @@ export default function TmdbFilmsPage() {
         ) : items.length === 0 ? (
           <div className="text-center py-20 text-white/40">无结果</div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-            {items.map((it, idx) => {
-              let key: string;
-              if (it.block === 2) key = `b2-${(it as Block2Item).id}`;
-              else if (it.block === 1) key = `b1-${(it as Block1Item).tmdb_id}-${(it as Block1Item).tmdb_type}`;
-              else key = `b3-${(it as Block3Item).tmdb_id}-${(it as Block3Item).tmdb_type}`;
-              return <Card key={key} item={it} idx={idx} router={router} />;
-            })}
-          </div>
+          <VirtualizedGrid items={items} router={router} />
         )}
 
         {/* 总数提示（一次拉完所有） */}
@@ -286,8 +278,7 @@ function Card({ item, idx, router }: { item: Item; idx: number; router: any }) {
   if (item.block === 1) {
     const r = item;
     return (
-      <motion.div
-        initial={false}
+      <div
         onClick={() => router.push(`/tmdb-films/${r.tmdb_id}?type=${r.tmdb_type}`)}
         className="group cursor-pointer"
       >
@@ -326,15 +317,14 @@ function Card({ item, idx, router }: { item: Item; idx: number; router: any }) {
           <h3 className="text-white text-sm font-medium line-clamp-2 group-hover:text-violet-300 transition">{r.title}</h3>
           <p className="text-white/40 text-xs mt-0.5">{(r.release_date || r.first_air_date || '').slice(0, 4)}</p>
         </div>
-      </motion.div>
+      </div>
     );
   }
 
   if (item.block === 2) {
     const r = item;
     return (
-      <motion.div
-        initial={false}
+      <div
         onClick={() => router.push(`/tmdb-films/b2/${r.id}`)}
         className="group cursor-pointer"
       >
@@ -355,17 +345,16 @@ function Card({ item, idx, router }: { item: Item; idx: number; router: any }) {
           </div>
         </div>
         <div className="mt-2">
-          <h3 className="text-white/80 text-xs line-clamp-2 group-hover:text-amber-300 transition">{r.name}</h3>
+            <h3 className="text-white/80 text-xs line-clamp-2 group-hover:text-amber-300 transition">{r.name}</h3>
+          </div>
         </div>
-      </motion.div>
     );
   }
 
   // block === 3
   const r = item;
   return (
-    <motion.div
-      initial={false}
+    <div
       onClick={() => router.push(`/tmdb-films/${r.tmdb_id}?type=${r.tmdb_type}`)}
       className="group cursor-pointer"
     >
@@ -393,6 +382,64 @@ function Card({ item, idx, router }: { item: Item; idx: number; router: any }) {
         <h3 className="text-white text-sm font-medium line-clamp-2 group-hover:text-pink-300 transition">{r.title}</h3>
         <p className="text-white/40 text-xs mt-0.5">{(r.release_date || '').slice(0, 4)}</p>
       </div>
-    </motion.div>
+    </div>
+  );
+}
+
+// ─── 虚拟滚动 Grid（7 万卡片秒开） ─────────────────────────────────
+function VirtualizedGrid({ items, router }: { items: Item[]; router: any }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dims, setDims] = useState({ w: 1200, cols: 6, cw: 0, ch: 0 });
+
+  useEffect(() => {
+    const update = () => {
+      const w = containerRef.current?.clientWidth || 1200;
+      // 响应式 cols
+      let cols = 2;
+      if (w >= 640) cols = 3;
+      if (w >= 768) cols = 4;
+      if (w >= 1024) cols = 5;
+      if (w >= 1280) cols = 6;
+      const gap = 16;
+      const cw = Math.floor((w - gap * (cols - 1)) / cols);
+      const ch = Math.floor(cw * 1.5) + 56; // aspect 2/3 海报 + 标题区
+      setDims({ w, cols, cw, ch });
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  const rowCount = Math.ceil(items.length / dims.cols);
+  const Cell = ({ columnIndex, rowIndex, style }: any) => {
+    const idx = rowIndex * dims.cols + columnIndex;
+    if (idx >= items.length) return null;
+    const it = items[idx];
+    let key: string;
+    if (it.block === 2) key = `b2-${(it as Block2Item).id}`;
+    else if (it.block === 1) key = `b1-${(it as Block1Item).tmdb_id}-${(it as Block1Item).tmdb_type}`;
+    else key = `b3-${(it as Block3Item).tmdb_id}-${(it as Block3Item).tmdb_type}`;
+    return (
+      <div style={{ ...style, padding: 4 }} key={key}>
+        <Card item={it} idx={idx} router={router} />
+      </div>
+    );
+  };
+
+  return (
+    <div ref={containerRef} style={{ width: '100%' }}>
+      {dims.cw > 0 && (
+        <Grid
+          columnCount={dims.cols}
+          columnWidth={dims.cw + 8}
+          rowCount={rowCount}
+          rowHeight={dims.ch + 8}
+          width={dims.w}
+          height={typeof window !== 'undefined' ? Math.min(window.innerHeight - 100, 800) : 600}
+        >
+          {Cell}
+        </Grid>
+      )}
+    </div>
   );
 }
