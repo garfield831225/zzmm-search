@@ -89,7 +89,7 @@ export default function TmdbFilmsPage() {
   const router = useRouter();
   const [type, setType] = useState('all');  // all | movie | tv（首页 = all）
   const [category, setCategory] = useState('all');
-  const [sort, setSort] = useState('smart');
+  const [sort, setSort] = useState('release_date');  // 默认按上映日期（用户要"从近到远"）
   const [year, setYear] = useState('全部');
   const [genre, setGenre] = useState('');
   const [linkType, setLinkType] = useState('all');

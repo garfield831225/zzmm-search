@@ -223,22 +223,10 @@ async function _GET(request: NextRequest) {
     b3 = b3.filter(r => (r.genres || []).includes(genre));
   }
 
-  // 排序
-  const dateOf = (r: any) => r.release_date || r.first_air_date || r.cache_release || '1900';
-  if (sort === 'release_date') {
-    b1.sort((a, b) => dateOf(b).localeCompare(dateOf(a)));
-    b3.sort((a, b) => dateOf(b).localeCompare(dateOf(a)));
-  } else if (sort === 'popularity') {
-    b1.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
-    b3.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
-  } else if (sort === 'rating') {
-    b1.sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0));
-    b3.sort((a, b) => (b.vote_average || 0) - (a.vote_average || 0));
-  } else {
-    // smart：1 块按 updated_at（用户最新导入在前），3 块按 popularity
-    b1.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-    b3.sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
-  }
+  // 排序：SQL 端已经排好（b1 release_date DESC, b2 created_at DESC, b3 release_date DESC）
+  // JS 层不再重排，避免 dateOf() 短字符串混排
+  // popularity / rating 等"按子字段排"在 SQL 端处理（fetch 时改 order_by）
+  // 默认 sort='release_date' 用 SQL 排好的；其他 sort 类型这里不重排
 
   // ─── 拼装结果（整体排序：1 块 → 2 块 → 3 块，各自按自己规则排满 pageSize 条）──
   // **精简版**：删 overview/backdrop/original_title/genres/origin_country（详情页用），减少 body 80%
