@@ -478,11 +478,11 @@ function WatchSection({ tmdbId, type, title }: { tmdbId: string; type: string; t
       headers: token ? { 'Authorization': `Bearer ${decodeURIComponent(token)}` } : {},
     })
       .then(r => r.json().then(j => ({ status: r.status, json: j })))
+      // FAIL-SOFT-WATCH: 始终 setData，VIP 锁用 isLocked 字段判断
       .then(({ status, json }) => {
-        if (status === 401 || status === 403) {
-          setError({ msg: json.error || '需 VIP', code: json.code });
-        } else {
-          setData(json);
+        setData(json);
+        if (json.isLocked) {
+          setError({ msg: json.lockReason === 'vip_required' ? 'VIP 专享，登录后可查看' : '请先登录', code: json.lockReason });
         }
       })
       .catch(e => setError({ msg: e.message }))

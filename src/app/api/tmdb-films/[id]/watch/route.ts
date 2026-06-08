@@ -29,14 +29,16 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // FAIL-SOFT: 即使 getUser 失败也继续返回数据，错误状态用 error 字段带
   const lockEnabled = process.env.LOCK_PLAYBACK_TO_VIP !== 'false';
+  let user: { id: number; group: string } | null = null;
+  let lockReason: string | null = null;
   if (lockEnabled) {
-    const user = await getUser(request);
+    user = await getUser(request);
     if (!user) {
-      return NextResponse.json({ error: '请先登录', code: 'unauthenticated' }, { status: 401 });
-    }
-    if (!['vip', 'admin'].includes(user.group)) {
-      return NextResponse.json({ error: '需 VIP 会员才能播放', code: 'vip_required', userGroup: user.group }, { status: 403 });
+      lockReason = 'unauthenticated';
+    } else if (!['vip', 'admin'].includes(user.group)) {
+      lockReason = 'vip_required';
     }
   }
 
@@ -84,6 +86,9 @@ export async function GET(
       videos,
       keelSearch,
       title,
+      lockReason,
+      isLocked: !!lockReason,
+      userGroup: user?.group || null,
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message, videos: [] }, { status: 502 });

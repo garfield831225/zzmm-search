@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Music, Library, LogOut, CreditCard, ShoppingCart } from 'lucide-react';
+import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv } from 'lucide-react';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
@@ -348,7 +348,23 @@ export default function HomePage() {
               {user ? (
                 <div className="flex items-center gap-2">
                   <span className="px-3 py-1.5 bg-violet-600/30 rounded-lg text-sm text-violet-300">{user.username}</span>
-                  <Link href="/nonfilm" className="group flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/50 rounded-lg text-sm transition-all duration-200 text-cyan-300 hover:shadow-[0_0_12px_rgba(34,211,238,0.4)] hover:scale-105">
+                                    <Link href="/tmdb-films" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/20 hover:bg-pink-600/50 rounded-lg text-sm transition-all duration-200 text-pink-300 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
+                    <Film size={14} className="transition-transform group-hover:scale-110" />
+                    <span>TMDB 影视区</span>
+                  </Link>
+                  <Link href="/vip-videos" className="group flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/20 hover:bg-violet-600/50 rounded-lg text-sm transition-all duration-200 text-violet-300 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105">
+                    <Tv size={14} className="transition-transform group-hover:scale-110" />
+                    <span>VIP 观影区</span>
+                  </Link>
+                  <Link href="/tmdb-films" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/20 hover:bg-pink-600/50 rounded-lg text-sm transition-all duration-200 text-pink-300 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
+                    <Film size={14} className="transition-transform group-hover:scale-110" />
+                    <span>TMDB 影视区</span>
+                  </Link>
+                  <Link href="/vip-videos" className="group flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/20 hover:bg-violet-600/50 rounded-lg text-sm transition-all duration-200 text-violet-300 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105">
+                    <Tv size={14} className="transition-transform group-hover:scale-110" />
+                    <span>VIP 观影区</span>
+                  </Link>
+<Link href="/nonfilm" className="group flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/50 rounded-lg text-sm transition-all duration-200 text-cyan-300 hover:shadow-[0_0_12px_rgba(34,211,238,0.4)] hover:scale-105">
                     <Music size={14} className="transition-transform group-hover:scale-110" />
                     <span>非影视区</span>
                   </Link>
