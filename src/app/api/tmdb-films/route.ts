@@ -244,7 +244,6 @@ async function _GET(request: NextRequest) {
         first_air_date: r.first_air_date,
         vote_average: Number(r.vote_average || 0),
         link_count: Number(r.link_count || 1),
-        sub_types: r.sub_types || [],
         sub_types: r.sub_types || [],  // 原 category 数组（如 ['连载','剧集']），前端展示
         sort_key: sk,
       };
