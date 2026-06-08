@@ -497,7 +497,9 @@ function WatchSection({ tmdbId, type, title }: { tmdbId: string; type: string; t
     );
   }
 
-  if (error) {
+  // FAIL-SOFT-WATCH-V2: 即使 isLocked 也显示 videos，VIP 提示叠加
+  const showVipPrompt = !!error;
+  if (error && (!data?.videos || data.videos.length === 0)) {
     return (
       <div className="bg-gradient-to-r from-violet-900/20 to-pink-900/20 border border-violet-500/30 rounded-2xl p-5">
         <div className="flex items-center justify-between flex-wrap gap-3">
