@@ -44,7 +44,7 @@ async function _GET(request: NextRequest) {
   const minRating  = parseFloat(searchParams.get('minRating') || '0');
   const sort       = searchParams.get('sort') || 'smart';           // smart | release_date | popularity | rating
   const page       = Math.max(1, parseInt(searchParams.get('page') || '1'));
-  const pageSize   = Math.max(1, Math.min(parseInt(searchParams.get('pageSize') || '999999'), 999999));  // 一次拉完所有（不分段）
+  const pageSize   = Math.max(1, Math.min(parseInt(searchParams.get('pageSize') || '999999'), 999999))  // 一次拉完所有（不分段）
   const linkType   = searchParams.get('linkType') || 'all';         // all | 115 | baidu | ...
   const keyword    = (searchParams.get('q') || '').trim();
 
@@ -244,6 +244,7 @@ async function _GET(request: NextRequest) {
         first_air_date: r.first_air_date,
         vote_average: Number(r.vote_average || 0),
         link_count: Number(r.link_count || 1),
+        sub_types: r.sub_types || [],
         sub_types: r.sub_types || [],  // 原 category 数组（如 ['连载','剧集']），前端展示
         sort_key: sk,
       };

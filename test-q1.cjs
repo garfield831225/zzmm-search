@@ -1,0 +1,15 @@
+const cats = ['电影', '华语电影', '外语电影', '动画电影', '演唱会', 'REMUX', '系列电影'];
+const linkType = '115';
+const type = 'movie';
+const _params = [...cats];
+const _cond = [`r.status = 'active'`];
+const ph = cats.map((_, i) => `$${_params.length - cats.length + i + 1}`).join(',');
+_cond.push(`r.category IN (${ph})`);
+if (linkType === '115') _cond.push(`r.source = '115'`);
+if (type === 'movie') _cond.push(`r.category IN ('电影','华语电影','外语电影','动画电影','演唱会','REMUX','系列电影')`);
+const resourceWhere = _cond.join(' AND ');
+const baseLen = _params.length;
+const limit1 = 500, offset1 = 0;
+const q1 = `WITH matched AS (SELECT r.tmdb_id::int FROM xx_resources r WHERE r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000 AND ${resourceWhere} GROUP BY r.tmdb_id) SELECT m.tmdb_id FROM matched m LEFT JOIN xx_tmdb_discover d ON d.tmdb_id = m.tmdb_id AND d.tmdb_type = $${baseLen + 1} LIMIT $${baseLen + 2} OFFSET $${baseLen + 3}`;
+console.log('Q1:', q1);
+console.log('P1:', JSON.stringify([..._params, type, limit1, offset1]));
