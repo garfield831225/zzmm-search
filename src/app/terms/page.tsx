@@ -86,12 +86,12 @@ export default function TermsPage() {
               <div className="flex items-center gap-2">
                 <Mail className="w-4 h-4 text-amber-400" />
                 <span>版权 / 投诉邮箱:</span>
-                <a href="mailto:dmca@zzmm-search.cc" className="text-amber-400 hover:underline">dmca@zzmm-search.cc</a>
+                <a href="mailto:243856689@qq.com" className="text-amber-400 hover:underline">243856689@qq.com</a>
               </div>
               <div className="flex items-center gap-2">
                 <Mail className="w-4 h-4 text-emerald-400" />
                 <span>商务合作:</span>
-                <a href="mailto:bd@zzmm-search.cc" className="text-emerald-400 hover:underline">bd@zzmm-search.cc</a>
+                <a href="mailto:243856689@qq.com" className="text-emerald-400 hover:underline">243856689@qq.com</a>
               </div>
             </div>
           </section>

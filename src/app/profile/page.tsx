@@ -191,8 +191,8 @@ export default function ProfilePage() {
               <Mail className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
               <div>
                 <b className="text-white">邮箱:</b>
-                <a href="mailto:support@zzmm-search.cc" className="text-amber-400 hover:underline ml-1">
-                  support@zzmm-search.cc
+                <a href="mailto:243856689@qq.com" className="text-amber-400 hover:underline ml-1">
+                  243856689@qq.com
                 </a>
                 <div className="text-xs text-white/40 mt-0.5">投诉 / 退款 / 大客户合作</div>
               </div>
