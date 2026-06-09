@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Home, AlertTriangle, Mail, MessageCircle } from 'lucide-react';
+import { Home, AlertTriangle, MessageCircle } from 'lucide-react';
 
 export default function TermsPage() {
   return (
@@ -83,17 +83,7 @@ export default function TermsPage() {
                 <span>Telegram 客服群:</span>
                 <a href="https://t.me/ziyuankefuqun" target="_blank" rel="noopener" className="text-sky-400 hover:underline">泽泽客服群</a>
               </div>
-              <div className="flex items-center gap-2">
-                <Mail className="w-4 h-4 text-amber-400" />
-                <span>版权 / 投诉邮箱:</span>
-                <a href="mailto:243856689@qq.com" className="text-amber-400 hover:underline">243856689@qq.com</a>
               </div>
-              <div className="flex items-center gap-2">
-                <Mail className="w-4 h-4 text-emerald-400" />
-                <span>商务合作:</span>
-                <a href="mailto:243856689@qq.com" className="text-emerald-400 hover:underline">243856689@qq.com</a>
-              </div>
-            </div>
           </section>
 
           <div className="text-xs text-white/30 pt-4 border-t border-white/5">

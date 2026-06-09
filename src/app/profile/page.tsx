@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Crown, Calendar, Tag, Sparkles, ArrowRight, MessageCircle, Mail, ExternalLink, History, Home, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Crown, Calendar, Tag, Sparkles, ArrowRight, MessageCircle, ExternalLink, History, Home, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 interface UserInfo {
   id: number;
@@ -185,16 +185,6 @@ export default function ProfilePage() {
                   泽泽客服群
                 </a>
                 <div className="text-xs text-white/40 mt-0.5">客服 9:00-23:00 在线 / 闪退问题找群主</div>
-              </div>
-            </div>
-            <div className="flex items-start gap-2">
-              <Mail className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-              <div>
-                <b className="text-white">邮箱:</b>
-                <a href="mailto:243856689@qq.com" className="text-amber-400 hover:underline ml-1">
-                  243856689@qq.com
-                </a>
-                <div className="text-xs text-white/40 mt-0.5">投诉 / 退款 / 大客户合作</div>
               </div>
             </div>
             <div className="pt-3 border-t border-white/5 text-xs text-white/40 leading-relaxed">
