@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { rateLimit, getClientIp } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +10,13 @@ const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
 export async function POST(req: NextRequest) {
   try {
+    // 限流: 单 IP 每小时最多 5 次注册
+    const ip = getClientIp(req.headers);
+    const rl = rateLimit(`register:${ip}`, { limit: 5, windowMs: 60 * 60 * 1000 });
+    if (!rl.allowed) {
+      return NextResponse.json({ error: '注册太频繁，请 1 小时后再试', code: 'rate_limited', resetIn: Math.ceil(rl.resetIn / 1000) }, { status: 429 });
+    }
+
     const { username, password, captcha } = await req.json();
 
     const storedCaptcha = req.cookies.get('captcha_code')?.value || '';

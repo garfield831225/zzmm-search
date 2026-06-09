@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
+import { rateLimit, getClientIp } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
@@ -46,6 +47,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '请先登录后再兑换', code: 'unauthenticated' }, { status: 401 });
     }
     const userId = String(payload.id);
+
+    // 限流: 单用户 10 次/小时
+    const rl = rateLimit(`activate:${userId}:${getClientIp(req.headers)}`, { limit: 10, windowMs: 60 * 60 * 1000 });
+    if (!rl.allowed) {
+      return NextResponse.json({ error: '兑换太频繁，请稍后再试', code: 'rate_limited', resetIn: Math.ceil(rl.resetIn / 1000) }, { status: 429 });
+    }
 
     const body = await req.json().catch(() => ({}));
     const code = String(body.code || '').trim();

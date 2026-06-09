@@ -128,13 +128,23 @@ export async function GET(request: NextRequest) {
           const payload = jwt.verify(token, (process.env.JWT_SECRET || 'cLWhs2015')) as any;
           const userId = String(payload.id);
           userGroup = (payload.group || 'user').toLowerCase();
-          const userRow = await sql`SELECT "group" FROM xx_users WHERE id = ${userId} LIMIT 1`;
-          if (userRow[0]?.group) userGroup = String(userRow[0].group).toLowerCase();
+          const userRow = await sql`SELECT user_group FROM xx_users WHERE id = ${userId} LIMIT 1`;
+          if (userRow[0]?.user_group) userGroup = String(userRow[0].user_group).toLowerCase();
         }
       } catch { /* 未登录或无效 token → userGroup='user' */ }
     }
+    // 2026-06-09: 按 userGroup 动态生成 access_level 过滤
+    // admin/vip → 全部; basic → basic+code; user → basic
+    if (['admin', 'vip'].includes(userGroup)) {
+      accessLevelFilter = "(r.access_level IN ('basic', 'vip', 'code', 'free'))";
+    } else if (['basic', 'member'].includes(userGroup)) {
+      accessLevelFilter = "(r.access_level IN ('basic', 'free'))";
+    } else {
+      accessLevelFilter = "(r.access_level IN ('basic', 'free'))";
+    }
+    // 额外: code 资源 (单资源付费) 需要在 xx_user_unlocks 有记录 → 这里只过 access_level, 具体逻辑在 list 阶段补
     const basicZezheOnly = process.env.BASIC_ZEZHE_ONLY === 'true';
-    const isVipPlus = ['vip', 'admin', 'code'].includes(userGroup);
+    const isVipPlus = ['vip', 'admin'].includes(userGroup);
     const importChannelFilter = (basicZezheOnly && !isVipPlus)
       ? `(r.import_channel = 'zezhe')` : '1=1';
 

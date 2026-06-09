@@ -15,8 +15,8 @@ async function getUser(req: NextRequest) {
     const payload = jwt.verify(token, (process.env.JWT_SECRET || 'cLWhs2015')) as any;
     const userId = String(payload.id);
     const sql = neon(process.env.DATABASE_URL || '');
-    const r = await sql`SELECT id, "group" FROM xx_users WHERE id = ${userId} LIMIT 1`;
-    return r[0] ? { id: r[0].id, group: String(r[0].group || 'user').toLowerCase() } : null;
+    const r = await sql`SELECT id, user_group FROM xx_users WHERE id = ${userId} LIMIT 1`;
+    return r[0] ? { id: r[0].id, group: String(r[0].user_group || 'user').toLowerCase() } : null;
   } catch { return null; }
 }
 

@@ -20,6 +20,9 @@ interface Code {
   created_at: string;
   channel: string | null;
   batch_id: string | null;
+  sent_to_customer: boolean;
+  sent_at: string | null;
+  sent_note: string | null;
 }
 
 interface BatchStat {
@@ -56,6 +59,9 @@ export default function CodesPage() {
   const [fCodeType, setFCodeType] = useState('');
   const [fStatus, setFStatus] = useState('');
   const [fBatch, setFBatch] = useState('');
+  const [fSent, setFSent] = useState(''); // '' / 'sent' / 'unsent'
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [sentNote, setSentNote] = useState('');
 
   // 生成器
   const [genPlan, setGenPlan] = useState('vip_180d');
@@ -83,12 +89,19 @@ export default function CodesPage() {
       if (fStatus) params.set('status', fStatus);
       if (fBatch) params.set('batch_id', fBatch);
       const r = await fetch('/api/admin/codes?' + params, { headers: { Authorization: 'Bearer ' + token } });
-      const d = await r.json();
+      let d = await r.json();
       if (d.error) showToast('❌ ' + d.error);
-      else { setCodes(d.items || []); setBatchStats(d.batch_stats || []); }
+      else {
+        let items = d.items || [];
+        // sent 过滤 (前端, 因为后端没加)
+        if (fSent === 'sent') items = items.filter((c: Code) => c.sent_to_customer);
+        else if (fSent === 'unsent') items = items.filter((c: Code) => !c.sent_to_customer);
+        setCodes(items);
+        setBatchStats(d.batch_stats || []);
+      }
     } catch (e: any) { showToast('❌ ' + e.message); }
     finally { setLoading(false); }
-  }, [token, fChannel, fCodeType, fStatus, fBatch]);
+  }, [token, fChannel, fCodeType, fStatus, fBatch, fSent]);
 
   useEffect(() => { if (authed) fetchList(); }, [authed, fetchList]);
 
@@ -118,9 +131,30 @@ export default function CodesPage() {
     try { await navigator.clipboard.writeText(text); showToast('✅ ' + msg); } catch { showToast('❌ 复制失败'); }
   };
 
+  const markSent = async (ids: number[], sent: boolean, note?: string) => {
+    if (!ids.length) return;
+    const r = await fetch('/api/admin/codes', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ ids, sent_to_customer: sent, sent_note: note || null }),
+    });
+    const d = await r.json();
+    if (d.error) showToast('❌ ' + d.error);
+    else { showToast(`✅ 已标记 ${ids.length} 个`); setSelectedIds([]); setSentNote(''); fetchList(); }
+  };
+
   const copyAll = () => {
     if (!genResult) return;
     copyText(genResult.codes.join('\n'), `已复制 ${genResult.codes.length} 个码`);
+  };
+
+  // 复制后自动标记本次生成的码为"已发" (防重发)
+  const copyAllAndMarkSent = async () => {
+    if (!genResult) return;
+    copyText(genResult.codes.join('\n'), `已复制并标记 ${genResult.codes.length} 个为已发`);
+    // 找到刚生成的码对应的 id, 标记为已发
+    const ids = codes.filter(c => genResult.codes.includes(c.code)).map(c => c.id);
+    if (ids.length) await markSent(ids, true, `批次 ${genResult.batch_id} 复制即发`);
   };
 
   const copyAsProduct = () => {
@@ -294,6 +328,9 @@ export default function CodesPage() {
                   <button onClick={copyAsProduct} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs flex items-center gap-1">
                     <Copy className="w-3 h-3" /> 商品格式
                   </button>
+                  <button onClick={copyAllAndMarkSent} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-xs flex items-center gap-1">
+                    <Copy className="w-3 h-3" /> 复制并标记已发
+                  </button>
                   <button onClick={exportCSV} className="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs flex items-center gap-1">
                     <Download className="w-3 h-3" /> CSV
                   </button>
@@ -355,9 +392,19 @@ export default function CodesPage() {
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <Filter className="w-5 h-5 text-amber-400" /> 激活码明细（共 {codes.length} 条）
             </h2>
-            <button onClick={fetchList} disabled={loading} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-sm flex items-center gap-1">
-              <RefreshCw className={'w-3 h-3 ' + (loading ? 'animate-spin' : '')} /> 刷新
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {selectedIds.length > 0 && (
+                <>
+                  <span className="text-sm text-violet-300">已选 {selectedIds.length} 个</span>
+                  <input value={sentNote} onChange={e => setSentNote(e.target.value)} placeholder="备注(可选)" className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-xs w-32" />
+                  <button onClick={() => markSent(selectedIds, true, sentNote)} className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 rounded text-xs">📦 标记已发</button>
+                  <button onClick={() => markSent(selectedIds, false)} className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-xs">↩️ 取消已发</button>
+                </>
+              )}
+              <button onClick={fetchList} disabled={loading} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-sm flex items-center gap-1">
+                <RefreshCw className={'w-3 h-3 ' + (loading ? 'animate-spin' : '')} /> 刷新
+              </button>
+            </div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
             <select value={fChannel} onChange={e => setFChannel(e.target.value)} className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm">
@@ -375,6 +422,11 @@ export default function CodesPage() {
               <option value="unused">未使用</option>
               <option value="used">已使用</option>
             </select>
+            <select value={fSent} onChange={e => setFSent(e.target.value)} className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm">
+              <option value="">全部发货</option>
+              <option value="sent">📦 已发</option>
+              <option value="unsent">⏳ 未发</option>
+            </select>
             <input value={fBatch} onChange={e => setFBatch(e.target.value)} placeholder="批次名筛选" className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm" />
           </div>
 
@@ -382,24 +434,30 @@ export default function CodesPage() {
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-[#12121a]">
                 <tr className="text-left text-white/40 text-xs border-b border-white/10">
+                  <th className="py-2 px-2 w-8">
+                    <input type="checkbox" checked={selectedIds.length === codes.length && codes.length > 0} onChange={e => setSelectedIds(e.target.checked ? codes.map(c => c.id) : [])} />
+                  </th>
                   <th className="py-2 px-2">激活码</th>
                   <th className="py-2 px-2">类型</th>
                   <th className="py-2 px-2">渠道</th>
                   <th className="py-2 px-2">批次</th>
-                  <th className="py-2 px-2">状态</th>
+                  <th className="py-2 px-2">使用</th>
+                  <th className="py-2 px-2">发货</th>
                   <th className="py-2 px-2">价格</th>
-                  <th className="py-2 px-2">使用时间</th>
                 </tr>
               </thead>
               <tbody>
                 {codes.length === 0 ? (
-                  <tr><td colSpan={7} className="py-8 text-center text-white/40">暂无数据</td></tr>
+                  <tr><td colSpan={8} className="py-8 text-center text-white/40">暂无数据</td></tr>
                 ) : codes.map(c => (
-                  <tr key={c.id} className="border-b border-white/5 hover:bg-white/5">
+                  <tr key={c.id} className={`border-b border-white/5 hover:bg-white/5 ${c.sent_to_customer ? 'opacity-60' : ''}`}>
+                    <td className="py-2 px-2">
+                      <input type="checkbox" checked={selectedIds.includes(c.id)} onChange={e => setSelectedIds(e.target.checked ? [...selectedIds, c.id] : selectedIds.filter(x => x !== c.id))} />
+                    </td>
                     <td className="py-2 px-2 font-mono text-violet-300 cursor-pointer" onClick={() => copyText(c.code)}>
                       {c.code}
                     </td>
-                    <td className="py-2 px-2">{c.code_type === 'vip' ? (c.plan_id || `VIP ${c.duration}天`) : (c.target_resource_name?.slice(0, 15) || `#${c.target_resource_id}`)}</td>
+                    <td className="py-2 px-2 text-xs">{c.code_type === 'vip' ? (c.plan_id || `VIP ${c.duration}天`) : (c.target_resource_name?.slice(0, 15) || `#${c.target_resource_id}`)}</td>
                     <td className="py-2 px-2">{c.channel === 'wd' ? '🏪' : c.channel === 'xy' ? '🐟' : '-'}</td>
                     <td className="py-2 px-2 font-mono text-xs text-white/60">{c.batch_id || '-'}</td>
                     <td className="py-2 px-2">
@@ -408,8 +466,13 @@ export default function CodesPage() {
                         : <span className="px-2 py-0.5 bg-amber-500/20 text-amber-400 rounded text-xs">未用</span>
                       }
                     </td>
-                    <td className="py-2 px-2">¥{c.price_at_issue || 0}</td>
-                    <td className="py-2 px-2 text-xs text-white/40">{c.used_at ? new Date(c.used_at).toLocaleString('zh-CN') : '-'}</td>
+                    <td className="py-2 px-2">
+                      {c.sent_to_customer
+                        ? <span className="px-2 py-0.5 bg-sky-500/20 text-sky-300 rounded text-xs" title={c.sent_note || ''}>📦 {c.sent_at ? new Date(c.sent_at).toLocaleDateString('zh-CN').slice(5) : '已发'}</span>
+                        : <span className="px-2 py-0.5 bg-white/5 text-white/40 rounded text-xs">⏳</span>
+                      }
+                    </td>
+                    <td className="py-2 px-2 text-xs">¥{c.price_at_issue || 0}</td>
                   </tr>
                 ))}
               </tbody>

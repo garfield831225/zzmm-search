@@ -160,6 +160,7 @@ export async function GET(req: NextRequest) {
     SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group,
            ac.target_resource_id, ac.price_at_issue, ac.is_used, ac.used_by, ac.used_at,
            ac.created_at, ac.channel, ac.batch_id,
+           ac.sent_to_customer, ac.sent_at, ac.sent_note,
            r.name as target_resource_name, r.category as target_resource_category
     FROM xx_activation_codes ac
     LEFT JOIN xx_resources r ON ac.target_resource_id = r.id
@@ -200,4 +201,25 @@ export async function GET(req: NextRequest) {
     page, pageSize,
     batch_stats: batchStats,
   });
+}
+
+// 标记已发 / 取消已发
+export async function PATCH(req: NextRequest) {
+  const auth = adminOnly(req.headers.get('authorization'));
+  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+  const body = await req.json().catch(() => ({}));
+  const { ids, sent_to_customer, sent_note } = body;
+  if (!Array.isArray(ids) || ids.length === 0) return NextResponse.json({ error: 'ids 必传' }, { status: 400 });
+  const sql = neon(process.env.DATABASE_URL || '');
+  try {
+    if (sent_to_customer) {
+      await sql`UPDATE xx_activation_codes SET sent_to_customer = true, sent_at = NOW(), sent_note = ${sent_note || null} WHERE id = ANY(${ids})`;
+    } else {
+      await sql`UPDATE xx_activation_codes SET sent_to_customer = false, sent_at = NULL, sent_note = NULL WHERE id = ANY(${ids})`;
+    }
+    return NextResponse.json({ ok: true, updated: ids.length });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
 }
