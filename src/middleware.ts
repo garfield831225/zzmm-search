@@ -41,6 +41,8 @@ const PUBLIC_PATHS = [
   '/tmdb-films',
   '/vip-videos',
   '/api/vip-videos',
+  '/api/user/activate',
+  '/activate',
 ];
 
 export function middleware(request: NextRequest) {
