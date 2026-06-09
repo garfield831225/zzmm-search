@@ -6,10 +6,23 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 async function getUser(req: NextRequest) {
+  // 三种方式拿 token: Authorization header > cookie > query (?token=)
+  const auth = req.headers.get('authorization');
+  let token = '';
+  if (auth?.startsWith('Bearer ')) {
+    token = auth.replace('Bearer ', '');
+  } else {
+    // cookie: zzmm_token / token
+    token = req.cookies.get('zzmm_token')?.value
+         || req.cookies.get('token')?.value
+         || '';
+    if (!token) {
+      // 兜底: query 参数
+      token = new URL(req.url).searchParams.get('token') || '';
+    }
+  }
+  if (!token) return null;
   try {
-    const auth = req.headers.get('authorization');
-    if (!auth?.startsWith('Bearer ')) return null;
-    const token = auth.replace('Bearer ', '');
     const payload = jwt.verify(token, (process.env.JWT_SECRET || 'cLWhs2015')) as any;
     const userId = String(payload.id);
     const sql = neon(process.env.DATABASE_URL || '');

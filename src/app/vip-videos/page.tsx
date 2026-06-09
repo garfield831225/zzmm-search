@@ -42,7 +42,11 @@ export default function VipVideosPage() {
     setLoading(true);
     setError(null);
     try {
-      const r = await fetch(`/api/vip-videos/search?source=${tab}&q=${encodeURIComponent(q)}&page=${page}`);
+      const token = typeof window !== 'undefined' ? (localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '') : '';
+    const r = await fetch(`/api/vip-videos/search?source=${tab}&q=${encodeURIComponent(q)}&page=${page}`, {
+      credentials: 'include',
+      headers: token ? { Authorization: 'Bearer ' + token } : {},
+    });
       if (r.status === 401 || r.status === 403) {
         setLocked(true);
         setItems([]);
