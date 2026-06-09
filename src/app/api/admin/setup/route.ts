@@ -44,12 +44,12 @@ async function doSetup(sql: any): Promise<string[]> {
   // 3. 创建管理员账户
   const existingAdmin = await sql`SELECT id FROM xx_users WHERE username = 'admin'`;
   if ((existingAdmin as any[]).length === 0) {
-    const hashed = bcrypt.hashSync('zzmm2026', 10);
+    const hashed = bcrypt.hashSync('@cLWhs2015', 10);
     await sql`
       INSERT INTO xx_users (username, password_hash, user_group, expire_at, status, created_at, updated_at)
       VALUES ('admin', ${hashed}, 'admin', '2099-12-31', 'active', NOW(), NOW())
     `;
-    results.push('✅ 管理员账户创建：admin / zzmm2026');
+    results.push('✅ 管理员账户创建：admin / @cLWhs2015');
   } else {
     results.push('ℹ️ 管理员已存在');
   }
