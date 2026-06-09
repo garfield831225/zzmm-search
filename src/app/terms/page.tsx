@@ -81,7 +81,7 @@ export default function TermsPage() {
               <div className="flex items-center gap-2">
                 <MessageCircle className="w-4 h-4 text-sky-400" />
                 <span>Telegram 客服群:</span>
-                <a href="https://t.me/+XxxYyyZzz" target="_blank" rel="noopener" className="text-sky-400 hover:underline">@zzmm_support</a>
+                <a href="https://t.me/ziyuankefuqun" target="_blank" rel="noopener" className="text-sky-400 hover:underline">泽泽客服群</a>
               </div>
               <div className="flex items-center gap-2">
                 <Mail className="w-4 h-4 text-amber-400" />
