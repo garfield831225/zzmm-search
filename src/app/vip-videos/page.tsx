@@ -406,71 +406,69 @@ export default function VipVideosPage() {
           )}
         </div>
 
-        {/* 搜索结果 8 平台跳转 */}
-        <AnimatePresence mode="wait">
-          {q.trim() && (
-            <motion.div
-              key={q}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="bg-[#12121a] rounded-2xl p-6 border border-white/5"
-            >
-              <div className="mb-4 flex items-center justify-between flex-wrap gap-2">
-                <div>
-                  <div className="text-sm text-white/60 mb-1">搜 "<span className="text-violet-300 font-medium">{q}</span>" 在以下平台</div>
-                  <div className="text-xs text-white/40">点击跳转新窗口 · 完全免费 · 正版资源</div>
-                </div>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => toggleFavorite(q)}
-                    className={`px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 ${
-                      favorites.includes(q) ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-white/5 hover:bg-white/10'
-                    }`}
-                  >
-                    {favorites.includes(q) ? <><BookmarkCheck className="w-3 h-3" /> 已收藏</> : <><Bookmark className="w-3 h-3" /> 收藏</>}
-                  </button>
-                </div>
+        {/* 搜索结果 8 平台跳转 - 不用 AnimatePresence 避免 q 变化时 exit 动画卡住 */}
+        {q.trim() && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+            className="bg-[#12121a] rounded-2xl p-6 border border-white/5"
+          >
+            <div className="mb-4 flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <div className="text-sm text-white/60 mb-1">搜 "<span className="text-violet-300 font-medium">{q}</span>" 在以下平台</div>
+                <div className="text-xs text-white/40">点击跳转新窗口 · 完全免费 · 正版资源</div>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {PORTALS.map(p => (
-                  <a
-                    key={p.name}
-                    href={p.searchUrl(q)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={`group p-4 bg-gradient-to-br ${p.color} rounded-xl hover:scale-105 transition shadow-lg`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-2xl">{p.emoji}</span>
-                      <ExternalLink className="w-3.5 h-3.5 text-white/60 group-hover:text-white" />
-                    </div>
-                    <div className="text-base font-bold mb-1">{p.name}</div>
-                    <div className="text-[10px] text-white/80 leading-tight">{p.desc}</div>
-                  </a>
-                ))}
+              <div className="flex gap-1">
+                <button
+                  onClick={() => toggleFavorite(q)}
+                  className={`px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 ${
+                    favorites.includes(q) ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-white/5 hover:bg-white/10'
+                  }`}
+                >
+                  {favorites.includes(q) ? <><BookmarkCheck className="w-3 h-3" /> 已收藏</> : <><Bookmark className="w-3 h-3" /> 收藏</>}
+                </button>
               </div>
-              {/* D. TMDB 联动入口 */}
-              <Link
-                href={`/tmdb-films?q=${encodeURIComponent(q)}`}
-                className="mt-3 flex items-center justify-between px-4 py-3 bg-gradient-to-r from-violet-500/20 to-pink-500/20 border border-violet-500/30 rounded-xl hover:bg-violet-500/30 transition"
-              >
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-violet-300" />
-                  <div>
-                    <div className="text-sm text-white font-medium">🎬 在本站影视区找 "{q}"</div>
-                    <div className="text-[10px] text-white/40">TMDB 8 万+ 资源直接看</div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {PORTALS.map(p => (
+                <a
+                  key={p.name}
+                  href={p.searchUrl(q)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`group p-4 bg-gradient-to-br ${p.color} rounded-xl hover:scale-105 transition shadow-lg`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-2xl">{p.emoji}</span>
+                    <ExternalLink className="w-3.5 h-3.5 text-white/60 group-hover:text-white" />
                   </div>
+                  <div className="text-base font-bold mb-1">{p.name}</div>
+                  <div className="text-[10px] text-white/80 leading-tight">{p.desc}</div>
+                </a>
+              ))}
+            </div>
+            {/* D. TMDB 联动入口 */}
+            <Link
+              href={`/tmdb-films?q=${encodeURIComponent(q)}`}
+              className="mt-3 flex items-center justify-between px-4 py-3 bg-gradient-to-r from-violet-500/20 to-pink-500/20 border border-violet-500/30 rounded-xl hover:bg-violet-500/30 transition"
+            >
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-violet-300" />
+                <div>
+                  <div className="text-sm text-white font-medium">🎬 在本站影视区找 "{q}"</div>
+                  <div className="text-[10px] text-white/40">TMDB 8 万+ 资源直接看</div>
                 </div>
-                <ChevronRight className="w-4 h-4 text-violet-300" />
-              </Link>
-
-              {/* 免责 */}
-              <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-200 text-xs leading-relaxed">
-                <b>💡 小提示</b>：本站不存视频内容, 只提供搜索导航。想看"在线试看"用上方 TMDB 联动。
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+              <ChevronRight className="w-4 h-4 text-violet-300" />
+            </Link>
+
+            {/* 免责 */}
+            <div className="mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-200 text-xs leading-relaxed">
+              <b>💡 小提示</b>：本站不存视频内容, 只提供搜索导航。想看"在线试看"用上方 TMDB 联动。
+            </div>
+          </motion.div>
+        )}
 
         {/* 说明 */}
         <div className="bg-[#12121a] rounded-2xl p-6 border border-white/5 text-sm text-white/70 leading-relaxed">
