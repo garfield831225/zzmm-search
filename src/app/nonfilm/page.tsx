@@ -8,6 +8,16 @@ const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
 
 const NONFILM_CATEGORIES = ['全部', '音乐', '体育', '游戏', '电子书', '精品课', '文档'];
+
+// 子区入口: '游戏' 跳独立 /games 页面 (VIP), 其他查 xx_resources
+const NONFILM_SUBSECTIONS: { key: string; icon: string; label: string; desc: string; href: string; badge?: string; color: string }[] = [
+  { key: 'game', icon: '🎮', label: '游戏中心', desc: '掌机/PC 6 万+', href: '/games', badge: 'VIP', color: 'from-amber-500 to-orange-600' },
+  { key: 'music', icon: '🎵', label: '音乐', desc: 'Hi-Res 专辑', href: '/nonfilm?category=音乐', color: 'from-pink-500 to-rose-600' },
+  { key: 'sport', icon: '⚽', label: '体育', desc: '赛事/纪录片', href: '/nonfilm?category=体育', color: 'from-green-500 to-emerald-600' },
+  { key: 'ebook', icon: '📚', label: '电子书', desc: '小说/教程', href: '/nonfilm?category=电子书', color: 'from-blue-500 to-cyan-600' },
+  { key: 'course', icon: '🎓', label: '精品课', desc: '付费课/讲座', href: '/nonfilm?category=精品课', color: 'from-violet-500 to-purple-600' },
+  { key: 'doc', icon: '📄', label: '文档', desc: '教程/工具', href: '/nonfilm?category=文档', color: 'from-slate-500 to-gray-600' },
+];
 const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '磁力链接', 'ed2k链接'];
 
 const SOURCE_KEY_MAP: Record<string, string> = {
@@ -166,6 +176,26 @@ export default function NonFilmPage() {
             >
               搜索
             </button>
+          </div>
+
+          {/* 子区入口卡片 (游戏跳独立页) */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 mt-4">
+            {NONFILM_SUBSECTIONS.map((s) => (
+              <Link
+                key={s.key}
+                href={s.href}
+                className={`group relative overflow-hidden rounded-xl p-3 bg-gradient-to-br ${s.color} text-white shadow-sm hover:shadow-md transition-all hover:scale-[1.03]`}
+              >
+                <div className="text-2xl mb-1">{s.icon}</div>
+                <div className="font-medium text-sm flex items-center gap-1">
+                  {s.label}
+                  {s.badge && (
+                    <span className="text-[9px] px-1 py-0.5 bg-white/30 rounded">{s.badge}</span>
+                  )}
+                </div>
+                <div className="text-[10px] text-white/70 mt-0.5">{s.desc}</div>
+              </Link>
+            ))}
           </div>
 
           {/* Category filters */}
