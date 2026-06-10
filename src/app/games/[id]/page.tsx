@@ -5,6 +5,14 @@ import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 
+function getAuthHeaders(): HeadersInit {
+  if (typeof window === 'undefined') return {};
+  const t = localStorage.getItem('zzmm_token')
+    || localStorage.getItem('token')
+    || localStorage.getItem('adminToken');
+  return t ? { Authorization: 'Bearer ' + t } : {};
+}
+
 interface Game {
   id: number;
   name: string;
@@ -42,7 +50,7 @@ export default function GameDetailPage() {
 
   useEffect(() => {
     if (!params?.id) return;
-    fetch(`/api/games/${params.id}`, { credentials: 'include' })
+    fetch(`/api/games/${params.id}`, { credentials: 'include', headers: getAuthHeaders() })
       .then((r) => r.json())
       .then((d) => {
         if (!d.ok) {

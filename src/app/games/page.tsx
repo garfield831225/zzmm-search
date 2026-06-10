@@ -4,6 +4,15 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 
+// 拿 localStorage token (兼容多个 key)
+function getAuthHeaders(): HeadersInit {
+  if (typeof window === 'undefined') return {};
+  const t = localStorage.getItem('zzmm_token')
+    || localStorage.getItem('token')
+    || localStorage.getItem('adminToken');
+  return t ? { Authorization: 'Bearer ' + t } : {};
+}
+
 interface Game {
   id: number;
   name: string;
@@ -81,7 +90,7 @@ export default function GamesPage() {
 
   // 加载平台
   useEffect(() => {
-    fetch('/api/games/platforms', { credentials: 'include' })
+    fetch('/api/games/platforms', { credentials: 'include', headers: getAuthHeaders() })
       .then((r) => r.json())
       .then((d) => {
         if (d.ok) setPlatforms(d.platforms || []);
@@ -99,7 +108,7 @@ export default function GamesPage() {
       params.set('page', String(page));
       params.set('pageSize', '24');
 
-      const r = await fetch(`/api/games?${params}`, { credentials: 'include' });
+      const r = await fetch(`/api/games?${params}`, { credentials: 'include', headers: getAuthHeaders() });
       const d = await r.json();
       if (!d.ok) {
         if (d.need === 'vip' || d.need === 'basic') {
