@@ -110,9 +110,14 @@ export default function GamesPage() {
 
       const r = await fetch(`/api/games?${params}`, { credentials: 'include', headers: getAuthHeaders() });
       const d = await r.json();
+      console.log('[games API]', r.status, d);
       if (!d.ok) {
         if (d.need === 'vip' || d.need === 'basic') {
           addToast(d.tip || '需要升级会员', 'error');
+        } else if (d.needLogin) {
+          addToast('请先登录', 'error');
+        } else {
+          addToast(d.error || '加载失败', 'error');
         }
         setItems([]);
         setTotal(0);
@@ -120,8 +125,9 @@ export default function GamesPage() {
       }
       setItems(d.items || []);
       setTotal(d.total || 0);
-    } catch (e) {
-      addToast('加载失败', 'error');
+    } catch (e: any) {
+      console.error('[games loadGames error]', e);
+      addToast('加载失败: ' + (e?.message || '网络错误'), 'error');
     } finally {
       setLoading(false);
     }
