@@ -40,25 +40,46 @@ const RID_MAP: Record<string, number> = {
   doc: 37,          // 纪录片
 };
 
-// 已实测风控拒绝的 rid (B 站 anti-bot)
-const BLOCKED_RIDS = new Set([0, 11]);
+// B 站 anti-bot 风控的 rid
+const BLOCKED_RIDS = new Set([0, 11, 13, 23, 37, 71, 168]);
 
+// PGC season_type 映射: 1=电影 2=剧 3=纪录片 4=综艺 5=动画 7=番剧
+const PGC_TYPE_MAP: Record<string, number> = {
+  movie: 1,
+  tv: 2,
+  doc: 3,
+  variety: 4,
+};
+
+// 哪类用哪个端点
+// all + anime → /x/web-interface (B 站动漫区, ranking 没风控用 /popular)
+// movie + tv + doc + variety → /pgc/season/rank (电影/剧/综艺/纪录片)
 async function fetchBiliHot(rid: number): Promise<BiliHot[]> {
-  // 全站 (rid=0) 用 /popular? 端点
   const url = rid === 0
     ? 'https://api.bilibili.com/x/web-interface/popular?ps=24&pn=1'
-    : `https://api.bilibili.com/x/web-interface/ranking/v2?rid=${rid}&type=all`;
-  const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    : rid === 1
+      ? 'https://api.bilibili.com/x/web-interface/ranking/v2?rid=1&type=all'
+      : PGC_TYPE_MAP[['movie', 'tv', 'doc', 'variety'].find(k => RID_MAP[k] === rid) || '']
+        ? `https://api.bilibili.com/pgc/season/rank/web/list?day=3&type=1&season_type=${PGC_TYPE_MAP[['movie', 'tv', 'doc', 'variety'].find(k => RID_MAP[k] === rid) || '']}`
+        : `https://api.bilibili.com/x/web-interface/ranking/v2?rid=${rid}&type=all`;
+
+  const r = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0' },
+    signal: AbortSignal.timeout(8000),
+  });
   if (!r.ok) return [];
   const j = await r.json();
-  const list = rid === 0 ? (j?.data?.list || []) : (j?.data?.list || []);
+  if (j.code !== 0) return [];
+  // popular + ranking: j.data.list
+  // pgc: j.result.list
+  const list = j.data?.list || j.result?.list || [];
   return list.slice(0, 24).map((v: any) => ({
     rid,
-    title: v.title,
-    pic: (v.pic || '').replace(/^\/\//, 'https://'),
-    bvid: v.bvid || v.short_link?.match(/BV\w+/)?.[0] || '',
-    author: v.author || v.owner?.name || '',
-    play: v.play || v.stat?.view || 0,
+    title: v.title || '',
+    pic: (v.pic || v.cover || '').replace(/^\/\//, 'https://'),
+    bvid: v.bvid || v.ep_id?.toString() || '',
+    author: v.author || v.owner?.name || v.staff || '',
+    play: v.play || v.stat?.view || v.views || 0,
     danmaku: v.danmaku || v.stat?.danmaku || 0,
     duration: formatDuration(v.duration || v.duration_text || 0),
   }));
