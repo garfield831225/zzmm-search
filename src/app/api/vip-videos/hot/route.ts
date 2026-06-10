@@ -34,14 +34,38 @@ interface BiliHot {
 const RID_MAP: Record<string, number> = {
   all: 0,
   anime: 1,
-  movie: 23,        // 电影
-  tv: 11,           // 国产剧
+  movie: 23,        // 电影 (确认活着)
+  tv: 13,           // 番剧 (B 站用 13=番剧, 不是 11=国产剧)
   variety: 71,      // 综艺
   doc: 37,          // 纪录片
 };
 
+// 已实测风控拒绝的 rid (B 站 anti-bot)
+const BLOCKED_RIDS = new Set([0, 11]);
+
 async function fetchBiliHot(rid: number): Promise<BiliHot[]> {
-  // B站官方公开 API
+  // 全站 (rid=0) 用 /popular? 端点
+  const url = rid === 0
+    ? 'https://api.bilibili.com/x/web-interface/popular?ps=24&pn=1'
+    : `https://api.bilibili.com/x/web-interface/ranking/v2?rid=${rid}&type=all`;
+  const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!r.ok) return [];
+  const j = await r.json();
+  const list = rid === 0 ? (j?.data?.list || []) : (j?.data?.list || []);
+  return list.slice(0, 24).map((v: any) => ({
+    rid,
+    title: v.title,
+    pic: (v.pic || '').replace(/^\/\//, 'https://'),
+    bvid: v.bvid || v.short_link?.match(/BV\w+/)?.[0] || '',
+    author: v.author || v.owner?.name || '',
+    play: v.play || v.stat?.view || 0,
+    danmaku: v.danmaku || v.stat?.danmaku || 0,
+    duration: formatDuration(v.duration || v.duration_text || 0),
+  }));
+}
+
+async function fetchBiliHotOLD(rid: number): Promise<BiliHot[]> {
+  // B站官方公开 API (ranking 端点, 部分 rid 被风控)
   const url = `https://api.bilibili.com/x/web-interface/ranking/v2?rid=${rid}&type=all`;
   const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
   if (!r.ok) return [];
