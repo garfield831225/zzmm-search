@@ -51,6 +51,50 @@ export default function ImportPage() {
   const [showKeyInput, setShowKeyInput] = useState(true);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // 2026-06-10: 快速导入 (CSV / 粘链接)
+  const [quickText, setQuickText] = useState('');
+  const [quickCategory, setQuickCategory] = useState('');
+  const [quickImporting, setQuickImporting] = useState(false);
+
+  const QUICK_SAMPLE = `狂飙,https://115.com/s/swXXX123,abc123
+三体 S01E05,https://pan.baidu.com/s/1abcdef,def456
+流浪地球2,https://115.com/s/swYYY456,
+${'magnet:?'}xt=urn:btih:ABCDEF1234567890
+庆余年2,https://115.com/s/swZZZ789,xyz789`;
+
+  const doQuickImport = async () => {
+    if (!quickText.trim()) { addLog('❌ 内容为空'); return; }
+    setQuickImporting(true);
+    addLog(`⚡ 快速导入: ${quickText.split('\n').filter(l => l.trim()).length} 行`);
+    try {
+      const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || localStorage.getItem('adminToken') || '';
+      const r = await fetch('/api/admin/import/quick', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify({ mode: 'paste', text: quickText, category: quickCategory || undefined }),
+      });
+      const d = await r.json();
+      if (d.error) {
+        addLog('❌ ' + d.error);
+        return;
+      }
+      addLog(`✅ 解析 ${d.parsed} 条, 入库 ${d.imported}, 失败 ${d.failed}`);
+      if (d.by_source) {
+        const srcStr = Object.entries(d.by_source).map(([k, v]) => `${k}:${v}`).join(', ');
+        addLog(`📊 来源分布: ${srcStr}`);
+      }
+      if (d.by_category) {
+        const catStr = Object.entries(d.by_category).slice(0, 5).map(([k, v]) => `${k}:${v}`).join(', ');
+        addLog(`📊 分类分布: ${catStr}`);
+      }
+      if (d.imported > 0) setQuickText(''); // 成功才清空
+    } catch (e: any) {
+      addLog('❌ 网络错误: ' + e.message);
+    } finally {
+      setQuickImporting(false);
+    }
+  };
+
   const addLog = useCallback((msg: string) => setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]), []);
 
   // 关键字匹配（fallback for sheet names not in the map）
@@ -458,6 +502,73 @@ export default function ImportPage() {
             </div>
           </motion.div>
         )}
+
+        {/* 2026-06-10: 快速导入 - CSV / 粘链接 (无需 Excel, 纯文本) */}
+        <div className="bg-[#12121a] rounded-xl border border-white/5 p-4 mb-4">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h3 className="text-sm font-medium">⚡ 快速导入 (粘 CSV / 粘链接)</h3>
+            <div className="text-xs text-white/40">
+              支持: <code className="text-violet-300">片名,链接,提取码</code> (CSV/TSV/空格) ·
+              自动识别 115/百度/磁力/ed2k
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 mb-2">
+            <select
+              value={quickCategory}
+              onChange={e => setQuickCategory(e.target.value)}
+              className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs"
+            >
+              <option value="">自动猜分类</option>
+              <option value="电影">电影</option>
+              <option value="剧集">剧集</option>
+              <option value="动漫">动漫</option>
+              <option value="纪录片">纪录片</option>
+              <option value="综艺">综艺</option>
+              <option value="演唱会">演唱会</option>
+              <option value="原盘">原盘</option>
+              <option value="REMUX">REMUX</option>
+              <option value="连载">连载</option>
+              <option value="合集">合集</option>
+              <option value="少儿频道">少儿频道</option>
+              <option value="音乐">音乐</option>
+              <option value="体育">体育</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => { setQuickText(QUICK_SAMPLE); }}
+              className="px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 rounded-lg"
+            >
+              📋 填示例
+            </button>
+            <button
+              type="button"
+              onClick={() => setQuickText('')}
+              className="px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 rounded-lg"
+            >
+              🗑️ 清空
+            </button>
+          </div>
+
+          <textarea
+            value={quickText}
+            onChange={e => setQuickText(e.target.value)}
+            placeholder={`每行一条: 片名,链接,提取码\n狂飙,https://115.com/s/swXXX,abc123\n三体 S01E05,https://pan.baidu.com/s/1xxx,def456\n磁力链接: ${'magnet:?'}xt=urn:btih:...`}
+            className="w-full h-40 bg-black/30 border border-white/10 rounded-lg p-3 text-xs font-mono text-white/90 placeholder-white/20 focus:outline-none focus:border-violet-500/50"
+          />
+
+          <div className="flex items-center justify-between mt-2 text-xs text-white/50">
+            <div>当前: <b className="text-white">{quickText.split('\n').filter(l => l.trim()).length}</b> 行</div>
+            <button
+              type="button"
+              onClick={doQuickImport}
+              disabled={quickImporting || !quickText.trim()}
+              className="px-4 py-1.5 bg-gradient-to-r from-violet-600 to-pink-600 hover:opacity-90 disabled:opacity-50 rounded-lg font-medium"
+            >
+              {quickImporting ? '导入中...' : '⚡ 快速导入'}
+            </button>
+          </div>
+        </div>
 
         {/* Log */}
         {log.length > 0 && (
