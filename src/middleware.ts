@@ -46,6 +46,7 @@ const PUBLIC_PATHS = [
   '/profile',
   '/api/user/activations',
   '/terms',
+  '/api/vip-videos/hot',
 ];
 
 export function middleware(request: NextRequest) {
