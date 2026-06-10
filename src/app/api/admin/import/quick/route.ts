@@ -168,10 +168,11 @@ export async function POST(request: NextRequest) {
 
     for (let i = 0; i < items.length; i += BATCH) {
       const batch = items.slice(i, i + BATCH);
-      // 7 字段 + import_channel 字面量 (避免 $N 类型推断失败)
+      // 6 字段占位符 (name/link/link_code/source/category/size) + import_channel 字面量
+      // 其他列 (type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at) 用 DEFAULT / NULL / 字面量
       const cols = 'name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
       const vals = batch.map((_: any, idx: number) => {
-        const base = idx * 7;
+        const base = idx * 6;
         return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), 'quick-paste'::text)`;
       }).join(', ');
       const params: any[] = batch.flatMap((it: any) => [
