@@ -5,9 +5,27 @@ import { motion } from 'framer-motion';
 
 type Tab = 'stats' | 'users' | 'codes' | 'import' | 'match';
 
+interface DashboardData {
+  total_codes: number;
+  used_codes: number;
+  unused_codes: number;
+  total_revenue: number;
+  total_users: number;
+  vip_count: number;
+  vip_active: number;
+  month_generated: number;
+  month_used: number;
+  month_revenue: number;
+  channel_stats: Array<{ channel: string; code_type: string; total: number; used: number }>;
+  trend: Array<{ day: string; generated: number; used: number }>;
+  expiring_soon: Array<{ id: number; username: string; expire_at: string }>;
+  expired: Array<{ id: number; username: string; expire_at: string }>;
+}
+
 export default function AdminPage() {
    const [tab, setTab] = useState<Tab>('stats');
   const [stats, setStats] = useState<any>(null);
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [users, setUsers] = useState<any[]>([]);
   const [codes, setCodes] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -35,6 +53,15 @@ export default function AdminPage() {
       const data = await res.json();
       setStats(data);
     } catch {} finally { setLoading(false); }
+  };
+
+  const fetchDashboard = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/admin/stats/dashboard?key=' + token);
+      const data = await res.json();
+      if (!data.error) setDashboard(data);
+    } catch {}
   };
 
   const fetchUsers = async () => {
@@ -90,7 +117,10 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (authed) {
-      if (tab === 'stats' || tab === 'match') fetchStats();
+      if (tab === 'stats' || tab === 'match') {
+        fetchStats();
+        fetchDashboard();
+      }
       if (tab === 'users') fetchUsers();
       if (tab === 'codes') fetchCodes();
     }
@@ -206,6 +236,105 @@ export default function AdminPage() {
                 <div className="text-sm text-white/40 mt-1">待匹配</div>
               </div>
             </div>
+
+            {/* 2026-06-10: 营收 Dashboard */}
+            {dashboard && (
+              <>
+                <div className="mt-6 mb-2 flex items-center gap-2">
+                  <span className="text-base font-semibold text-white">💰 营收看板</span>
+                  <span className="text-xs text-white/40">实时数据</span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                  <div className="bg-gradient-to-br from-amber-500/10 to-orange-500/10 border border-amber-500/30 rounded-xl p-4">
+                    <div className="text-xs text-amber-300 mb-1">💵 总营收 (¥)</div>
+                    <div className="text-3xl font-bold text-amber-400">{dashboard.total_revenue.toLocaleString()}</div>
+                    <div className="text-xs text-white/40 mt-1">本月 +¥{dashboard.month_revenue.toLocaleString()}</div>
+                  </div>
+                  <div className="bg-gradient-to-br from-violet-500/10 to-pink-500/10 border border-violet-500/30 rounded-xl p-4">
+                    <div className="text-xs text-violet-300 mb-1">🎫 激活码</div>
+                    <div className="text-3xl font-bold text-violet-400">{dashboard.total_codes.toLocaleString()}</div>
+                    <div className="text-xs text-white/40 mt-1">
+                      已用 {dashboard.used_codes} · 未用 {dashboard.unused_codes}
+                    </div>
+                  </div>
+                  <div className="bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border border-emerald-500/30 rounded-xl p-4">
+                    <div className="text-xs text-emerald-300 mb-1">👥 用户</div>
+                    <div className="text-3xl font-bold text-emerald-400">{dashboard.total_users.toLocaleString()}</div>
+                    <div className="text-xs text-white/40 mt-1">
+                      VIP {dashboard.vip_active} 活跃 / {dashboard.vip_count} 累计
+                    </div>
+                  </div>
+                  <div className="bg-gradient-to-br from-sky-500/10 to-cyan-500/10 border border-sky-500/30 rounded-xl p-4">
+                    <div className="text-xs text-sky-300 mb-1">📅 本月</div>
+                    <div className="text-3xl font-bold text-sky-400">+{dashboard.month_generated}</div>
+                    <div className="text-xs text-white/40 mt-1">
+                      生成 {dashboard.month_generated} · 用 {dashboard.month_used}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 渠道分布 */}
+                {dashboard.channel_stats.length > 0 && (
+                  <div className="bg-[#12121a] rounded-xl p-4 mb-4">
+                    <h3 className="text-sm font-semibold mb-3">渠道分布</h3>
+                    <div className="space-y-2">
+                      {dashboard.channel_stats.slice(0, 8).map((c, i) => (
+                        <div key={i} className="flex items-center gap-3 text-sm">
+                          <span className="w-16 text-white/60">{c.channel === 'wd' ? '🏪 微店' : c.channel === 'xy' ? '🐟 闲鱼' : c.channel || '-'}</span>
+                          <span className="w-20 text-white/60">{c.code_type}</span>
+                          <div className="flex-1 bg-white/5 rounded-full h-4 overflow-hidden">
+                            <div className="h-full bg-gradient-to-r from-violet-500 to-pink-500 flex items-center pl-2 text-[10px] text-white" style={{ width: dashboard.total_codes > 0 ? `${Math.max(c.total / dashboard.total_codes * 100, 8)}%` : '0%' }}>
+                              {c.total}
+                            </div>
+                          </div>
+                          <span className="w-20 text-right text-white/60 text-xs">已用 {c.used}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 续费挽留名单 */}
+                {(dashboard.expiring_soon.length > 0 || dashboard.expired.length > 0) && (
+                  <div className="bg-[#12121a] rounded-xl p-4 mb-4">
+                    <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                      <span>🔔</span> 续费挽留名单
+                      <span className="text-xs text-white/40 font-normal">
+                        7天内到期 {dashboard.expiring_soon.length} · 已过期 {dashboard.expired.length}
+                      </span>
+                    </h3>
+                    {dashboard.expiring_soon.length > 0 && (
+                      <div className="mb-3">
+                        <div className="text-xs text-amber-300 mb-1.5">⏰ 即将到期 (7天内)</div>
+                        <div className="space-y-1">
+                          {dashboard.expiring_soon.map(u => (
+                            <div key={u.id} className="text-xs flex items-center gap-2">
+                              <span className="font-mono text-white/60">#{u.id}</span>
+                              <span>{u.username}</span>
+                              <span className="text-amber-400 ml-auto">{new Date(u.expire_at).toLocaleDateString('zh-CN')}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {dashboard.expired.length > 0 && (
+                      <div>
+                        <div className="text-xs text-red-300 mb-1.5">⚠️ 已过期</div>
+                        <div className="space-y-1">
+                          {dashboard.expired.map(u => (
+                            <div key={u.id} className="text-xs flex items-center gap-2">
+                              <span className="font-mono text-white/60">#{u.id}</span>
+                              <span>{u.username}</span>
+                              <span className="text-red-400 ml-auto">{new Date(u.expire_at).toLocaleDateString('zh-CN')}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
 
             {/* Download + User stats */}
             {stats.downloadStats && (

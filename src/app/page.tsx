@@ -408,6 +408,29 @@ export default function HomePage() {
             <button onClick={() => fetchItems(1)} className="px-5 py-3 bg-violet-600 hover:bg-violet-500 rounded-xl text-white font-medium transition shrink-0">搜索</button>
           </div>
 
+          {/* 2026-06-10: 新用户引导卡 - 仅未登录显示 */}
+          {mounted && !user && (
+            <div className="mt-3 bg-gradient-to-r from-violet-500/10 to-pink-500/10 border border-violet-500/30 rounded-xl p-4 flex items-center gap-3 flex-wrap">
+              <div className="flex-shrink-0 text-3xl">🎬</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold mb-0.5">新人 3 步上手指南</div>
+                <div className="text-xs text-white/60">① 注册账号 → ② 闲鱼/微店买 VIP 激活码 → ③ 兑换看全站资源</div>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <Link href="/register" className="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs font-medium whitespace-nowrap">1️⃣ 注册</Link>
+                <Link href="/activate" className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 rounded-lg text-xs font-medium whitespace-nowrap">3️⃣ 兑换码</Link>
+              </div>
+            </div>
+          )}
+          {/* 已登录但非 VIP - 引导开通 */}
+          {mounted && user && !['vip', 'admin'].includes(user.group) && (
+            <div className="mt-3 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/30 rounded-xl p-3 flex items-center gap-3 flex-wrap">
+              <div className="text-2xl">⭐</div>
+              <div className="flex-1 min-w-0 text-sm">开通 VIP 解锁 <b className="text-amber-300">TMDB 8万+ 资源</b> + <b className="text-pink-300">VIP视频区6平台</b></div>
+              <Link href="/activate" className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 rounded-lg text-xs font-medium whitespace-nowrap">🎫 开通 VIP</Link>
+            </div>
+          )}
+
           {/* Filter Bar */}
           <div className="flex flex-col gap-2 mt-4">
             {/* 分类 */}

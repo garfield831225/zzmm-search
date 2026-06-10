@@ -76,6 +76,41 @@ export default function ProfilePage() {
           </Link>
         </div>
 
+        {/* 2026-06-10: 续费提醒条 - 7天内到期 / 已过期 */}
+        {isVip && isExpired && (
+          <Link href="/activate" className="block mb-4 p-4 bg-gradient-to-r from-red-500/20 to-orange-500/20 border border-red-500/40 rounded-xl hover:from-red-500/30 transition">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="text-3xl">⚠️</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-base font-bold text-red-300">您的 VIP 已过期</div>
+                <div className="text-xs text-white/60 mt-0.5">于 {new Date(user.expire_at!).toLocaleDateString('zh-CN')} 到期 · 续费立即恢复全部权限</div>
+              </div>
+              <div className="px-4 py-2 bg-gradient-to-r from-red-500 to-orange-500 rounded-lg text-sm font-medium whitespace-nowrap">🔄 立即续费</div>
+            </div>
+          </Link>
+        )}
+        {isVip && !isExpired && daysLeft > 0 && daysLeft <= 7 && (
+          <Link href="/activate" className="block mb-4 p-4 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/40 rounded-xl hover:from-amber-500/30 transition">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="text-3xl">⏰</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-base font-bold text-amber-300">VIP 将在 {daysLeft} 天后到期</div>
+                <div className="text-xs text-white/60 mt-0.5">续费半年/年卡享优惠 · 避免过期影响使用</div>
+              </div>
+              <div className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 rounded-lg text-sm font-medium whitespace-nowrap">🔄 提前续费</div>
+            </div>
+          </Link>
+        )}
+        {isVip && !isExpired && daysLeft > 7 && daysLeft <= 30 && (
+          <Link href="/activate" className="block mb-4 p-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition">
+            <div className="flex items-center gap-2 flex-wrap text-sm">
+              <span>💡</span>
+              <span className="text-white/60">VIP 剩余 <b className="text-white">{daysLeft}</b> 天</span>
+              <span className="ml-auto text-violet-300">续费 →</span>
+            </div>
+          </Link>
+        )}
+
         {/* 会员状态卡 */}
         <motion.div
           initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
