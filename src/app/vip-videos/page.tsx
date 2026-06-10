@@ -82,16 +82,24 @@ export default function VipVideosPage() {
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(''), 2500); };
 
   useEffect(() => {
-    // 鉴权 (跟之前一样, 401/403 锁屏)
-    const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
-    if (!t) { setLocked(true); return; }
-    fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + t, 'Cache-Control': 'no-cache' } })
+    // 鉴权 - 兼容多种 token key + cookie 兜底
+    const t = localStorage.getItem('zzmm_token')
+          || localStorage.getItem('token')
+          || localStorage.getItem('adminToken')
+          || '';
+    // 关键: credentials: 'include' 让 httpOnly cookie 也能带上 (防止 localStorage token 过期但 cookie 还在的情况)
+    const authHeaders: Record<string, string> = t
+      ? { Authorization: 'Bearer ' + t, 'Cache-Control': 'no-cache' }
+      : { 'Cache-Control': 'no-cache' };
+    fetch('/api/auth/me', { headers: authHeaders, credentials: 'include' })
       .then(r => {
         if (!r.ok) { setLocked(true); return r.json(); }
         return r.json();
       })
       .then(d => {
-        if (d?.user?.user_group && !['vip', 'admin'].includes(d.user.user_group)) {
+        // 兼容字段名: user_group (新) / group (老) 都认
+        const grp = d?.user?.user_group || d?.user?.group;
+        if (grp && !['vip', 'admin'].includes(grp)) {
           setLocked(true);
         }
       }).catch(() => setLocked(true));
@@ -139,9 +147,13 @@ export default function VipVideosPage() {
     setHotLoading(true);
     setActiveTab(category);
     try {
-      const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
+      const t = localStorage.getItem('zzmm_token')
+            || localStorage.getItem('token')
+            || localStorage.getItem('adminToken')
+            || '';
       const url = `/api/vip-videos/hot?category=${category}${force ? '&fresh=1' : ''}`;
-      const r = await fetch(url, { headers: { Authorization: 'Bearer ' + t } });
+      const authHeaders: Record<string, string> = t ? { Authorization: 'Bearer ' + t } : {};
+      const r = await fetch(url, { headers: authHeaders, credentials: 'include' });
       const d = await r.json();
       if (d.error) {
         showToast(d.error);
