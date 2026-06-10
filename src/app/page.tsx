@@ -368,6 +368,11 @@ export default function HomePage() {
                     <Music size={14} className="transition-transform group-hover:scale-110" />
                     <span>非影视区</span>
                   </Link>
+                  <Link href="/games" className="group flex items-center gap-1.5 px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/50 rounded-lg text-sm transition-all duration-200 text-amber-300 hover:shadow-[0_0_12px_rgba(245,158,11,0.4)] hover:scale-105">
+                    <span>🎮</span>
+                    <span>游戏中心</span>
+                    <span className="text-[10px] px-1 py-0.5 bg-amber-500/40 rounded">VIP</span>
+                  </Link>
                   <Link href="/library" className="group flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/20 hover:bg-violet-600/50 rounded-lg text-sm transition-all duration-200 text-violet-300 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105">
                     <Library size={14} className="transition-transform group-hover:scale-110" />
                     <span>文档资源库</span>
@@ -383,6 +388,11 @@ export default function HomePage() {
                   <Link href="/nonfilm" className="group flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/50 rounded-lg text-sm transition-all duration-200 text-cyan-300 hover:shadow-[0_0_12px_rgba(34,211,238,0.4)] hover:scale-105">
                     <Music size={14} className="transition-transform group-hover:scale-110" />
                     <span>非影视区</span>
+                  </Link>
+                  <Link href="/games" className="group flex items-center gap-1.5 px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/50 rounded-lg text-sm transition-all duration-200 text-amber-300 hover:shadow-[0_0_12px_rgba(245,158,11,0.4)] hover:scale-105">
+                    <span>🎮</span>
+                    <span>游戏中心</span>
+                    <span className="text-[10px] px-1 py-0.5 bg-amber-500/40 rounded">VIP</span>
                   </Link>
                   <Link href="/library" className="group flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/20 hover:bg-violet-600/50 rounded-lg text-sm transition-all duration-200 text-violet-300 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105">
                     <Library size={14} className="transition-transform group-hover:scale-110" />
