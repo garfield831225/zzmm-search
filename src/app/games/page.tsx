@@ -109,13 +109,29 @@ export default function GamesPage() {
       params.set('pageSize', '24');
 
       const r = await fetch(`/api/games?${params}`, { credentials: 'include', headers: getAuthHeaders() });
-      const d = await r.json();
-      console.log('[games API]', r.status, d);
+      // 关键修复: 即使 r.json() 失败也诊断
+      const text = await r.text();
+      console.log('[games API]', r.status, 'content-type:', r.headers.get('content-type'), 'body:', text.slice(0, 300));
+      let d: any;
+      try {
+        d = JSON.parse(text);
+      } catch (e: any) {
+        console.error('[games JSON parse failed]', e.message, 'raw:', text.slice(0, 500));
+        addToast('API 返回非 JSON: ' + (text.slice(0, 80) || '空响应 (status=' + r.status + ')'), 'error');
+        setItems([]);
+        setTotal(0);
+        return;
+      }
       if (!d.ok) {
         if (d.need === 'vip' || d.need === 'basic') {
           addToast(d.tip || '需要升级会员', 'error');
-        } else if (d.needLogin) {
-          addToast('请先登录', 'error');
+        } else if (d.needLogin || r.status === 401) {
+          // token 失效, 清 localStorage 跳登录
+          localStorage.removeItem('zzmm_token');
+          localStorage.removeItem('token');
+          localStorage.removeItem('adminToken');
+          addToast('登录已过期, 请重新登录', 'error');
+          setTimeout(() => { window.location.href = '/login?redirect=/games'; }, 1500);
         } else {
           addToast(d.error || '加载失败', 'error');
         }
