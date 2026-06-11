@@ -49,3 +49,21 @@ const r = await fetch('/api/xxx', {
 ```
 
 **所有需要鉴权的 API**（access.ts 里的 `requireAccess` / `requireAdmin`）的前端调用方都要这么写。**新加 API 页面时**——`/games /games/[id]` 就是反例（之前只 credentials，403 全空）。
+
+## 新增 API 路由的 middleware 放行（必读，2026-06-11 踩坑）
+
+**每次新增 `/api/xxx/*` 路由，必须在 `src/middleware.ts` 的 `PUBLIC_PATHS` 加一行！**
+
+否则：用户登录态在 localStorage（不在 cookie），middleware 拿不到 cookie token → **重定向到 /login** → API 返回 HTML → 前端 `r.json()` 解析失败 → **"Unexpected end of JSON input"**。
+
+```typescript
+// src/middleware.ts
+const PUBLIC_PATHS = [
+  // ...
+  '/api/games',           // ← 每次新加 API 都要追加
+  '/api/games/platforms',
+  // 鉴权交给后端 requireAccess
+];
+```
+
+**前车之鉴**：`/api/games` 第一次部署忘了加，403/HTML 错误。`/api/vip-videos` 当时加了所以没事。**新加 API 必查**。
