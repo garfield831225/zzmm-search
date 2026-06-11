@@ -34,6 +34,7 @@ export async function requireAccess(
   req: NextRequest,
   level: AccessLevel
 ): Promise<AuthUser | NextResponse> {
+  try {
   // 1. 拿 token (从 header / cookie / query)
   const token = extractToken(req);
   if (!token) {
@@ -49,12 +50,18 @@ export async function requireAccess(
   }
 
   // 3. 查用户 (实时状态, 不靠 JWT 缓存)
-  const rows = await sql`
-    SELECT id, username, user_group, expire_at, status
-    FROM xx_users
-    WHERE id = ${payload.id} AND status = 'active'
-  ` as any[];
-  const user = rows[0];
+  let user: any;
+  try {
+    const rows = await sql`
+      SELECT id, username, user_group, expire_at, status
+      FROM xx_users
+      WHERE id = ${payload.id} AND status = 'active'
+    ` as any[];
+    user = rows[0];
+  } catch (e: any) {
+    console.error('[requireAccess] DB query failed:', e.message, 'payload.id:', payload.id);
+    return NextResponse.json({ error: 'DB 错误', detail: e.message }, { status: 500 });
+  }
   if (!user) {
     return NextResponse.json({ error: '用户不存在或已禁用', needLogin: true }, { status: 401 });
   }
@@ -112,6 +119,10 @@ export async function requireAccess(
     );
   }
   return NextResponse.json({ error: '未知的访问级别' }, { status: 500 });
+  } catch (e: any) {
+    console.error('[requireAccess] FATAL:', e.message, e.stack);
+    return NextResponse.json({ error: '服务端错误', detail: e.message }, { status: 500 });
+  }
 }
 
 /**
