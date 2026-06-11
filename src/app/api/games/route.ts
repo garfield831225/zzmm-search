@@ -1,69 +1,69 @@
-// /api/games — 游戏列表/详情/platforms
-// 鉴权: vip 专属 (即 access_level='vip' 或 is_vip_only=true)
+// /api/games — 改用 Client (node-postgres wire protocol) 替代 neon()
+// 鉴权: vip 专属
 import { NextRequest, NextResponse } from 'next/server';
-import { sql } from '@/lib/db';
+import { Client } from '@neondatabase/serverless';
 import { requireAccess } from '@/lib/access';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+// 共享 client 缓存
+let _client: Client | null = null;
+async function getDb(): Promise<Client> {
+  if (_client) return _client;
+  _client = new Client({ connectionString: process.env.DATABASE_URL! });
+  await _client.connect();
+  return _client;
+}
+
 export async function GET(req: NextRequest) {
-  // 鉴权: 游戏是 vip 专属
-  const auth = await requireAccess(req, 'vip');
-  if (auth instanceof NextResponse) return auth;
+  try {
+    const auth = await requireAccess(req, 'vip');
+    if (auth instanceof NextResponse) return auth;
 
-  const { searchParams } = new URL(req.url);
-  const platform = searchParams.get('platform') || '';
-  const subPlatform = searchParams.get('sub_platform') || '';
-  const keyword = (searchParams.get('q') || '').trim();
-  const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-  const pageSize = Math.min(60, Math.max(1, parseInt(searchParams.get('pageSize') || '24')));
-  const sort = searchParams.get('sort') || 'created_at'; // created_at | view_count | name
-  const order = searchParams.get('order') || 'desc';
+    const db = await getDb();
+    const { searchParams } = new URL(req.url);
+    const platform = searchParams.get('platform') || '';
+    const keyword = (searchParams.get('q') || '').trim();
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
+    const pageSize = Math.min(60, Math.max(1, parseInt(searchParams.get('pageSize') || '24')));
+    const offset = (page - 1) * pageSize;
 
-  // 组装 WHERE
-  const conditions: any[] = [sql`status = 'active'`];
-  if (platform) conditions.push(sql`platform = ${platform}`);
-  if (subPlatform) conditions.push(sql`sub_platform = ${subPlatform}`);
-  if (keyword) conditions.push(sql`LOWER(name) LIKE ${'%' + keyword.toLowerCase() + '%'}`);
+    // Client.query 支持 $1, $2 参数化和任意 SQL 字符串
+    const filterSql = platform || keyword
+      ? `WHERE status = 'active' ${platform ? `AND platform = $1` : ''} ${keyword ? `${platform ? 'AND' : 'AND'} LOWER(name) LIKE $${platform ? 2 : 1}` : ''}`
+      : `WHERE status = 'active'`;
 
-  // 安全 ORDER BY (白名单)
-  const orderCol = ['created_at', 'view_count', 'name'].includes(sort) ? sort : 'created_at';
-  const orderDir = order === 'asc' ? 'ASC' : 'DESC';
+    const params: any[] = [];
+    if (platform) params.push(platform);
+    if (keyword) params.push('%' + keyword.toLowerCase() + '%');
 
-  // 拼 WHERE
-  const whereClause = conditions.reduce((acc, c, i) => {
-    return i === 0 ? c : sql`${acc} AND ${c}`;
-  }, sql``);
+    const countRes = await db.query(
+      `SELECT COUNT(*)::int as total FROM xx_games ${filterSql}`,
+      params
+    );
+    const total = countRes.rows[0]?.total || 0;
 
-  // 总数
-  const countRows = await sql`
-    SELECT COUNT(*)::int as total FROM xx_games WHERE ${whereClause}
-  ` as any[];
-  const total = countRows[0]?.total || 0;
+    const listRes = await db.query(
+      `SELECT id, name, platform, sub_platform, cover_url, description,
+              size, source, release_date, publisher, developer, language,
+              tags, rawg_id, match_status, is_vip_only, view_count, created_at
+       FROM xx_games ${filterSql}
+       ORDER BY created_at DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, pageSize, offset]
+    );
 
-  // 列表
-  const offset = (page - 1) * pageSize;
-  const rows = await sql`
-    SELECT id, name, platform, sub_platform, cover_url, description,
-           size, source, release_date, publisher, developer, language,
-           tags, rawg_id, match_status, is_vip_only, view_count, created_at
-    FROM xx_games
-    WHERE ${whereClause}
-    ORDER BY created_at DESC
-    LIMIT ${pageSize} OFFSET ${offset}
-  ` as any[];
-
-  return NextResponse.json({
-    ok: true,
-    user: { id: auth.id, user_group: auth.effective_group, is_expired: auth.is_expired },
-    total,
-    page,
-    pageSize,
-    items: rows.map((r: any) => ({
-      ...r,
-      // 隐藏 link/link_code (列表不暴露)
-      _has_link: true,
-    })),
-  });
+    return NextResponse.json({
+      ok: true,
+      user: { id: auth.id, user_group: auth.effective_group, is_expired: auth.is_expired },
+      total,
+      page,
+      pageSize,
+      items: listRes.rows.map((r: any) => ({ ...r, _has_link: true })),
+    });
+  } catch (e: any) {
+    console.error('[api/games] FATAL:', e.message, e.stack);
+    return NextResponse.json({ ok: false, error: '服务端错误', detail: e.message }, { status: 500 });
+  }
 }
