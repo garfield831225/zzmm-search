@@ -48,6 +48,8 @@ const PUBLIC_PATHS = [
   '/terms',
   '/api/vip-videos/hot',
   '/api/admin/import/quick',
+  '/api/games',          // 游戏中心 API (后端 requireAccess 自鉴权)
+  '/api/debug/games-test', // debug 端
 ];
 
 export function middleware(request: NextRequest) {
