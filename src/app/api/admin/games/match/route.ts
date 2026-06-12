@@ -1,38 +1,21 @@
-// /api/admin/games/match — 抓 Rawg 封面 (后台异步任务)
-// 用法: POST { type: 'all' | 'pending', limit: 10 }
-// 后端: 每条 1.2s 间隔, 抓 rawg.io 网页 og:image
+// /api/admin/games/match — 抓 Rawg 封面 (通过 NAS 反代)
+// 用法: POST { type: 'all' | 'pending', limit: 20 }
+// 后端: 每条 1.2s 间隔, 调 NAS 反代抓 rawg.io
 import { NextRequest, NextResponse } from 'next/server';
-import { sql } from '@/lib/db';
+import { Client } from '@neondatabase/serverless';
 import { requireAdmin } from '@/lib/access';
+import { searchRawg, RawgProxyError } from '@/lib/rawg';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300; // 5 分钟
+export const maxDuration = 300;
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-
-async function fetchCover(name: string): Promise<{ cover: string | null; slug: string | null; rawg_id: number | null }> {
-  try {
-    // 1. 搜 rawg
-    const searchUrl = `https://rawg.io/games?query=${encodeURIComponent(name)}`;
-    const r = await fetch(searchUrl, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(15000) });
-    if (!r.ok) return { cover: null, slug: null, rawg_id: null };
-    const html = await r.text();
-
-    // 2. 解析第一条游戏链接
-    const linkMatch = html.match(/href="(\/games\/[a-z0-9\-]+)"/);
-    if (!linkMatch) return { cover: null, slug: null, rawg_id: null };
-
-    const slug = linkMatch[1].replace('/games/', '');
-
-    // 3. 找 og:image (列表页就有, 不跳详情页)
-    const ogMatch = html.match(/og:image" content="([^"]+)"/);
-    const cover = ogMatch?.[1] || null;
-
-    return { cover, slug, rawg_id: null };
-  } catch {
-    return { cover: null, slug: null, rawg_id: null };
-  }
+let _client: Client | null = null;
+async function getDb(): Promise<Client> {
+  if (_client) return _client;
+  _client = new Client({ connectionString: process.env.DATABASE_URL! });
+  await _client.connect();
+  return _client;
 }
 
 export async function POST(req: NextRequest) {
@@ -43,54 +26,74 @@ export async function POST(req: NextRequest) {
   const type: 'all' | 'pending' = body.type || 'pending';
   const limit: number = Math.min(100, Math.max(1, parseInt(body.limit || '20')));
 
+  const db = await getDb();
+
   // 拉待匹配列表
-  const where = type === 'pending'
-    ? sql`status = 'active' AND match_status = 'pending'`
-    : sql`status = 'active'`;
+  const whereClause = type === 'pending'
+    ? `WHERE status = 'active' AND cover_url IS NULL AND match_status = 'pending'`
+    : `WHERE status = 'active' AND cover_url IS NULL`;
 
-  const rows = await sql`
-    SELECT id, name, platform FROM xx_games WHERE ${where}
-    ORDER BY view_count DESC NULLS LAST, created_at DESC
-    LIMIT ${limit}
-  ` as any[];
+  const rows = await db.query(
+    `SELECT id, name, platform FROM xx_games ${whereClause} ORDER BY view_count DESC NULLS LAST, created_at DESC LIMIT $1`,
+    [limit]
+  );
 
-  if (!rows || rows.length === 0) {
+  if (rows.rows.length === 0) {
     return NextResponse.json({ ok: true, processed: 0, results: [] });
   }
 
   const results: any[] = [];
-  for (const game of rows) {
+  let matched = 0, failed = 0;
+  const startTime = Date.now();
+
+  for (const game of rows.rows) {
     // 1.2s 间隔防风控
     await new Promise((r) => setTimeout(r, 1200));
 
-    const { cover, slug } = await fetchCover(game.name);
-
-    if (cover) {
-      await sql`
-        UPDATE xx_games
-        SET cover_url = ${cover}, rawg_slug = ${slug}, match_status = 'matched', match_attempted_at = NOW()
-        WHERE id = ${game.id}
-      `;
-      results.push({ id: game.id, name: game.name, status: 'matched', cover });
-    } else {
-      await sql`
-        UPDATE xx_games SET match_status = 'failed', match_attempted_at = NOW()
-        WHERE id = ${game.id}
-      `;
-      results.push({ id: game.id, name: game.name, status: 'failed' });
+    try {
+      const result = await searchRawg(game.name);
+      if (result?.cover) {
+        await db.query(
+          `UPDATE xx_games SET cover_url = $1, rawg_slug = $2, match_status = 'matched', match_attempted_at = NOW() WHERE id = $3`,
+          [result.cover, result.slug, game.id]
+        );
+        matched++;
+        results.push({ id: game.id, name: game.name, status: 'matched', cover: result.cover });
+      } else {
+        await db.query(
+          `UPDATE xx_games SET match_status = 'failed', match_attempted_at = NOW() WHERE id = $1`,
+          [game.id]
+        );
+        failed++;
+        results.push({ id: game.id, name: game.name, status: 'failed', reason: 'no result' });
+      }
+    } catch (e: any) {
+      failed++;
+      const reason = e instanceof RawgProxyError ? `NAS ${e.status}` : e.message?.slice(0, 100);
+      results.push({ id: game.id, name: game.name, status: 'error', reason });
+      // 一次错误, 整批中断 (NAS 可能挂了)
+      if (e instanceof RawgProxyError && e.status >= 500) {
+        results.push({ abort: 'NAS 反代 5xx, 整批中断' });
+        break;
+      }
     }
   }
 
-  const matched = results.filter((r) => r.status === 'matched').length;
-  return NextResponse.json({ ok: true, processed: rows.length, matched, results });
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  return NextResponse.json({
+    ok: true,
+    processed: rows.rows.length,
+    matched,
+    failed,
+    elapsed: elapsed + 's',
+    results: results.slice(0, 50), // 防止响应过大
+  });
 }
 
 export async function GET(req: NextRequest) {
-  // 查任务状态 (看哪些待匹配)
-  const rows = await sql`
-    SELECT match_status, COUNT(*)::int as count
-    FROM xx_games WHERE status='active'
-    GROUP BY match_status
-  `;
-  return NextResponse.json({ ok: true, stats: rows });
+  const db = await getDb();
+  const stats = await db.query(
+    `SELECT match_status, COUNT(*)::int as count FROM xx_games WHERE status='active' GROUP BY match_status`
+  );
+  return NextResponse.json({ ok: true, stats: stats.rows });
 }
