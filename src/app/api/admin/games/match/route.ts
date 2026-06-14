@@ -55,30 +55,41 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const type: 'all' | 'pending' = body.type || 'pending';
-  const limit: number = Math.min(100, Math.max(1, parseInt(body.limit || '20')));
+  const platform: string | null = body.platform || null; // 限定平台
+  const source: string | null = body.source || null; // cover_source 限定 (eg 'excel' = 有底图待升级)
+  const limit: number = Math.min(200, Math.max(1, parseInt(body.limit || '20')));
 
   let games: any[] = [];
   let total = 0;
 
   if (type === 'pending') {
-    const list = await sql`
-      SELECT id, name, platform FROM xx_games
-      WHERE status = 'active' AND cover_url IS NULL AND match_status = 'pending'
-      ORDER BY view_count DESC NULLS LAST, created_at DESC
-      LIMIT ${limit}
-    ` as any[];
+    // 静态 SQL 4 分支 (避免 neon tagged template 动态拼接 500)
+    let list: any[], c: any[];
+    if (platform && source) {
+      list = await sql`SELECT id, name, platform, cover_url, cover_source FROM xx_games WHERE status = 'active' AND platform = ${platform} AND cover_source = ${source} ORDER BY view_count DESC NULLS LAST, created_at DESC LIMIT ${limit}` as any[];
+      c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND platform = ${platform} AND cover_source = ${source}` as any[];
+    } else if (platform) {
+      list = await sql`SELECT id, name, platform, cover_url, cover_source FROM xx_games WHERE status = 'active' AND platform = ${platform} AND cover_url IS NULL ORDER BY view_count DESC NULLS LAST, created_at DESC LIMIT ${limit}` as any[];
+      c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND platform = ${platform} AND cover_url IS NULL` as any[];
+    } else if (source) {
+      list = await sql`SELECT id, name, platform, cover_url, cover_source FROM xx_games WHERE status = 'active' AND cover_source = ${source} ORDER BY view_count DESC NULLS LAST, created_at DESC LIMIT ${limit}` as any[];
+      c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND cover_source = ${source}` as any[];
+    } else {
+      list = await sql`SELECT id, name, platform, cover_url, cover_source FROM xx_games WHERE status = 'active' AND cover_url IS NULL AND match_status = 'pending' ORDER BY view_count DESC NULLS LAST, created_at DESC LIMIT ${limit}` as any[];
+      c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND cover_url IS NULL AND match_status = 'pending'` as any[];
+    }
     games = list;
-    const c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND cover_url IS NULL AND match_status = 'pending'` as any[];
     total = c[0]?.total || 0;
   } else {
-    const list = await sql`
-      SELECT id, name, platform FROM xx_games
-      WHERE status = 'active' AND cover_url IS NULL
-      ORDER BY view_count DESC NULLS LAST, created_at DESC
-      LIMIT ${limit}
-    ` as any[];
+    let list: any[], c: any[];
+    if (platform) {
+      list = await sql`SELECT id, name, platform, cover_url, cover_source FROM xx_games WHERE status = 'active' AND platform = ${platform} AND cover_url IS NULL ORDER BY view_count DESC NULLS LAST, created_at DESC LIMIT ${limit}` as any[];
+      c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND platform = ${platform} AND cover_url IS NULL` as any[];
+    } else {
+      list = await sql`SELECT id, name, platform, cover_url, cover_source FROM xx_games WHERE status = 'active' AND cover_url IS NULL ORDER BY view_count DESC NULLS LAST, created_at DESC LIMIT ${limit}` as any[];
+      c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND cover_url IS NULL` as any[];
+    }
     games = list;
-    const c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND cover_url IS NULL` as any[];
     total = c[0]?.total || 0;
   }
 
@@ -100,12 +111,14 @@ export async function POST(req: NextRequest) {
         await sql`
           UPDATE xx_games
           SET cover_url = ${result.cover}, rawg_slug = ${result.refId},
+              cover_source = ${result.source},
               match_status = 'matched', match_attempted_at = NOW()
           WHERE id = ${game.id}
         `;
         matched++;
         results.push({ id: game.id, name: game.name, status: 'matched', cover: result.cover, source: result.source });
       } else {
+        // 没匹配: 保持 cover_url (excel 底图), 但改状态为 failed (记录尝试过)
         await sql`
           UPDATE xx_games
           SET match_status = 'failed', match_attempted_at = NOW()
