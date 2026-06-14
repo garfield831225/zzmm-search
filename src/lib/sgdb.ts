@@ -30,21 +30,28 @@ export async function searchSgdb(name: string): Promise<SgdbGame | null> {
   const cleanName = name
     .replace(/\[.*?\]/g, '')
     .replace(/\.7z|\.zip|\.rar|\.iso/g, '')
-    // "中文名/English Name" → 取后半段 (按 / 拆, 取最长一截)
     .replace(/\/附.*$/, '') // "/附历代合集" 这种
-    .replace(/：.*$/, '') // 中文冒号及之后
     .trim();
   let cleaned = cleanName;
   if (cleaned.includes('/')) {
     const parts = cleaned.split('/').map(s => s.trim()).filter(Boolean);
-    // 优先选包含英文/空格的; 没有英文全中文时取最短
+    // 优先选包含英文的 (取最长)
     const ascii = parts.filter(p => /[a-zA-Z]/.test(p));
     if (ascii.length > 0) {
-      // 选英文截最长
       cleaned = ascii.sort((a, b) => b.length - a.length)[0];
     } else {
       // 全中文, 取最短的
       cleaned = parts.sort((a, b) => a.length - b.length)[0];
+    }
+  } else {
+    // 无 /: 去 "中文名：xxx" 后面的中文副标题
+    // eg "刺客信条编年史：俄罗斯" → "刺客信条编年史"
+    // 但 "使命召唤7：黑色行动" → "使命召唤7" 错了, 所以仅当 : 之前是中文且 之后无英文时
+    if (cleaned.includes('：')) {
+      const [before, after] = cleaned.split('：', 2);
+      if (!/[a-zA-Z]/.test(after) && /[\u4e00-\u9fa5]/.test(after)) {
+        cleaned = before.trim();
+      }
     }
   }
   if (!cleaned) return null;
