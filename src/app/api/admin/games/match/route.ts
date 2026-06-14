@@ -7,7 +7,8 @@ import { searchIgdb, IgdbError } from '@/lib/igdb';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300;
+export const maxDuration = 60; // Vercel hobby 最大 60s, 一批 60s 能处理约 200 条
+// 全量靠前端轮询: limit=200, 前端 batch 循环调 273 次 (54651/200)
 
 const sql = neon(process.env.DATABASE_URL!);
 
@@ -89,9 +90,10 @@ export async function POST(req: NextRequest) {
   let matched = 0, failed = 0;
   const startTime = Date.now();
 
-  for (const game of games) {
-    // SGDB 限流 5 req/s, IGDB 4 req/s, 用 300ms 间隔保险
-    await new Promise((r) => setTimeout(r, 300));
+  for (let i = 0; i < games.length; i++) {
+    const game = games[i];
+    // SGDB 5 req/s, IGDB 4 req/s, 用 280ms 间隔 (300-500ms 安全)
+    await new Promise((r) => setTimeout(r, 280));
     try {
       const result = await matchGame(game.name);
       if (result) {
