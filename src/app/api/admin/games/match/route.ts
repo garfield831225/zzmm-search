@@ -106,6 +106,11 @@ export async function POST(req: NextRequest) {
     // 间隔 180ms (单 API 280ms, 错峰, 100 条 ~ 18s + API 响应 ~ 30s = 48s 留 buffer)
     await new Promise((r) => setTimeout(r, 180));
     try {
+      // DEBUG: 第一个 game 输出 cleanName + env 状态
+      if (i === 0) {
+        const cleaned = game.name.replace(/\[.*?\]/g, '').replace(/\.7z|\.zip|\.rar|\.iso/g, '').replace(/\/附.*$/, '').trim();
+        results.push({ _debug: true, raw: game.name, cleaned, hasKey: !!process.env.SGDB_API_KEY, hasIgdb: !!process.env.TWITCH_CLIENT_ID });
+      }
       const result = await matchGame(game.name);
       if (result) {
         await sql`
