@@ -67,7 +67,10 @@ export async function searchSgdb(name: string): Promise<SgdbGame | null> {
   const list = await r.json();
   if (!Array.isArray(list?.data) || list.data.length === 0) return null;
 
-  const g = list.data[0]; // {id, name, release_year}
+  // 取最佳匹配: 优先 name 完全等于 cleaned (大小写无关), 没有取第一个
+  const targetName = cleaned.toLowerCase().replace(/[^a-z0-9]/g, '');
+  let g = list.data.find((d: any) => d.name?.toLowerCase().replace(/[^a-z0-9]/g, '') === targetName);
+  if (!g) g = list.data[0]; // fallback
   const gameId = g.id;
 
   // 拿 grid (背景)
