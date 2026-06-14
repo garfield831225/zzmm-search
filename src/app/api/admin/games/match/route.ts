@@ -113,7 +113,7 @@ export async function POST(req: NextRequest) {
           headers: { 'Authorization': 'Bearer ' + (process.env.SGDB_API_KEY || '') },
         });
         const tryJ = await tryR.json().catch(() => null);
-        const all = (tryJ?.data || []).map(d => d.name);
+        const all = (tryJ?.data || []).map((d: any) => d.name);
         const sgdbRaw = await searchSgdb(game.name).catch(e => ({ _err: e.message || String(e) }));
         results.push({ _debug: true, raw: game.name, sgdbAllResults: all, sgdbRaw });
       }
