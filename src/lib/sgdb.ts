@@ -34,8 +34,8 @@ export async function searchSgdb(name: string): Promise<SgdbGame | null> {
     .trim();
   if (!cleanName) return null;
 
-  // SGDB search endpoint (v2)
-  const r = await fetch(`${SGDB_API_URL}/search/autocomplete?term=${encodeURIComponent(cleanName)}`, {
+  // SGDB search endpoint (v2): GET /search/autocomplete/{term}
+  const r = await fetch(`${SGDB_API_URL}/search/autocomplete/${encodeURIComponent(cleanName)}`, {
     headers: HEADERS,
     signal: AbortSignal.timeout(15000),
   });
