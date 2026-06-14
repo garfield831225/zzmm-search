@@ -103,8 +103,8 @@ export async function POST(req: NextRequest) {
 
   for (let i = 0; i < games.length; i++) {
     const game = games[i];
-    // SGDB 5 req/s, IGDB 4 req/s, 用 280ms 间隔 (300-500ms 安全)
-    await new Promise((r) => setTimeout(r, 280));
+    // 间隔 180ms (单 API 280ms, 错峰, 100 条 ~ 18s + API 响应 ~ 30s = 48s 留 buffer)
+    await new Promise((r) => setTimeout(r, 180));
     try {
       const result = await matchGame(game.name);
       if (result) {
