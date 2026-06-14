@@ -11,10 +11,16 @@ export const maxDuration = 300;
 const sql = neon(process.env.DATABASE_URL!);
 
 export async function POST(req: NextRequest) {
-  const auth = await requireAccess(req, 'vip');
-  if (auth instanceof NextResponse) return auth;
-  if (auth.effective_group !== 'admin') {
-    return NextResponse.json({ error: '需要管理员权限' }, { status: 403 });
+  // 鉴权: 1. JWT (正常用户)  2. X-Admin-Token (Mavis 自动化, 不踢用户登录)
+  const bypassToken = req.headers.get('x-admin-token');
+  if (bypassToken && bypassToken === process.env.ADMIN_API_TOKEN && process.env.ADMIN_API_TOKEN) {
+    // 走 Mavis bypass 通道, 不查 JWT
+  } else {
+    const auth = await requireAccess(req, 'vip');
+    if (auth instanceof NextResponse) return auth;
+    if (auth.effective_group !== 'admin') {
+      return NextResponse.json({ error: '需要管理员权限' }, { status: 403 });
+    }
   }
 
   const body = await req.json().catch(() => ({}));
@@ -101,10 +107,13 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await requireAccess(req, 'vip');
-  if (auth instanceof NextResponse) return auth;
-  if (auth.effective_group !== 'admin') {
-    return NextResponse.json({ error: '需要管理员权限' }, { status: 403 });
+  const bypassToken = req.headers.get('x-admin-token');
+  if (!bypassToken || bypassToken !== process.env.ADMIN_API_TOKEN || !process.env.ADMIN_API_TOKEN) {
+    const auth = await requireAccess(req, 'vip');
+    if (auth instanceof NextResponse) return auth;
+    if (auth.effective_group !== 'admin') {
+      return NextResponse.json({ error: '需要管理员权限' }, { status: 403 });
+    }
   }
   const stats = await sql`
     SELECT match_status, COUNT(*)::int as count
