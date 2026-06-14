@@ -1,77 +1,86 @@
 // /api/admin/games/match — 抓 Rawg 封面 (通过 NAS 反代)
-// 用法: POST { type: 'all' | 'pending', limit: 20 }
-// 后端: 每条 1.2s 间隔, 调 NAS 反代抓 rawg.io
 import { NextRequest, NextResponse } from 'next/server';
-import { Client } from '@neondatabase/serverless';
-import { requireAdmin } from '@/lib/access';
+import { neon } from '@neondatabase/serverless';
+import { requireAccess } from '@/lib/access';
 import { searchRawg, RawgProxyError } from '@/lib/rawg';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
-let _client: Client | null = null;
-async function getDb(): Promise<Client> {
-  if (_client) return _client;
-  _client = new Client({ connectionString: process.env.DATABASE_URL! });
-  await _client.connect();
-  return _client;
-}
+const sql = neon(process.env.DATABASE_URL!);
 
 export async function POST(req: NextRequest) {
-  const auth = await requireAdmin(req);
+  const auth = await requireAccess(req, 'vip');
   if (auth instanceof NextResponse) return auth;
+  if (auth.effective_group !== 'admin') {
+    return NextResponse.json({ error: '需要管理员权限' }, { status: 403 });
+  }
 
   const body = await req.json().catch(() => ({}));
   const type: 'all' | 'pending' = body.type || 'pending';
   const limit: number = Math.min(100, Math.max(1, parseInt(body.limit || '20')));
 
-  const db = await getDb();
+  // 用 4 个静态 if, 不用动态拼接 tagged template (避免 500)
+  let games: any[] = [];
+  let total = 0;
 
-  // 拉待匹配列表
-  const whereClause = type === 'pending'
-    ? `WHERE status = 'active' AND cover_url IS NULL AND match_status = 'pending'`
-    : `WHERE status = 'active' AND cover_url IS NULL`;
+  if (type === 'pending') {
+    const list = await sql`
+      SELECT id, name, platform FROM xx_games
+      WHERE status = 'active' AND cover_url IS NULL AND match_status = 'pending'
+      ORDER BY view_count DESC NULLS LAST, created_at DESC
+      LIMIT ${limit}
+    ` as any[];
+    games = list;
+    const c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND cover_url IS NULL AND match_status = 'pending'` as any[];
+    total = c[0]?.total || 0;
+  } else {
+    const list = await sql`
+      SELECT id, name, platform FROM xx_games
+      WHERE status = 'active' AND cover_url IS NULL
+      ORDER BY view_count DESC NULLS LAST, created_at DESC
+      LIMIT ${limit}
+    ` as any[];
+    games = list;
+    const c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND cover_url IS NULL` as any[];
+    total = c[0]?.total || 0;
+  }
 
-  const rows = await db.query(
-    `SELECT id, name, platform FROM xx_games ${whereClause} ORDER BY view_count DESC NULLS LAST, created_at DESC LIMIT $1`,
-    [limit]
-  );
-
-  if (rows.rows.length === 0) {
-    return NextResponse.json({ ok: true, processed: 0, results: [] });
+  if (games.length === 0) {
+    return NextResponse.json({ ok: true, total, processed: 0, message: '没有待匹配的游戏' });
   }
 
   const results: any[] = [];
   let matched = 0, failed = 0;
   const startTime = Date.now();
 
-  for (const game of rows.rows) {
-    // 1.2s 间隔防风控
+  for (const game of games) {
     await new Promise((r) => setTimeout(r, 1200));
-
     try {
       const result = await searchRawg(game.name);
       if (result?.cover) {
-        await db.query(
-          `UPDATE xx_games SET cover_url = $1, rawg_slug = $2, match_status = 'matched', match_attempted_at = NOW() WHERE id = $3`,
-          [result.cover, result.slug, game.id]
-        );
+        await sql`
+          UPDATE xx_games
+          SET cover_url = ${result.cover}, rawg_slug = ${result.slug},
+              match_status = 'matched', match_attempted_at = NOW()
+          WHERE id = ${game.id}
+        `;
         matched++;
         results.push({ id: game.id, name: game.name, status: 'matched', cover: result.cover });
       } else {
-        await db.query(
-          `UPDATE xx_games SET match_status = 'failed', match_attempted_at = NOW() WHERE id = $1`,
-          [game.id]
-        );
+        await sql`
+          UPDATE xx_games
+          SET match_status = 'failed', match_attempted_at = NOW()
+          WHERE id = ${game.id}
+        `;
         failed++;
         results.push({ id: game.id, name: game.name, status: 'failed', reason: 'no result' });
       }
     } catch (e: any) {
       failed++;
-      const reason = e instanceof RawgProxyError ? `NAS ${e.status}` : e.message?.slice(0, 100);
+      const reason = e instanceof RawgProxyError ? `NAS ${e.status}` : (e.message || '').slice(0, 100);
       results.push({ id: game.id, name: game.name, status: 'error', reason });
-      // 一次错误, 整批中断 (NAS 可能挂了)
       if (e instanceof RawgProxyError && e.status >= 500) {
         results.push({ abort: 'NAS 反代 5xx, 整批中断' });
         break;
@@ -82,18 +91,25 @@ export async function POST(req: NextRequest) {
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   return NextResponse.json({
     ok: true,
-    processed: rows.rows.length,
+    total,
+    processed: games.length,
     matched,
     failed,
     elapsed: elapsed + 's',
-    results: results.slice(0, 50), // 防止响应过大
+    results: results.slice(0, 50),
   });
 }
 
 export async function GET(req: NextRequest) {
-  const db = await getDb();
-  const stats = await db.query(
-    `SELECT match_status, COUNT(*)::int as count FROM xx_games WHERE status='active' GROUP BY match_status`
-  );
-  return NextResponse.json({ ok: true, stats: stats.rows });
+  const auth = await requireAccess(req, 'vip');
+  if (auth instanceof NextResponse) return auth;
+  if (auth.effective_group !== 'admin') {
+    return NextResponse.json({ error: '需要管理员权限' }, { status: 403 });
+  }
+  const stats = await sql`
+    SELECT match_status, COUNT(*)::int as count
+    FROM xx_games WHERE status='active'
+    GROUP BY match_status
+  ` as any[];
+  return NextResponse.json({ ok: true, stats });
 }
