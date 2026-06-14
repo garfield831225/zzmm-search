@@ -30,7 +30,8 @@ export async function searchSgdb(name: string): Promise<SgdbGame | null> {
   const cleanName = name
     .replace(/\[.*?\]/g, '')
     .replace(/\.7z|\.zip|\.rar|\.iso/g, '')
-    .replace(/\/.*$/, '')
+    // 删前缀: 中文标题 (eg "暗黑地牢/Darkest Dungeon" → "Darkest Dungeon")
+    .replace(/^[\u4e00-\u9fa5\uff08\uff09\uff0c\u3001\s]+\//, '')
     .trim();
   if (!cleanName) return null;
 
