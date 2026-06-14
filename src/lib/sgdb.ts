@@ -30,10 +30,24 @@ export async function searchSgdb(name: string): Promise<SgdbGame | null> {
   const cleanName = name
     .replace(/\[.*?\]/g, '')
     .replace(/\.7z|\.zip|\.rar|\.iso/g, '')
-    // 删前缀: 中文标题 (eg "暗黑地牢/Darkest Dungeon" → "Darkest Dungeon")
-    .replace(/^[\u4e00-\u9fa5\uff08\uff09\uff0c\u3001\s]+\//, '')
+    // "中文名/English Name" → 取后半段 (按 / 拆, 取最长一截)
+    .replace(/\/附.*$/, '') // "/附历代合集" 这种
+    .replace(/：.*$/, '') // 中文冒号及之后
     .trim();
-  if (!cleanName) return null;
+  let cleaned = cleanName;
+  if (cleaned.includes('/')) {
+    const parts = cleaned.split('/').map(s => s.trim()).filter(Boolean);
+    // 优先选包含英文/空格的; 没有英文全中文时取最短
+    const ascii = parts.filter(p => /[a-zA-Z]/.test(p));
+    if (ascii.length > 0) {
+      // 选英文截最长
+      cleaned = ascii.sort((a, b) => b.length - a.length)[0];
+    } else {
+      // 全中文, 取最短的
+      cleaned = parts.sort((a, b) => a.length - b.length)[0];
+    }
+  }
+  if (!cleaned) return null;
 
   // SGDB search endpoint (v2): GET /search/autocomplete/{term}
   const r = await fetch(`${SGDB_API_URL}/search/autocomplete/${encodeURIComponent(cleanName)}`, {
