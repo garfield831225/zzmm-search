@@ -64,16 +64,17 @@ export async function POST(req: NextRequest) {
 
   if (type === 'pending') {
     // 静态 SQL 4 分支 (避免 neon tagged template 动态拼接 500)
+    // 注: 加 match_status='pending' 避免重跑已尝试过的
     let list: any[], c: any[];
     if (platform && source) {
-      list = await sql`SELECT id, name, platform, cover_url, cover_source FROM xx_games WHERE status = 'active' AND platform = ${platform} AND cover_source = ${source} ORDER BY view_count DESC NULLS LAST, created_at DESC LIMIT ${limit}` as any[];
-      c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND platform = ${platform} AND cover_source = ${source}` as any[];
+      list = await sql`SELECT id, name, platform, cover_url, cover_source FROM xx_games WHERE status = 'active' AND match_status = 'pending' AND platform = ${platform} AND cover_source = ${source} ORDER BY view_count DESC NULLS LAST, created_at DESC LIMIT ${limit}` as any[];
+      c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND match_status = 'pending' AND platform = ${platform} AND cover_source = ${source}` as any[];
     } else if (platform) {
-      list = await sql`SELECT id, name, platform, cover_url, cover_source FROM xx_games WHERE status = 'active' AND platform = ${platform} AND cover_url IS NULL ORDER BY view_count DESC NULLS LAST, created_at DESC LIMIT ${limit}` as any[];
-      c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND platform = ${platform} AND cover_url IS NULL` as any[];
+      list = await sql`SELECT id, name, platform, cover_url, cover_source FROM xx_games WHERE status = 'active' AND match_status = 'pending' AND platform = ${platform} AND cover_url IS NULL ORDER BY view_count DESC NULLS LAST, created_at DESC LIMIT ${limit}` as any[];
+      c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND match_status = 'pending' AND platform = ${platform} AND cover_url IS NULL` as any[];
     } else if (source) {
-      list = await sql`SELECT id, name, platform, cover_url, cover_source FROM xx_games WHERE status = 'active' AND cover_source = ${source} ORDER BY view_count DESC NULLS LAST, created_at DESC LIMIT ${limit}` as any[];
-      c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND cover_source = ${source}` as any[];
+      list = await sql`SELECT id, name, platform, cover_url, cover_source FROM xx_games WHERE status = 'active' AND match_status = 'pending' AND cover_source = ${source} ORDER BY view_count DESC NULLS LAST, created_at DESC LIMIT ${limit}` as any[];
+      c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND match_status = 'pending' AND cover_source = ${source}` as any[];
     } else {
       list = await sql`SELECT id, name, platform, cover_url, cover_source FROM xx_games WHERE status = 'active' AND cover_url IS NULL AND match_status = 'pending' ORDER BY view_count DESC NULLS LAST, created_at DESC LIMIT ${limit}` as any[];
       c = await sql`SELECT COUNT(*)::int as total FROM xx_games WHERE status = 'active' AND cover_url IS NULL AND match_status = 'pending'` as any[];
