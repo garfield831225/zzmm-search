@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import { requireAccess } from '@/lib/access';
-import { searchRawg, RawgProxyError } from '@/lib/rawg';
+import { searchIgdb, IgdbError } from '@/lib/igdb';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -62,13 +62,14 @@ export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
   for (const game of games) {
-    await new Promise((r) => setTimeout(r, 1200));
+    // IGDB 限流 4 req/s, 用 280ms 间隔
+    await new Promise((r) => setTimeout(r, 280));
     try {
-      const result = await searchRawg(game.name);
+      const result = await searchIgdb(game.name);
       if (result?.cover) {
         await sql`
           UPDATE xx_games
-          SET cover_url = ${result.cover}, rawg_slug = ${result.slug},
+          SET cover_url = ${result.cover}, rawg_slug = ${'igdb:' + result.id},
               match_status = 'matched', match_attempted_at = NOW()
           WHERE id = ${game.id}
         `;
@@ -85,10 +86,10 @@ export async function POST(req: NextRequest) {
       }
     } catch (e: any) {
       failed++;
-      const reason = e instanceof RawgProxyError ? `NAS ${e.status}` : (e.message || '').slice(0, 100);
+      const reason = e instanceof IgdbError ? `IGDB ${e.status}` : (e.message || '').slice(0, 100);
       results.push({ id: game.id, name: game.name, status: 'error', reason });
-      if (e instanceof RawgProxyError && e.status >= 500) {
-        results.push({ abort: 'NAS 反代 5xx, 整批中断' });
+      if (e instanceof IgdbError && e.status === 429) {
+        results.push({ abort: 'IGDB 限流, 整批中断' });
         break;
       }
     }
