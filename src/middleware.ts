@@ -50,6 +50,8 @@ const PUBLIC_PATHS = [
   '/api/admin/import/quick',
   '/api/games',          // 游戏中心 API (后端 requireAccess 自鉴权)
   '/api/debug/games-test', // debug 端
+  '/api/admin/games/match',  // 游戏匹配 (admin 鉴权, 后端判)
+  '/api/admin/games',       // 游戏管理 API (admin 鉴权)
 ];
 
 export function middleware(request: NextRequest) {
