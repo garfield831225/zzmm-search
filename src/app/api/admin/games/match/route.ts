@@ -108,9 +108,14 @@ export async function POST(req: NextRequest) {
     try {
       // DEBUG: 第一个 game 输出 cleanName + env 状态
       if (i === 0) {
-        // 直接调 searchSgdb 看结果
+        // 直接调 SGDB autocomplete 看完整返回
+        const tryR = await fetch('https://www.steamgriddb.com/api/v2/search/autocomplete/Pro%20Evolution%20Soccer%202019', {
+          headers: { 'Authorization': 'Bearer ' + (process.env.SGDB_API_KEY || '') },
+        });
+        const tryJ = await tryR.json().catch(() => null);
+        const all = (tryJ?.data || []).map(d => d.name);
         const sgdbRaw = await searchSgdb(game.name).catch(e => ({ _err: e.message || String(e) }));
-        results.push({ _debug: true, raw: game.name, sgdbRaw });
+        results.push({ _debug: true, raw: game.name, sgdbAllResults: all, sgdbRaw });
       }
       const result = await matchGame(game.name);
       if (result) {
