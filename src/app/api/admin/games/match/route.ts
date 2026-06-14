@@ -1,7 +1,8 @@
-// /api/admin/games/match — 抓 Rawg 封面 (通过 NAS 反代)
+// /api/admin/games/match — 抓游戏封面 (SGDB 优先, IGDB 兜底)
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import { requireAccess } from '@/lib/access';
+import { searchSgdb, SgdbError } from '@/lib/sgdb';
 import { searchIgdb, IgdbError } from '@/lib/igdb';
 
 export const runtime = 'nodejs';
@@ -10,11 +11,39 @@ export const maxDuration = 300;
 
 const sql = neon(process.env.DATABASE_URL!);
 
+// 混合策略: 先 SGDB (覆盖广, 老游戏强), 失败再 IGDB (现代游戏)
+async function matchGame(name: string): Promise<{ source: 'sgdb'|'igdb'; cover: string; refId: string } | null> {
+  // 1. SGDB 优先
+  try {
+    const sgdb = await searchSgdb(name);
+    if (sgdb?.coverVertical) {
+      return { source: 'sgdb', cover: sgdb.coverVertical, refId: String(sgdb.id) };
+    }
+    if (sgdb?.cover) {
+      return { source: 'sgdb', cover: sgdb.cover, refId: String(sgdb.id) };
+    }
+  } catch (e) {
+    if (e instanceof SgdbError && e.status === 401) {
+      throw e; // key 错, 不再继续
+    }
+  }
+
+  // 2. IGDB 兜底
+  try {
+    const igdb = await searchIgdb(name);
+    if (igdb?.cover) {
+      return { source: 'igdb', cover: igdb.cover, refId: 'igdb:' + igdb.id };
+    }
+  } catch {}
+
+  return null;
+}
+
 export async function POST(req: NextRequest) {
-  // 鉴权: 1. JWT (正常用户)  2. X-Admin-Token (Mavis 自动化, 不踢用户登录)
+  // 鉴权
   const bypassToken = req.headers.get('x-admin-token');
   if (bypassToken && bypassToken === process.env.ADMIN_API_TOKEN && process.env.ADMIN_API_TOKEN) {
-    // 走 Mavis bypass 通道, 不查 JWT
+    // bypass OK
   } else {
     const auth = await requireAccess(req, 'vip');
     if (auth instanceof NextResponse) return auth;
@@ -27,7 +56,6 @@ export async function POST(req: NextRequest) {
   const type: 'all' | 'pending' = body.type || 'pending';
   const limit: number = Math.min(100, Math.max(1, parseInt(body.limit || '20')));
 
-  // 用 4 个静态 if, 不用动态拼接 tagged template (避免 500)
   let games: any[] = [];
   let total = 0;
 
@@ -62,19 +90,19 @@ export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
   for (const game of games) {
-    // IGDB 限流 4 req/s, 用 280ms 间隔
-    await new Promise((r) => setTimeout(r, 280));
+    // SGDB 限流 5 req/s, IGDB 4 req/s, 用 300ms 间隔保险
+    await new Promise((r) => setTimeout(r, 300));
     try {
-      const result = await searchIgdb(game.name);
-      if (result?.cover) {
+      const result = await matchGame(game.name);
+      if (result) {
         await sql`
           UPDATE xx_games
-          SET cover_url = ${result.cover}, rawg_slug = ${'igdb:' + result.id},
+          SET cover_url = ${result.cover}, rawg_slug = ${result.refId},
               match_status = 'matched', match_attempted_at = NOW()
           WHERE id = ${game.id}
         `;
         matched++;
-        results.push({ id: game.id, name: game.name, status: 'matched', cover: result.cover });
+        results.push({ id: game.id, name: game.name, status: 'matched', cover: result.cover, source: result.source });
       } else {
         await sql`
           UPDATE xx_games
@@ -86,10 +114,14 @@ export async function POST(req: NextRequest) {
       }
     } catch (e: any) {
       failed++;
-      const reason = e instanceof IgdbError ? `IGDB ${e.status}` : (e.message || '').slice(0, 100);
+      let reason = '';
+      if (e instanceof SgdbError) reason = `SGDB ${e.status}`;
+      else if (e instanceof IgdbError) reason = `IGDB ${e.status}`;
+      else reason = (e.message || '').slice(0, 100);
       results.push({ id: game.id, name: game.name, status: 'error', reason });
-      if (e instanceof IgdbError && e.status === 429) {
-        results.push({ abort: 'IGDB 限流, 整批中断' });
+      if ((e instanceof SgdbError && e.status === 401) ||
+          (e instanceof IgdbError && e.status === 429)) {
+        results.push({ abort: 'key/auth/限流, 整批中断' });
         break;
       }
     }
