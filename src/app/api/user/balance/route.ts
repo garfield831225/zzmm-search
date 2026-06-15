@@ -23,7 +23,7 @@ function getUserId(authHeader: string | null): { userId?: number; error?: string
 
 export async function GET(req: NextRequest) {
   const auth = getUserId(req.headers.get('authorization'));
-  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  if (auth.error || !auth.userId) return NextResponse.json({ error: auth.error || '未登录' }, { status: auth.status || 401 });
 
   const sql = neon(process.env.DATABASE_URL || '');
   const users = await sql`SELECT id, username, user_group, expire_at, lumen_balance FROM xx_users WHERE id = ${auth.userId} LIMIT 1` as any[];
