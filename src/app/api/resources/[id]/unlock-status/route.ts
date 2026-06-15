@@ -43,7 +43,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     if (auth.userId) {
       const existing = await sql`SELECT id FROM xx_user_unlocks WHERE user_id = ${auth.userId} AND resource_id = ${resourceId} LIMIT 1` as any[];
       unlocked = !!existing[0];
-      const users = await sql`SELECT lumen_balance, user_group, expire_at FROM xx_users WHERE id = ${auth.userId} LIMIT 1` as any[];
+      const users = await sql`SELECT u.user_group, u.expire_at, COALESCE(l.balance, 0) as lumen_balance
+                                FROM xx_users u
+                                LEFT JOIN xx_user_lumen l ON l.user_id = u.id
+                                WHERE u.id = ${auth.userId} LIMIT 1` as any[];
       if (users[0]) {
         lumenBalance = users[0].lumen_balance || 0;
         userVipActive = (users[0].user_group === 'vip' || users[0].user_group === 'admin') && (!users[0].expire_at || new Date(users[0].expire_at) > new Date());

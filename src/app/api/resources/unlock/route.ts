@@ -31,8 +31,11 @@ async function unlockWithLumen(sql: any, userId: string, resourceId: number) {
   const r = resources[0];
   const lumenCost = r.lumen_cost || 1;
 
-  // 2. 查用户 VIP 状态
-  const users = await sql`SELECT id, user_group, expire_at, lumen_balance FROM xx_users WHERE id = ${userId} LIMIT 1` as any[];
+  // 2. 查用户 VIP 状态 (JOIN xx_user_lumen 拿 balance)
+  const users = await sql`SELECT u.id, u.user_group, u.expire_at, COALESCE(l.balance, 0) as lumen_balance
+                            FROM xx_users u
+                            LEFT JOIN xx_user_lumen l ON l.user_id = u.id
+                            WHERE u.id = ${userId} LIMIT 1` as any[];
   if (!users[0]) return { error: '用户不存在', status: 401 };
   const u = users[0];
   const isVip = (u.user_group === 'vip' || u.user_group === 'admin') && (!u.expire_at || new Date(u.expire_at) > new Date());
@@ -49,21 +52,25 @@ async function unlockWithLumen(sql: any, userId: string, resourceId: number) {
     return { error: `流明不足, 需要 ${lumenCost} 个, 当前 ${u.lumen_balance || 0}`, need: 'lumen', cost: lumenCost, balance: u.lumen_balance || 0, status: 402 };
   }
 
-  // 5. 扣流明 + 写 unlock 记录
+  // 5. 扣流明 (xx_user_lumen) + 写 unlock 记录
   try {
-    await sql`UPDATE xx_users SET lumen_balance = lumen_balance - ${lumenCost} WHERE id = ${userId}`;
+    await sql`UPDATE xx_user_lumen SET balance = balance - ${lumenCost}, updated_at = NOW() WHERE user_id = ${userId}`;
     await sql`INSERT INTO xx_user_unlocks (user_id, resource_id, lumen_cost, unlocked_at) VALUES (${userId}, ${resourceId}, ${lumenCost}, NOW())`;
+    // 写流水
+    const balanceAfter = u.lumen_balance - lumenCost;
+    await sql`INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description)
+              VALUES (${userId}, ${-lumenCost}, ${balanceAfter}, 'debit', null, ${'resource_unlock:' + resourceId})`.catch(() => {});
   } catch (e: any) {
     return { error: '解锁失败: ' + e.message, status: 500 };
   }
 
-  const after = await sql`SELECT lumen_balance FROM xx_users WHERE id = ${userId} LIMIT 1` as any[];
+  const after = await sql`SELECT balance FROM xx_user_lumen WHERE user_id = ${userId} LIMIT 1` as any[];
   return {
     success: true,
     message: `解锁成功! 消耗 ${lumenCost} 流明`,
     resource: { id: r.id, name: r.name },
     lumen_cost: lumenCost,
-    lumen_balance_after: after[0]?.lumen_balance || 0,
+    lumen_balance_after: after[0]?.balance || 0,
   };
 }
 

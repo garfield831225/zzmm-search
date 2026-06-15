@@ -35,8 +35,8 @@ export async function POST(req: NextRequest) {
 
   const sql = neon(process.env.DATABASE_URL || '');
 
-  // 3. 查/创用户
-  const existing = await sql`SELECT id, lumen_balance FROM xx_users WHERE username = ${email} LIMIT 1` as any[];
+  // 3. 查/创用户 + 创 lumen 行
+  const existing = await sql`SELECT id FROM xx_users WHERE username = ${email} LIMIT 1` as any[];
   let userId: number;
   if (existing[0]) {
     userId = existing[0].id;
@@ -45,17 +45,20 @@ export async function POST(req: NextRequest) {
                               VALUES (${email}, '', 'user', 'active', true, NOW(), NOW()) RETURNING id` as any[];
     userId = inserted[0].id;
   }
+  // 创 lumen 行 (if not exists)
+  await sql`INSERT INTO xx_user_lumen (user_id, balance) VALUES (${userId}, 0) ON CONFLICT (user_id) DO NOTHING`;
 
   // 4. 加流明
-  await sql`UPDATE xx_users SET lumen_balance = lumen_balance + ${lumen_amount} WHERE id = ${userId}`;
+  await sql`UPDATE xx_user_lumen SET balance = balance + ${lumen_amount}, updated_at = NOW() WHERE user_id = ${userId}`;
 
   // 5. 拿新余额
-  const after = await sql`SELECT lumen_balance FROM xx_users WHERE id = ${userId} LIMIT 1` as any[];
+  const after = await sql`SELECT balance FROM xx_user_lumen WHERE user_id = ${userId} LIMIT 1` as any[];
 
-  // 6. 记录流水 (审计) - 用 logs 表
-  await sql`INSERT INTO xx_logs (user_id, action, details, created_at)
-            VALUES (${userId}, 'lumen_credit', ${JSON.stringify({ lumen_amount, activation_code_id: activation_code_id || null, reason: reason || 'internal_credit' })}, NOW())`.catch(() => {
-    // logs 表若 schema 不匹配, 不阻塞
+  // 6. 记录流水 (审计) - 用 xx_lumen_logs 表
+  const newBalance = after[0]?.balance || 0;
+  await sql`INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description)
+            VALUES (${userId}, ${lumen_amount}, ${newBalance}, 'credit', ${activation_code_id ? String(activation_code_id) : null}, ${reason || 'internal_credit'})`.catch(() => {
+    // 流水失败不阻塞
   });
 
   return NextResponse.json({

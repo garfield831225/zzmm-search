@@ -26,7 +26,10 @@ export async function GET(req: NextRequest) {
   if (auth.error || !auth.userId) return NextResponse.json({ error: auth.error || '未登录' }, { status: auth.status || 401 });
 
   const sql = neon(process.env.DATABASE_URL || '');
-  const users = await sql`SELECT id, username, user_group, expire_at, lumen_balance FROM xx_users WHERE id = ${auth.userId} LIMIT 1` as any[];
+  const users = await sql`SELECT u.id, u.username, u.user_group, u.expire_at, COALESCE(l.balance, 0) as lumen_balance
+                            FROM xx_users u
+                            LEFT JOIN xx_user_lumen l ON l.user_id = u.id
+                            WHERE u.id = ${auth.userId} LIMIT 1` as any[];
   if (!users[0]) return NextResponse.json({ error: '用户不存在' }, { status: 404 });
   const u = users[0];
   const vipActive = (u.user_group === 'vip' || u.user_group === 'admin') && (!u.expire_at || new Date(u.expire_at) > new Date());

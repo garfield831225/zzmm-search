@@ -64,10 +64,14 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // 2. 查/创 zzmm-search 端 xx_users
+  // 2. 查/创 zzmm-search 端 xx_users + 创 lumen 行
+  // v2.1.3: VIP 不跨站共享, 只共享账号
   const sql = neon(process.env.DATABASE_URL || '');
   const email = payload.email;
-  const existing = await sql`SELECT id, username, user_group, expire_at, lumen_balance FROM xx_users WHERE username = ${email} LIMIT 1` as any[];
+  const existing = await sql`SELECT u.id, u.user_group, u.expire_at, COALESCE(l.balance, 0) as lumen_balance
+                            FROM xx_users u
+                            LEFT JOIN xx_user_lumen l ON l.user_id = u.id
+                            WHERE u.username = ${email} LIMIT 1` as any[];
 
   let userId: number;
   let lumenBalance = 0;
@@ -75,15 +79,20 @@ export async function GET(request: NextRequest) {
     userId = existing[0].id;
     lumenBalance = existing[0].lumen_balance || 0;
   } else {
-    // 创用户 - SSO 来的用户, password_hash 留空 (v2 SSO 全面铺开改 nullable)
+    // 创用户 - SSO 来的用户, password_hash 留空
     const inserted = await sql`INSERT INTO xx_users (username, password_hash, user_group, status, is_verified, created_at, updated_at)
                               VALUES (${email}, '', 'user', 'active', true, NOW(), NOW()) RETURNING id` as any[];
     userId = inserted[0].id;
+    // 创 lumen 行
+    await sql`INSERT INTO xx_user_lumen (user_id, balance) VALUES (${userId}, 0) ON CONFLICT (user_id) DO NOTHING`;
   }
 
-  // 3. VIP 共享同步: 从 SSO payload 拿 vip_expire_at / vip_level
-  // 规则: 两边都给 VIP 组, 不缩短
-  if (payload.vip_expire_at) {
+  // 3. v2.1.3 修正: 不再跨站共享 VIP 时长
+  // SSO 之前也共享了 vip_expire_at (v1.2 行为), v2.1.3 改为只共享账号, VIP 各买各的
+  // (mov 端 mov 自己处理 mov 端 VIP)
+  // v2.1.3 禁用跨站 VIP 双写 - 整段禁用
+  /*
+  if (payload?.vip_expire_at) {
     const newExpire = new Date(payload.vip_expire_at * 1000);
     await sql`UPDATE xx_users
               SET expire_at = GREATEST(${newExpire.toISOString()}::timestamptz, COALESCE(expire_at, NOW())),
@@ -93,6 +102,7 @@ export async function GET(request: NextRequest) {
                   END
               WHERE id = ${userId}`;
   }
+  */
 
   // 4. 签 zzmm-search 自己的 JWT
   const zzmmToken = jwt.sign(
