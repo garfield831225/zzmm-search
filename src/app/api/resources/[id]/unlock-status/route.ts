@@ -32,7 +32,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
   try {
     // 查资源
-    const resources = await sql`SELECT id, name, lumen_cost, is_vip_only, pay_type FROM xx_resources WHERE id = ${resourceId} AND status = 'active' LIMIT 1` as any[];
+    const resources = await sql`SELECT id, name, lumen_cost, access_level, pay_type FROM xx_resources WHERE id = ${resourceId} AND status = 'active' LIMIT 1` as any[];
     if (!resources[0]) return NextResponse.json({ error: '资源不存在' }, { status: 404 });
     const r = resources[0];
 
@@ -58,7 +58,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       lumen_cost: r.lumen_cost || 1,
       lumen_balance: lumenBalance,
       user_vip_active: userVipActive,
-      is_vip_only: r.is_vip_only || false,
+      access_level: r.access_level || 'free',
       pay_type: r.pay_type,
       need_login: !!auth.error,
     });

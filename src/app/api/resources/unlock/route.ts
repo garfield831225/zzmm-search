@@ -26,7 +26,7 @@ function getUserId(authHeader: string | null): { userId?: string; email?: string
 //   3. 扣流明 + 写 unlock 记录 (lumen_cost 审计)
 async function unlockWithLumen(sql: any, userId: string, resourceId: number) {
   // 1. 查资源 + lumen_cost
-  const resources = await sql`SELECT id, name, lumen_cost, is_vip_only FROM xx_resources WHERE id = ${resourceId} AND status = 'active' LIMIT 1` as any[];
+  const resources = await sql`SELECT id, name, lumen_cost, access_level FROM xx_resources WHERE id = ${resourceId} AND status = 'active' LIMIT 1` as any[];
   if (!resources[0]) return { error: '资源不存在', status: 404 };
   const r = resources[0];
   const lumenCost = r.lumen_cost || 1;
