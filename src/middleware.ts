@@ -52,6 +52,10 @@ const PUBLIC_PATHS = [
   '/api/debug/games-test', // debug 端
   '/api/admin/games/match',  // 游戏匹配 (admin 鉴权, 后端判)
   '/api/admin/games',       // 游戏管理 API (admin 鉴权)
+  // v1.2 跨站流明体系
+  '/api/auth/sso/redirect',  // SSO 跳板 (免登录)
+  '/api/auth/sso/callback',  // SSO 回调 (免登录, 内部验 token + 签 JWT)
+  '/api/internal/lumen/credit',  // 内部 API: Moviezone 调加流明 (Bearer INTERNAL_API_TOKEN 鉴权)
 ];
 
 export function middleware(request: NextRequest) {
