@@ -1,7 +1,7 @@
 // /api/auth/sso/callback - zzmm-search 端 SSO 回调
 // 流程: scraper 跳回 /api/auth/sso/callback?token=xxx&callback=...
 // 1. 拿 token
-// 2. 用 SSO_SECRET HS256 验 token (来自 scraper Vercel env SSO_SECRET)
+// 2. 用 SSO_JWT_SECRET HS256 验 token (来自 scraper Vercel env SSO_JWT_SECRET)
 // 3. 拿 token payload {email, user_id, vip_expire_at, vip_level, points}
 // 4. 查 sso_tokens 表 (scraper 端) - 可选, 由 scraper callback 内部验证
 // 5. 查/创 zzmm-search 端 xx_users.username = email
@@ -16,7 +16,8 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 10;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
-const SSO_SECRET = process.env.SSO_SECRET; // 来自 scraper Vercel env (用户转达填入, 不贴消息)
+const SSO_JWT_SECRET = process.env.SSO_JWT_SECRET; // 来自 scraper Vercel env (用户转达填入, 不贴消息)
+// ⚠️ 不能 fallback 到默认值! 不写 fallback 是有意为之: 万一 env 没配就报错, 不让代码用公开默认密钥"装作加密"
 const SCRAPER_API_BASE = 'https://scraper.cc.cd';
 
 interface SsoPayload {
@@ -28,14 +29,14 @@ interface SsoPayload {
   exp?: number; // JWT 标准 5min 过期
 }
 
-// 用 SSO_SECRET HS256 验 scraper 颁发的 sso_token
+// 用 SSO_JWT_SECRET HS256 验 scraper 颁发的 sso_token
 function verifySsoToken(token: string): SsoPayload | null {
-  if (!SSO_SECRET) {
-    console.error('[sso-callback] SSO_SECRET not configured');
+  if (!SSO_JWT_SECRET) {
+    console.error('[sso-callback] SSO_JWT_SECRET not configured - refusing to verify token (防公开默认密钥陷阱)');
     return null;
   }
   try {
-    const payload = jwt.verify(token, SSO_SECRET, { algorithms: ['HS256'] }) as SsoPayload;
+    const payload = jwt.verify(token, SSO_JWT_SECRET, { algorithms: ['HS256'] }) as SsoPayload;
     return payload;
   } catch (e: any) {
     console.error('[sso-callback] SSO token verify failed:', e.message);
