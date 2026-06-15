@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
 
   // 5. 拿新余额
   const after = await sql`SELECT balance::int as balance FROM xx_user_lumen WHERE user_id = ${userId} LIMIT 1` as any[];
-  console.log('[lumen-credit] after SELECT:', after, 'userId:', userId, 'expected:', u.lumen_balance || 0 + lumen_amount);
+  console.log('[lumen-credit] userId:', userId, 'lumen_amount:', lumen_amount, 'after:', after[0]?.balance);
 
   // 6. 记录流水 (审计) - 用 xx_lumen_logs 表
   const newBalance = after[0]?.balance || 0;
