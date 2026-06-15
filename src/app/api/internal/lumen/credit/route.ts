@@ -48,12 +48,10 @@ export async function POST(req: NextRequest) {
   // 创 lumen 行 (if not exists)
   await sql`INSERT INTO xx_user_lumen (user_id, balance) VALUES (${userId}, 0) ON CONFLICT (user_id) DO NOTHING`;
 
-  // 4. 加流明
-  await sql`UPDATE xx_user_lumen SET balance = balance + ${lumen_amount}, updated_at = NOW() WHERE user_id = ${userId}`;
+  // 4. 加流明 (用 RETURNING 拿新值, 避免二次 SELECT)
+  const updated = await sql`UPDATE xx_user_lumen SET balance = balance + ${lumen_amount}, updated_at = NOW() WHERE user_id = ${userId} RETURNING balance` as any[];
 
-  // 5. 拿新余额
-  const after = await sql`SELECT balance::int as balance FROM xx_user_lumen WHERE user_id = ${userId} LIMIT 1` as any[];
-  console.log('[lumen-credit] userId:', userId, 'lumen_amount:', lumen_amount, 'after:', after[0]?.balance);
+  const newBalance = updated[0]?.balance ?? 0;
 
   // 6. 记录流水 (审计) - 用 xx_lumen_logs 表
   const newBalance = after[0]?.balance || 0;
@@ -67,7 +65,7 @@ export async function POST(req: NextRequest) {
     user_id: userId,
     email,
     lumen_amount,
-    new_balance: after[0]?.lumen_balance || 0,
+    new_balance: newBalance,
   });
 }
 

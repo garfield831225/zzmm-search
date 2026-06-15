@@ -52,26 +52,24 @@ async function unlockWithLumen(sql: any, userId: string, resourceId: number) {
     return { error: `流明不足, 需要 ${lumenCost} 个, 当前 ${u.lumen_balance || 0}`, need: 'lumen', cost: lumenCost, balance: u.lumen_balance || 0, status: 402 };
   }
 
-  // 5. 扣流明 (xx_user_lumen) + 写 unlock 记录
+  // 5. 扣流明 (xx_user_lumen) + 写 unlock 记录 (用 RETURNING 拿新值)
   try {
-    await sql`UPDATE xx_user_lumen SET balance = balance - ${lumenCost}, updated_at = NOW() WHERE user_id = ${userId}`;
+    const updated = await sql`UPDATE xx_user_lumen SET balance = balance - ${lumenCost}, updated_at = NOW() WHERE user_id = ${userId} RETURNING balance` as any[];
     await sql`INSERT INTO xx_user_unlocks (user_id, resource_id, lumen_cost, unlocked_at) VALUES (${userId}, ${resourceId}, ${lumenCost}, NOW())`;
     // 写流水
-    const balanceAfter = u.lumen_balance - lumenCost;
+    const balanceAfter = updated[0]?.balance ?? 0;
     await sql`INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description)
               VALUES (${userId}, ${-lumenCost}, ${balanceAfter}, 'debit', null, ${'resource_unlock:' + resourceId})`.catch(() => {});
+    return {
+      success: true,
+      message: `解锁成功! 消耗 ${lumenCost} 流明`,
+      resource: { id: r.id, name: r.name },
+      lumen_cost: lumenCost,
+      lumen_balance_after: balanceAfter,
+    };
   } catch (e: any) {
     return { error: '解锁失败: ' + e.message, status: 500 };
   }
-
-  const after = await sql`SELECT balance FROM xx_user_lumen WHERE user_id = ${userId} LIMIT 1` as any[];
-  return {
-    success: true,
-    message: `解锁成功! 消耗 ${lumenCost} 流明`,
-    resource: { id: r.id, name: r.name },
-    lumen_cost: lumenCost,
-    lumen_balance_after: after[0]?.balance || 0,
-  };
 }
 
 export async function POST(req: NextRequest) {
