@@ -56,6 +56,9 @@ const PUBLIC_PATHS = [
   '/api/auth/sso/redirect',  // SSO 跳板 (免登录)
   '/api/auth/sso/callback',  // SSO 回调 (免登录, 内部验 token + 签 JWT)
   '/api/internal/lumen/credit',  // 内部 API: Moviezone 调加流明 (Bearer INTERNAL_API_TOKEN 鉴权)
+  '/api/user/balance',         // 查余额 (后端 Bearer 鉴权)
+  '/api/resources/unlock',     // 资源解锁 (后端 Bearer 鉴权, 双模式)
+  '/api/resources/unlock-status', // 查解锁状态 (后端 Bearer 鉴权, 可选登录)
 ];
 
 export function middleware(request: NextRequest) {
