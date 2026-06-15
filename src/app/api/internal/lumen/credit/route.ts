@@ -54,7 +54,6 @@ export async function POST(req: NextRequest) {
   const newBalance = updated[0]?.balance ?? 0;
 
   // 6. 记录流水 (审计) - 用 xx_lumen_logs 表
-  const newBalance = after[0]?.balance || 0;
   await sql`INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description)
             VALUES (${userId}, ${lumen_amount}, ${newBalance}, 'credit', ${activation_code_id ? String(activation_code_id) : null}, ${reason || 'internal_credit'})`.catch(() => {
     // 流水失败不阻塞
