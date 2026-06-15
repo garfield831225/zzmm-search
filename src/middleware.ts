@@ -57,8 +57,8 @@ const PUBLIC_PATHS = [
   '/api/auth/sso/callback',  // SSO 回调 (免登录, 内部验 token + 签 JWT)
   '/api/internal/lumen/credit',  // 内部 API: Moviezone 调加流明 (Bearer INTERNAL_API_TOKEN 鉴权)
   '/api/user/balance',         // 查余额 (后端 Bearer 鉴权)
-  '/api/resources/unlock',     // 资源解锁 (后端 Bearer 鉴权, 双模式)
-  '/api/resources/unlock-status', // 查解锁状态 (后端 Bearer 鉴权, 可选登录)
+  // /api/resources/unlock 资源解锁 (后端 Bearer 鉴权, 双模式) - 用 startsWith 通配
+  // /api/resources/[id]/unlock-status 动态路由也走 unlock 路径检查
 ];
 
 export function middleware(request: NextRequest) {
@@ -69,6 +69,11 @@ export function middleware(request: NextRequest) {
     if (pathname.startsWith(path)) {
       return NextResponse.next();
     }
+  }
+
+  // v1.2 资源路由通配: /api/resources/unlock 和 /api/resources/[id]/unlock-status
+  if (pathname === '/api/resources/unlock' || pathname.match(/^\/api\/resources\/\d+\/unlock-status$/)) {
+    return NextResponse.next();
   }
 
   // 检查登录 cookie
