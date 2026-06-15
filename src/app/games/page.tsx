@@ -74,7 +74,9 @@ const FALLBACK_COVER = 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xml
 export default function GamesPage() {
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [activePlatform, setActivePlatform] = useState<string>('');
+  // 输入态 (受控) vs 提交态 (实际查询) 分离
   const [keyword, setKeyword] = useState('');
+  const [submittedKeyword, setSubmittedKeyword] = useState('');
   const [items, setItems] = useState<Game[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -98,25 +100,22 @@ export default function GamesPage() {
       .catch(() => {});
   }, []);
 
-  // 加载游戏列表
+  // 加载游戏列表 (只在平台/提交关键词/分页变化时触发, 不再受 input 输入影响)
   const loadGames = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (activePlatform) params.set('platform', activePlatform);
-      if (keyword) params.set('q', keyword);
+      if (submittedKeyword) params.set('q', submittedKeyword);
       params.set('page', String(page));
       params.set('pageSize', '24');
 
       const r = await fetch(`/api/games?${params}`, { credentials: 'include', headers: getAuthHeaders() });
-      // 关键修复: 即使 r.json() 失败也诊断
       const text = await r.text();
-      console.log('[games API]', r.status, 'content-type:', r.headers.get('content-type'), 'body:', text.slice(0, 300));
       let d: any;
       try {
         d = JSON.parse(text);
       } catch (e: any) {
-        console.error('[games JSON parse failed]', e.message, 'raw:', text.slice(0, 500));
         addToast('API 返回非 JSON: ' + (text.slice(0, 80) || '空响应 (status=' + r.status + ')'), 'error');
         setItems([]);
         setTotal(0);
@@ -126,7 +125,6 @@ export default function GamesPage() {
         if (d.need === 'vip' || d.need === 'basic') {
           addToast(d.tip || '需要升级会员', 'error');
         } else if (d.needLogin || r.status === 401) {
-          // token 失效, 清 localStorage 跳登录
           localStorage.removeItem('zzmm_token');
           localStorage.removeItem('token');
           localStorage.removeItem('adminToken');
@@ -142,21 +140,35 @@ export default function GamesPage() {
       setItems(d.items || []);
       setTotal(d.total || 0);
     } catch (e: any) {
-      console.error('[games loadGames error]', e);
       addToast('加载失败: ' + (e?.message || '网络错误'), 'error');
     } finally {
       setLoading(false);
     }
-  }, [activePlatform, keyword, page, addToast]);
+  }, [activePlatform, submittedKeyword, page, addToast]);
 
   useEffect(() => {
     loadGames();
   }, [loadGames]);
 
+  // 搜索提交: 输入的 keyword 复制到 submittedKeyword 才触发查询
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setPage(1);
-    loadGames();
+    setSubmittedKeyword(keyword.trim());
+  };
+
+  // 重置: 清搜索词 + 回全部平台 + 跳第 1 页
+  const handleReset = () => {
+    setKeyword('');
+    setSubmittedKeyword('');
+    setActivePlatform('');
+    setPage(1);
+  };
+
+  // 平台切换: 直接清搜索词
+  const switchPlatform = (p: string) => {
+    setActivePlatform(p);
+    setPage(1);
   };
 
   return (
@@ -185,13 +197,13 @@ export default function GamesPage() {
             </Link>
           </div>
 
-          {/* 搜索 + 平台筛选 */}
+          {/* 搜索 + 重置 + 平台筛选 */}
           <form onSubmit={handleSearch} className="flex gap-2 mb-3">
             <input
               type="text"
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
-              placeholder="搜索游戏名..."
+              placeholder="搜索游戏名... (按回车或点搜索)"
               className="flex-1 px-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm focus:outline-none focus:border-amber-500"
             />
             <button
@@ -199,14 +211,22 @@ export default function GamesPage() {
               disabled={loading}
               className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-900 font-medium rounded-lg text-sm disabled:opacity-50"
             >
-              搜索
+              {loading ? '搜索中...' : '🔍 搜索'}
+            </button>
+            <button
+              type="button"
+              onClick={handleReset}
+              disabled={loading}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm disabled:opacity-50"
+            >
+              ↺ 重置
             </button>
           </form>
 
           {/* 平台 tab */}
           <div className="flex gap-2 overflow-x-auto pb-1">
             <button
-              onClick={() => { setActivePlatform(''); setPage(1); }}
+              onClick={() => switchPlatform('')}
               className={`px-3 py-1.5 text-sm rounded-lg whitespace-nowrap transition-all ${
                 !activePlatform
                   ? 'bg-amber-500 text-slate-900 font-medium'
@@ -218,7 +238,7 @@ export default function GamesPage() {
             {platforms.map((p) => (
               <button
                 key={p.platform}
-                onClick={() => { setActivePlatform(p.platform); setPage(1); }}
+                onClick={() => switchPlatform(p.platform)}
                 className={`px-3 py-1.5 text-sm rounded-lg whitespace-nowrap transition-all flex items-center gap-1 ${
                   activePlatform === p.platform
                     ? 'bg-amber-500 text-slate-900 font-medium'
