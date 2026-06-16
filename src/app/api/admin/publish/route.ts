@@ -1,17 +1,18 @@
-// /api/admin/publish - 对外发布 (TG 频道)
-// v2.1.3 锁版: QQ 群机器人走 go-cqhttp / Mirai 框架, 独立项目, 不在 publish 端点
-// 这里只做 TG, v2.1.4 单独做 QQ
-// POST: { resource_id, channels: ['tg'], content?, image_url? }
+// /api/admin/publish - 对外发布双发 (TG + QQ 群)
+// v2.1.4: QQ 走 go-cqhttp 框架, 跑在 NAS 58080 端口
+// v2.1.3 锁版是 TG, v2.1.4 加 QQ 群机器人
+// POST: { resource_id, channels: ['qq', 'tg'], content?, image_url?, qq_group_id? }
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60; // TG 发图慢
+export const maxDuration = 60;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
-
 const TG_BOT_API = 'https://api.telegram.org/bot';
+// go-cqhttp 部署在 NAS, 走 HTTP API 调群消息
+const GOCQ_URL = process.env.GOCQ_URL || 'http://192.168.1.100:58080';
 
 function adminOnly(authHeader: string | null) {
   if (!authHeader?.startsWith('Bearer ')) return { error: '未登录', status: 401 };
@@ -22,14 +23,38 @@ function adminOnly(authHeader: string | null) {
   } catch { return { error: 'Token 无效', status: 401 }; }
 }
 
+// === 推送到 QQ 群 (go-cqhttp) ===
+// 端点: POST /send_group_msg
+// body: { group_id, message: [{ type: 'text', data: { text } }, { type: 'image', data: { file } }] }
+async function pushToQQGroup(title: string, content: string, groupId: string, imageUrl?: string): Promise<{ ok: boolean; msg: string; raw?: any }> {
+  if (!groupId) return { ok: false, msg: '缺 qq_group_id' };
+  const messageSeg = [];
+  messageSeg.push({ type: 'text', data: { text: `${title}\n\n${content}` } });
+  if (imageUrl) {
+    // go-cqhttp 支持 base64 / url / file, 直接传 url (但要公网可访问)
+    messageSeg.push({ type: 'image', data: { file: imageUrl } });
+  }
+  try {
+    const r = await fetch(`${GOCQ_URL}/send_group_msg`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ group_id: Number(groupId) || groupId, message: messageSeg }),
+      signal: AbortSignal.timeout(25000),
+    });
+    const j: any = await r.json().catch(() => ({}));
+    // go-cqhttp 响应: { retcode, data: { message_id }, msg }
+    const ok = j.retcode === 0 || j.status === 'ok';
+    return { ok, msg: j.msg || j.message || (ok ? 'OK' : 'send_group_msg 失败'), raw: j };
+  } catch (e: any) {
+    return { ok: false, msg: 'go-cqhttp 不可达: ' + e.message };
+  }
+}
+
 // === 推送到 TG 频道 ===
-// 走 bot sendMessage / sendPhoto, 频道 chat_id = TG_CHANNEL_CHAT_ID
 async function pushToTG(title: string, content: string, imageUrl?: string): Promise<{ ok: boolean; msg: string; raw?: any }> {
   const botToken = process.env.TG_BOT_TOKEN;
-  const chatId = process.env.TG_CHANNEL_CHAT_ID; // 频道 chat_id (e.g. -100xxxxxxxxxx)
-  if (!botToken || !chatId) {
-    return { ok: false, msg: 'TG 频道未配置 (缺 TG_BOT_TOKEN / TG_CHANNEL_CHAT_ID)' };
-  }
+  const chatId = process.env.TG_CHANNEL_CHAT_ID;
+  if (!botToken || !chatId) return { ok: false, msg: 'TG 频道未配置 (缺 TG_BOT_TOKEN / TG_CHANNEL_CHAT_ID)' };
   const text = `*${title}*\n\n${content}`;
   let url: string;
   let body: any;
@@ -55,23 +80,20 @@ async function pushToTG(title: string, content: string, imageUrl?: string): Prom
 }
 
 // === 端点 ===
-// GET 查发布历史
 export async function GET(req: NextRequest) {
   const auth = req.headers.get('authorization');
   const a = adminOnly(auth);
   if (a.error) return NextResponse.json({ error: a.error }, { status: a.status });
-
   const sql = neon(process.env.DATABASE_URL || '');
   const r = await sql`
-    SELECT id, resource_id, channels, tg_ok, content, error, published_by, created_at
-    FROM xx_publish_log
-    ORDER BY created_at DESC LIMIT 50
+    SELECT id, resource_id, channels, qq_ok, tg_ok, content, error, published_by, created_at
+    FROM xx_publish_log ORDER BY created_at DESC LIMIT 50
   ` as any[];
   return NextResponse.json({ ok: true, items: r, count: r.length });
 }
 
-// POST 推 TG
-// body: { resource_id, channels: ['tg'], content?, image_url? }
+// POST 推双发
+// body: { resource_id, channels: ['qq', 'tg'], qq_group_id?, content?, image_url? }
 export async function POST(req: NextRequest) {
   const auth = req.headers.get('authorization');
   const a = adminOnly(auth);
@@ -83,10 +105,11 @@ export async function POST(req: NextRequest) {
   const channels: string[] = Array.isArray(body.channels) ? body.channels : [];
   const customContent = body.content;
   const imageUrl = body.image_url;
+  const qqGroupId = String(body.qq_group_id || process.env.QQ_DEFAULT_GROUP_ID || '');
   if (!resourceId) return NextResponse.json({ error: '缺少 resource_id' }, { status: 400 });
   if (!channels.length) return NextResponse.json({ error: '请选择至少一个发布渠道' }, { status: 400 });
-  if (!channels.includes('tg')) {
-    return NextResponse.json({ error: 'v2.1.3 阶段仅支持 TG 频道, QQ 群机器人 v2.1.4 单独做' }, { status: 400 });
+  if (channels.includes('qq') && !qqGroupId) {
+    return NextResponse.json({ error: '请提供 qq_group_id 或在 env 配 QQ_DEFAULT_GROUP_ID' }, { status: 400 });
   }
 
   const sql = neon(process.env.DATABASE_URL || '');
@@ -94,24 +117,29 @@ export async function POST(req: NextRequest) {
   if (!rs[0]) return NextResponse.json({ error: '资源不存在' }, { status: 404 });
   const r = rs[0];
 
-  // 组装发布内容
   const title = `🎬 ${r.name}`;
   const content = customContent || `${r.description || '泽泽妈妈资源'}\n\n👉 查看详情: https://zzmm-search.cc.cd/resources/${r.id}`;
   const img = imageUrl || r.poster_url;
 
-  // 推 TG
-  const tgResult = await pushToTG(title, content, img);
-  const tgOk = tgResult.ok;
-  const error = tgOk ? '' : `[tg] ${tgResult.msg}`;
+  // 并行双发
+  const tasks: Promise<{ ch: string; ok: boolean; msg: string }>[] = [];
+  if (channels.includes('qq')) tasks.push(pushToQQGroup(title, content, qqGroupId, img).then(x => ({ ch: 'qq', ok: x.ok, msg: x.msg })));
+  if (channels.includes('tg')) tasks.push(pushToTG(title, content, img).then(x => ({ ch: 'tg', ok: x.ok, msg: x.msg })));
+  const results = await Promise.all(tasks);
 
-  // 写日志
+  const qqR = results.find(x => x.ch === 'qq');
+  const tgR = results.find(x => x.ch === 'tg');
+  const qqOk = qqR?.ok || false;
+  const tgOk = tgR?.ok || false;
+  const errors = results.filter(x => !x.ok).map(x => `[${x.ch}] ${x.msg}`).join('; ');
+
   try {
     await sql`
       INSERT INTO xx_publish_log (
-        resource_id, channels, tg_ok, content, error, published_by, created_at
+        resource_id, channels, qq_ok, tg_ok, content, error, published_by, created_at
       ) VALUES (
-        ${resourceId}, ${channels.join(',')}, ${tgOk}, ${content.slice(0, 1000)},
-        ${error.slice(0, 500)}, ${userId}, NOW()
+        ${resourceId}, ${channels.join(',')}, ${qqOk}, ${tgOk}, ${content.slice(0, 1000)},
+        ${errors.slice(0, 500)}, ${userId}, NOW()
       )
     `;
   } catch (e: any) {
@@ -119,9 +147,9 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({
-    ok: tgOk,
-    channels: [{ channel: 'tg', ok: tgOk, msg: tgResult.msg }],
-    tg_ok: tgOk,
-    message: tgOk ? '发布成功' : error,
+    ok: qqOk || tgOk,
+    channels: results.map(x => ({ channel: x.ch, ok: x.ok, msg: x.msg })),
+    qq_ok: qqOk, tg_ok: tgOk,
+    message: errors || '发布成功',
   });
 }
