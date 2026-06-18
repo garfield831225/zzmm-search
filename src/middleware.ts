@@ -76,6 +76,11 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // v2.1.3 悬赏专区 API (免登录浏览, 操作要登录)
+  if (pathname.startsWith('/api/bounty/list') || pathname === '/bounty') {
+    return NextResponse.next();
+  }
+
   // 检查登录 cookie
   const token = request.cookies.get('zzmm_token')?.value ||
                 request.cookies.get('token')?.value;
