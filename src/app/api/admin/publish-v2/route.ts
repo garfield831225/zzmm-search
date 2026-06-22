@@ -82,6 +82,16 @@ async function pushToTG(title: string, content: string, imageUrl?: string): Prom
 
 // === 端点 ===
 export async function GET(req: NextRequest) {
+  // 支持 GET 触发 publish (绕过 Vercel POST cache)
+  // GET ?publish=1&resource_id=X&channels=tg
+  if (req.nextUrl.searchParams.get('publish') === '1') {
+    return handlePublish(req, {
+      resource_id: Number(req.nextUrl.searchParams.get('resource_id')),
+      channels: (req.nextUrl.searchParams.get('channels') || 'tg').split(','),
+      content: req.nextUrl.searchParams.get('content') || undefined,
+    });
+  }
+  // 查发布历史
   const auth = req.headers.get('authorization');
   const a = adminOnly(auth);
   if (a.error) return NextResponse.json({ error: a.error }, { status: a.status });
@@ -96,12 +106,18 @@ export async function GET(req: NextRequest) {
 // POST 推双发
 // body: { resource_id, channels: ['qq', 'tg'], qq_group_id?, content?, image_url? }
 export async function POST(req: NextRequest) {
+  return handlePublish(req);
+}
+
+// GET publish via query string (绕过 Vercel POST cache)
+// GET ?publish=1&resource_id=X&channels=tg
+async function handlePublish(req: NextRequest, bodyOverride?: any) {
   const auth = req.headers.get('authorization');
   const a = adminOnly(auth);
   if (a.error) return NextResponse.json({ error: a.error }, { status: a.status });
   const userId = Number(a.payload.id);
 
-  const body = await req.json().catch(() => ({}));
+  const body = bodyOverride || await req.json().catch(() => ({}));
   const resourceId = body.resource_id;
   const channels: string[] = Array.isArray(body.channels) ? body.channels : [];
   const customContent = body.content;
