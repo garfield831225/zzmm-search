@@ -112,6 +112,7 @@ export async function POST(req: NextRequest) {
 // GET publish via query string (绕过 Vercel POST cache)
 // GET ?publish=1&resource_id=X&channels=tg
 async function handlePublish(req: NextRequest, bodyOverride?: any) {
+  try {
   const auth = req.headers.get('authorization');
   const a = adminOnly(auth);
   if (a.error) return NextResponse.json({ error: a.error }, { status: a.status });
@@ -169,4 +170,8 @@ async function handlePublish(req: NextRequest, bodyOverride?: any) {
     qq_ok: qqOk, tg_ok: tgOk,
     message: errors || '发布成功',
   });
+  } catch (e: any) {
+    console.error('[publish-v2] error:', e.message, e.stack);
+    return NextResponse.json({ error: e.message, stack: e.stack?.slice(0, 500) }, { status: 500 });
+  }
 }
