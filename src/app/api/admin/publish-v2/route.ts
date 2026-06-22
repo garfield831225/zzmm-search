@@ -85,7 +85,7 @@ export async function GET(req: NextRequest) {
   // 支持 GET 触发 publish (绕过 Vercel POST cache)
   // GET ?publish=1&resource_id=X&channels=tg
   if (req.nextUrl.searchParams.get('publish') === '1') {
-    return handlePublish(req, {
+    return await handlePublish(req, {
       resource_id: Number(req.nextUrl.searchParams.get('resource_id')),
       channels: (req.nextUrl.searchParams.get('channels') || 'tg').split(','),
       content: req.nextUrl.searchParams.get('content') || undefined,
