@@ -131,13 +131,13 @@ async function handlePublish(req: NextRequest, bodyOverride?: any) {
   }
 
   const sql = neon(process.env.DATABASE_URL || '');
-  const rs = await sql`SELECT id, name, description, poster_url FROM xx_resources WHERE id = ${resourceId} LIMIT 1` as any[];
+  const rs = await sql`SELECT id, name, link, tmdb_id, category FROM xx_resources WHERE id = ${resourceId} LIMIT 1` as any[];
   if (!rs[0]) return NextResponse.json({ error: '资源不存在' }, { status: 404 });
   const r = rs[0];
 
   const title = `🎬 ${r.name}`;
-  const content = customContent || `${r.description || '泽泽妈妈资源'}\n\n👉 查看详情: https://zzmm-search.cc.cd/resources/${r.id}`;
-  const img = imageUrl || r.poster_url;
+  const content = customContent || `${r.name}${r.category ? ' [' + r.category + ']' : ''}\n\n👉 查看详情: https://zzmm-search.cc.cd/resources/${r.id}`;
+  const img = imageUrl; // xx_resources 没有 poster_url, 用传入的或不要图
 
   // 并行双发
   const tasks: Promise<{ ch: string; ok: boolean; msg: string }>[] = [];
