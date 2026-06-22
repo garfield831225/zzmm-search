@@ -44,7 +44,7 @@ export default function PublishPage() {
   const fetchLogs = async () => {
     setLoadingLogs(true);
     try {
-      const r = await fetch('/api/admin/publish', {
+      const r = await fetch('/api/admin/publish-v2', {
         headers: { 'Authorization': 'Bearer ' + token }
       });
       const j = await r.json();
@@ -73,7 +73,7 @@ export default function PublishPage() {
     setPublishing(true);
     setResult(null);
     try {
-      const r = await fetch('/api/admin/publish', {
+      const r = await fetch('/api/admin/publish-v2', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
         body: JSON.stringify({
