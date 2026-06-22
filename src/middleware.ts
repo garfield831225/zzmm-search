@@ -81,6 +81,11 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // v2.1.4 publish-v2 (走 Bearer token 鉴权, 跳过 cookie 检查)
+  if (pathname.startsWith('/api/admin/publish') || pathname.startsWith('/api/admin/publish-v2')) {
+    return NextResponse.next();
+  }
+
   // 检查登录 cookie
   const token = request.cookies.get('zzmm_token')?.value ||
                 request.cookies.get('token')?.value;
