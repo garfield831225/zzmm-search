@@ -7,6 +7,7 @@ import { neon } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 export const maxDuration = 60;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
