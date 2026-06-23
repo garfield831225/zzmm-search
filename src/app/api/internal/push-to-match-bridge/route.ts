@@ -44,11 +44,11 @@ export async function POST(req: NextRequest) {
 
   const sql = neon(process.env.DATABASE_URL || '');
 
-  // 拿已匹配的资源 (tmdb_id 不为空)
+  // 拿已匹配的资源 (tmdb_id 不为空, tmdb_id 是 text)
   const r = await sql`
     SELECT id, name, category, tmdb_id
     FROM xx_resources
-    WHERE tmdb_id IS NOT NULL AND tmdb_id > 0
+    WHERE tmdb_id IS NOT NULL AND LENGTH(tmdb_id) > 0
     ORDER BY id
     LIMIT ${batchSize} OFFSET ${offset}
   ` as any[];
@@ -57,11 +57,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, inserted: 0, skipped: 0, error_count: 0, message: '没有可推的资源', offset });
   }
 
-  // 组装 match-bridge 期望的格式
+  // 组装 match-bridge 期望的格式 (tmdb_id 是 text -> 转 int)
   const matches = r.map((it: any) => ({
     name: it.name,
     category: VALID_CATEGORIES.has(it.category) ? it.category : 'movie',
-    tmdb_id: it.tmdb_id,
+    tmdb_id: Number(it.tmdb_id) || 0,
     tmdb_type: it.category === 'tv' || it.category === 'anime' || it.category === 'variety' ? 'tv' : 'movie',
     raw: { xx_id: it.id },
   }));
