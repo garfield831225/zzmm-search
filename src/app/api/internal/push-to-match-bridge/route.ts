@@ -86,6 +86,7 @@ export async function POST(req: NextRequest) {
     next_offset: offset + r.length,
     force,
     bridge_resp: j,
+    sample_errors: (j.errors || []).slice(0, 5), // 前 5 个错误样例
   });
 }
 
