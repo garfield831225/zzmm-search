@@ -86,6 +86,11 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // v2.1.4 push-to-match-bridge (走 Bearer admin token 鉴权)
+  if (pathname.startsWith('/api/internal/push-to-match-bridge')) {
+    return NextResponse.next();
+  }
+
   // 检查登录 cookie
   const token = request.cookies.get('zzmm_token')?.value ||
                 request.cookies.get('token')?.value;
