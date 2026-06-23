@@ -44,13 +44,12 @@ export async function POST(req: NextRequest) {
 
   const sql = neon(process.env.DATABASE_URL || '');
 
-  // 拿已匹配的资源 (tmdb_id 必须是纯数字, 过滤 NOMATCH 等)
+  // 拿已匹配的资源 (应用层过滤 NOMATCH 等非数字)
   const r = await sql`
     SELECT id, name, category, tmdb_id
     FROM xx_resources
     WHERE tmdb_id IS NOT NULL
-      AND tmdb_id ~ '^[0-9]+$'
-      AND LENGTH(tmdb_id) > 0
+      AND LENGTH(tmdb_id) BETWEEN 1 AND 10
     ORDER BY id
     LIMIT ${batchSize} OFFSET ${offset}
   ` as any[];
@@ -59,11 +58,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, inserted: 0, skipped: 0, error_count: 0, message: '没有可推的资源', offset });
   }
 
-  // 组装 match-bridge 期望的格式 (tmdb_id 是 text -> 转 int)
-  const matches = r.map((it: any) => ({
+  // 应用层过滤: tmdb_id 必须是纯数字
+  const validItems = r.filter((it: any) => /^[0-9]+$/.test(String(it.tmdb_id || '')));
+
+  if (!validItems.length) {
+    return NextResponse.json({
+      ok: true, sent: 0, offset,
+      next_offset: offset + r.length,
+      message: '本批全是 NOMATCH 跳过',
+    });
+  }
+
+  // 组装 match-bridge 期望的格式
+  const matches = validItems.map((it: any) => ({
     name: it.name,
     category: VALID_CATEGORIES.has(it.category) ? it.category : 'movie',
-    tmdb_id: Number(it.tmdb_id) || 0,
+    tmdb_id: Number(it.tmdb_id),
     tmdb_type: it.category === 'tv' || it.category === 'anime' || it.category === 'variety' ? 'tv' : 'movie',
     raw: { xx_id: it.id },
   }));
@@ -79,16 +89,19 @@ export async function POST(req: NextRequest) {
     body: JSON.stringify({ source: 'zzmm-search', matches }),
     signal: AbortSignal.timeout(55000),
   });
-  const j = await resp.json().catch(() => ({}));
+  const respText = await resp.text();
+  let j: any = {};
+  try { j = JSON.parse(respText); } catch { j = { ok: false, raw: respText.slice(0, 500) }; }
 
   return NextResponse.json({
     ok: j.ok,
-    sent: r.length,
+    sent: matches.length,
+    skipped_in_batch: r.length - validItems.length, // 跳过的 NOMATCH
     offset,
-    next_offset: offset + r.length,
+    next_offset: offset + r.length, // offset 按 SQL 走
     force,
     bridge_resp: j,
-    sample_errors: (j.errors || []).slice(0, 5), // 前 5 个错误样例
+    sample_errors: (j.errors || []).slice(0, 5),
   });
 }
 
