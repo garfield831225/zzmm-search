@@ -44,11 +44,13 @@ export async function POST(req: NextRequest) {
 
   const sql = neon(process.env.DATABASE_URL || '');
 
-  // 拿已匹配的资源 (tmdb_id 不为空, tmdb_id 是 text)
+  // 拿已匹配的资源 (tmdb_id 必须是纯数字, 过滤 NOMATCH 等)
   const r = await sql`
     SELECT id, name, category, tmdb_id
     FROM xx_resources
-    WHERE tmdb_id IS NOT NULL AND LENGTH(tmdb_id) > 0
+    WHERE tmdb_id IS NOT NULL
+      AND tmdb_id ~ '^[0-9]+$'
+      AND LENGTH(tmdb_id) > 0
     ORDER BY id
     LIMIT ${batchSize} OFFSET ${offset}
   ` as any[];
