@@ -1,75 +1,72 @@
-import { NextResponse } from 'next/server';
+// /api/admin/stats - admin 统计
+// 鉴权: Bearer JWT (adminOnly) 或 key=JWT_SECRET (兼容旧调用)
+import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
+import jwt from 'jsonwebtoken';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
-export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const key = url.searchParams.get('key');
-  const batchSize = Math.min(200, parseInt(url.searchParams.get('batch') || '50'));
+const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
-  if (key !== (process.env.JWT_SECRET || 'cLWhs2015')) {
-    return NextResponse.json({ error: '未授权' }, { status: 401 });
+function adminOnly(authHeader: string | null) {
+  if (!authHeader?.startsWith('Bearer ')) return { error: '未登录', status: 401 };
+  try {
+    const payload = jwt.verify(authHeader.replace('Bearer ', ''), JWT_SECRET) as any;
+    if (payload.group !== 'admin') return { error: '权限不足', status: 403 };
+    return { payload };
+  } catch { return { error: 'Token 无效', status: 401 }; }
+}
+
+export async function GET(req: NextRequest) {
+  // 优先 Bearer 鉴权, 兼容 ?key=
+  let authed = false;
+  const a = adminOnly(req.headers.get('authorization'));
+  if (!a.error) authed = true;
+
+  if (!authed) {
+    const url = new URL(req.url);
+    const key = url.searchParams.get('key');
+    if (key === JWT_SECRET) authed = true;
   }
+  if (!authed) return NextResponse.json({ error: '未授权' }, { status: 401 });
+
+  const url = new URL(req.url);
+  const batchSize = Math.min(200, parseInt(url.searchParams.get('batch') || '50'));
 
   const sql = neon(process.env.DATABASE_URL || '');
 
   try {
-    // 清理旧 tmdb 缓存（7天前）
     const cleaned = await sql`DELETE FROM xx_tmdb_cache WHERE cached_at < NOW() - INTERVAL '7 days'`.catch(() => []);
-    console.log('cleaned old tmdb cache');
 
-    // 统计各分类待匹配数量（包含 NULL/空/NOMATCH/GARBLED）
-    const stats = await sql(`
+    const stats = await sql`
       SELECT category, COUNT(*) as cnt FROM xx_resources
       WHERE (tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id IN ('NOMATCH', 'GARBLED'))
         AND status = 'active' AND name IS NOT NULL AND LENGTH(name) > 2
       GROUP BY category ORDER BY cnt DESC
-    `) as any[];
+    ` as any[];
 
-    const total = await sql(`
+    const total = await sql`
       SELECT COUNT(*) as cnt FROM xx_resources
       WHERE (tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id IN ('NOMATCH', 'GARBLED'))
-        AND status = 'active'
-    `) as any[];
+        AND status = 'active' AND name IS NOT NULL AND LENGTH(name) > 2
+    ` as any[];
 
-    // 已匹配 = 有真实 tmdb_id（排除占位符）
-    const searchTotal = await sql(`
+    const matchedTotal = await sql`
       SELECT COUNT(*) as cnt FROM xx_resources
-      WHERE tmdb_id IS NOT NULL AND tmdb_id != '' AND tmdb_id NOT IN ('NOMATCH', 'GARBLED')
+      WHERE tmdb_id IS NOT NULL AND tmdb_id ~ '^[0-9]+$'
         AND status = 'active'
-    `) as any[];
+    ` as any[];
 
-    // 资源来源统计
-    const sourceStats = await sql(`
-      SELECT source, COUNT(*) as cnt FROM xx_resources
-      WHERE status = 'active' GROUP BY source ORDER BY cnt DESC
-    `) as any[];
-
-    // 最新导入的资源（未匹配）
-    const recent = await sql(`
-      SELECT id, name, category, source, created_at FROM xx_resources
-      WHERE (tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id IN ('NOMATCH', 'GARBLED'))
-        AND status = 'active'
-      ORDER BY created_at DESC LIMIT 10
-    `) as any[];
+    const allTotal = await sql`SELECT COUNT(*) as cnt FROM xx_resources WHERE status = 'active'` as any[];
 
     return NextResponse.json({
-      totalResources: parseInt((total[0] as any)?.cnt || '0'),
-      matchedResources: parseInt((searchTotal[0] as any)?.cnt || '0'),
-      pendingByCategory: (stats || []).map((r: any) => ({ category: (r as any).category, count: parseInt((r as any).cnt || '0') })),
-      bySource: (sourceStats || []).map((r: any) => ({ source: (r as any).source, count: parseInt((r as any).cnt || '0') })),
-      recentUnmatched: (recent || []).map((r: any) => ({
-        id: (r as any).id, name: (r as any).name, category: (r as any).category, source: (r as any).source, created_at: (r as any).created_at
-      })),
-      // 下载统计
-      downloadStats: {
-        todayDownloads: parseInt((await sql`SELECT COUNT(*) as cnt FROM xx_download_logs WHERE DATE(created_at) = CURRENT_DATE` as any[])[0]?.cnt || '0'),
-        totalDownloads: parseInt((await sql`SELECT COUNT(*) as cnt FROM xx_download_logs` as any[])[0]?.cnt || '0'),
-        totalUsers: parseInt((await sql`SELECT COUNT(*) as cnt FROM xx_users` as any[])[0]?.cnt || '0'),
-        activeUsers: parseInt((await sql`SELECT COUNT(DISTINCT user_id) as cnt FROM xx_download_logs WHERE DATE(created_at) = CURRENT_DATE` as any[])[0]?.cnt || '0'),
-      },
-      message: 'stats ok - all routes verified',
+      ok: true,
+      cleaned: (cleaned as any).count || 0,
+      by_category: stats.map((s: any) => ({ category: s.category, count: Number(s.cnt) })),
+      total_pending: Number(total[0]?.cnt || 0),
+      total_matched: Number(matchedTotal[0]?.cnt || 0),
+      total_active: Number(allTotal[0]?.cnt || 0),
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });

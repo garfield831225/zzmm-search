@@ -154,35 +154,36 @@ export async function GET(req: NextRequest) {
   const offset = (page - 1) * pageSize;
   const sql = neon(process.env.DATABASE_URL || '');
 
-  const statusCond = statusFilter === 'used' ? sql`AND ac.is_used = true` : statusFilter === 'unused' ? sql`AND ac.is_used = false` : sql`AND 1=1`;
+  // v2.1.4 修复: 全部用字符串条件, 不混合 sql tag 和三元
+  const conds: string[] = ['1=1'];
+  const params: any[] = [];
+  if (codeType) { conds.push(`ac.code_type = $${params.length + 1}`); params.push(codeType); }
+  if (targetId) { conds.push(`ac.target_resource_id = $${params.length + 1}`); params.push(parseInt(targetId)); }
+  if (channelFilter) { conds.push(`ac.channel = $${params.length + 1}`); params.push(channelFilter); }
+  if (batchFilter) { conds.push(`ac.batch_id = $${params.length + 1}`); params.push(batchFilter); }
+  if (statusFilter === 'used') conds.push('ac.is_used = true');
+  else if (statusFilter === 'unused') conds.push('ac.is_used = false');
+  const where = conds.join(' AND ');
 
-  const rows = await sql`
-    SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group,
-           ac.target_resource_id, ac.price_at_issue, ac.is_used, ac.used_by, ac.used_at,
-           ac.created_at, ac.channel, ac.batch_id,
-           ac.sent_to_customer, ac.sent_at, ac.sent_note,
-           r.name as target_resource_name, r.category as target_resource_category
-    FROM xx_activation_codes ac
-    LEFT JOIN xx_resources r ON ac.target_resource_id = r.id
-    WHERE 1=1
-      ${codeType ? sql`AND ac.code_type = ${codeType}` : sql`AND 1=1`}
-      ${targetId ? sql`AND ac.target_resource_id = ${parseInt(targetId)}` : sql`AND 1=1`}
-      ${channelFilter ? sql`AND ac.channel = ${channelFilter}` : sql`AND 1=1`}
-      ${batchFilter ? sql`AND ac.batch_id = ${batchFilter}` : sql`AND 1=1`}
-      ${statusCond}
-    ORDER BY ac.id DESC
-    LIMIT ${pageSize} OFFSET ${offset}
-  `;
+  // 用 raw SQL (Neon 0.10+ 支持 sql.query(sql, params))
+  const rows = await (sql as any).query(
+    `SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group,
+            ac.target_resource_id, ac.price_at_issue, ac.is_used, ac.used_by, ac.used_at,
+            ac.created_at, ac.channel, ac.batch_id,
+            ac.sent_to_customer, ac.sent_at, ac.sent_note,
+            r.name as target_resource_name, r.category as target_resource_category
+     FROM xx_activation_codes ac
+     LEFT JOIN xx_resources r ON ac.target_resource_id = r.id
+     WHERE ${where}
+     ORDER BY ac.id DESC
+     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, pageSize, offset]
+  ) as any[];
 
-  const totalCnt = await sql`
-    SELECT COUNT(*)::int as cnt FROM xx_activation_codes ac
-    WHERE 1=1
-      ${codeType ? sql`AND ac.code_type = ${codeType}` : sql`AND 1=1`}
-      ${targetId ? sql`AND ac.target_resource_id = ${parseInt(targetId)}` : sql`AND 1=1`}
-      ${channelFilter ? sql`AND ac.channel = ${channelFilter}` : sql`AND 1=1`}
-      ${batchFilter ? sql`AND ac.batch_id = ${batchFilter}` : sql`AND 1=1`}
-      ${statusCond}
-  `;
+  const totalCnt = await (sql as any).query(
+    `SELECT COUNT(*)::int as cnt FROM xx_activation_codes ac WHERE ${where}`,
+    params
+  ) as any[];
 
   // 顺便聚合批次统计
   const batchStats = await sql`

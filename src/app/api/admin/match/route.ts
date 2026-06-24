@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300;
+export const revalidate = 0;
+export const maxDuration = 60; // Vercel hobby 60s, 客户端分批调
 
 const TMDB_KEYS = [
   '7985342d5961e9ee3d5ef6d969c1b8dd',

@@ -185,33 +185,90 @@ export default function AdminPage() {
       <div className="max-w-6xl mx-auto p-6">
         <h1 className="text-2xl font-bold mb-6">🎛️ 管理后台</h1>
 
-        {/* Tabs */}
-        <div className="flex gap-2 mb-6 flex-wrap">
-          <button onClick={() => setTab('stats')}
-            className={`px-4 py-2 rounded-lg text-sm ${tab === 'stats' ? 'bg-violet-600' : 'bg-white/5 hover:bg-white/10'}`}>
-            📊 数据
-          </button>
-          <button onClick={() => setTab('users')}
-            className={`px-4 py-2 rounded-lg text-sm ${tab === 'users' ? 'bg-violet-600' : 'bg-white/5 hover:bg-white/10'}`}>
-            👥 用户
-          </button>
-          <button onClick={() => setTab('codes')}
-            className={`px-4 py-2 rounded-lg text-sm ${tab === 'codes' ? 'bg-violet-600' : 'bg-white/5 hover:bg-white/10'}`}>
-            🎫 卡密
-          </button>
-          <a href="/admin/import" className="px-4 py-2 rounded-lg text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
-            📥 导入
-          </a>
-          <a href="/admin/pay-config" className="px-4 py-2 rounded-lg text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
-            💰 付费配置
-          </a>
-          <a href="/admin/publish" className="px-4 py-2 rounded-lg text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
-            📢 对外发布
-          </a>
-          <button onClick={() => setTab('match')}
-            className={`px-4 py-2 rounded-lg text-sm ${tab === 'match' ? 'bg-violet-600' : 'bg-white/5 hover:bg-white/10'}`}>
-            🔍 匹配
-          </button>
+        {/* Tabs - 5 大类管理菜单 */}
+        <div className="mb-6 space-y-3">
+          {/* 📊 概览 */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-white/40 mr-2 min-w-[60px]">📊 概览</span>
+            <button onClick={() => setTab('stats')}
+              className={`px-3 py-1.5 rounded text-sm ${tab === 'stats' ? 'bg-violet-600' : 'bg-white/5 hover:bg-white/10'}`}>
+              数据 Dashboard
+            </button>
+            <a href="/admin/stats-dashboard" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+              详细统计
+            </a>
+          </div>
+
+          {/* 👥 用户 */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-white/40 mr-2 min-w-[60px]">👥 用户</span>
+            <button onClick={() => setTab('users')}
+              className={`px-3 py-1.5 rounded text-sm ${tab === 'users' ? 'bg-violet-600' : 'bg-white/5 hover:bg-white/10'}`}>
+              用户管理
+            </button>
+            <button onClick={() => setTab('codes')}
+              className={`px-3 py-1.5 rounded text-sm ${tab === 'codes' ? 'bg-violet-600' : 'bg-white/5 hover:bg-white/10'}`}>
+              卡密生成
+            </button>
+            <a href="/bounty" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+              悬赏专区
+            </a>
+            <a href="/admin/blacklist" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+              黑名单
+            </a>
+          </div>
+
+          {/* 📥 资源 */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-white/40 mr-2 min-w-[60px]">📥 资源</span>
+            <a href="/admin/import" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+              导入
+            </a>
+            <button onClick={() => setTab('match')}
+              className={`px-3 py-1.5 rounded text-sm ${tab === 'match' ? 'bg-violet-600' : 'bg-white/5 hover:bg-white/10'}`}>
+              TMDB 匹配
+            </button>
+            <a href="/admin/match-manage" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+              匹配管理
+            </a>
+            <a href="/admin/games" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+              游戏管理
+            </a>
+            <a href="/games" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+              游戏中心
+            </a>
+          </div>
+
+          {/* 📢 对外 */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-white/40 mr-2 min-w-[60px]">📢 对外</span>
+            <a href="/admin/publish" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+              发布到 TG/QQ
+            </a>
+            <a href="/admin/tg-organize" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+              TG 群整理
+            </a>
+            <a href="/admin/publish-v2" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+              发布历史
+            </a>
+          </div>
+
+          {/* ⚙️ 系统 */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-white/40 mr-2 min-w-[60px]">⚙️ 系统</span>
+            <a href="/admin/pay-config" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+              付费配置
+            </a>
+            <a href="/admin/setup" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+              初始化
+            </a>
+            <a href="/admin/match" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+              匹配任务
+            </a>
+            <a href="/admin/codes" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+              激活码管理
+            </a>
+          </div>
         </div>
 
         {/* Stats */}
