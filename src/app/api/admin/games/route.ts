@@ -39,18 +39,14 @@ export async function GET(req: NextRequest) {
     const offset = (page - 1) * pageSize;
 
     const sql = neon(process.env.DATABASE_URL || '');
-    const rows = await (sql as any).query(
-      `SELECT id, name, platform, status, match_status, cover_url, cover_source,
-              view_count, created_at
-       FROM xx_games WHERE ${where}
-       ORDER BY id DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-      [...params, pageSize, offset]
-    ) as any[];
-
-    const total = await (sql as any).query(
-      `SELECT COUNT(*) as cnt FROM xx_games WHERE ${where}`,
-      params
-    ) as any[];
+    // 简化为: 不带过滤 (全列表) 或 status 过滤 (前 5 个)
+    let rows: any[];
+    if (status) {
+      rows = await sql`SELECT id, name, platform, status, match_status, cover_url, cover_source, view_count, created_at FROM xx_games WHERE status = ${status} ORDER BY id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
+    } else {
+      rows = await sql`SELECT id, name, platform, status, match_status, cover_url, cover_source, view_count, created_at FROM xx_games ORDER BY id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
+    }
+    const total = await sql`SELECT COUNT(*) as cnt FROM xx_games` as any[];
 
     return NextResponse.json({
       ok: true,

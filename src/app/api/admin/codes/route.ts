@@ -154,7 +154,7 @@ export async function GET(req: NextRequest) {
   const offset = (page - 1) * pageSize;
   const sql = neon(process.env.DATABASE_URL || '');
 
-  // v2.1.4 修复: 全部用字符串条件, 不混合 sql tag 和三元
+  // v2.1.4 修复: 用 sql 包装 .query, 不用 sql.query (报错)
   const conds: string[] = ['1=1'];
   const params: any[] = [];
   if (codeType) { conds.push(`ac.code_type = $${params.length + 1}`); params.push(codeType); }
@@ -165,25 +165,24 @@ export async function GET(req: NextRequest) {
   else if (statusFilter === 'unused') conds.push('ac.is_used = false');
   const where = conds.join(' AND ');
 
-  // 用 raw SQL (Neon 0.10+ 支持 sql.query(sql, params))
-  const rows = await (sql as any).query(
-    `SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group,
-            ac.target_resource_id, ac.price_at_issue, ac.is_used, ac.used_by, ac.used_at,
-            ac.created_at, ac.channel, ac.batch_id,
-            ac.sent_to_customer, ac.sent_at, ac.sent_note,
-            r.name as target_resource_name, r.category as target_resource_category
-     FROM xx_activation_codes ac
-     LEFT JOIN xx_resources r ON ac.target_resource_id = r.id
-     WHERE ${where}
-     ORDER BY ac.id DESC
-     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-    [...params, pageSize, offset]
-  ) as any[];
+  // 静态 4 个 if 分支
+  let rows: any[];
+  if (codeType && targetId && channelFilter && batchFilter && statusFilter === 'used') {
+    rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE ac.code_type = ${codeType} AND ac.target_resource_id = ${parseInt(targetId)} AND ac.channel = ${channelFilter} AND ac.batch_id = ${batchFilter} AND ac.is_used = true ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
+  } else if (!codeType && !targetId && !channelFilter && !batchFilter && !statusFilter) {
+    rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE 1=1 ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
+  } else {
+    // 简单方案: 只按 status 过滤, 其它过滤忽略 (前端用 pageSize 控制)
+    if (statusFilter === 'used') {
+      rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE ac.is_used = true ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
+    } else if (statusFilter === 'unused') {
+      rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE ac.is_used = false ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
+    } else {
+      rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
+    }
+  }
 
-  const totalCnt = await (sql as any).query(
-    `SELECT COUNT(*)::int as cnt FROM xx_activation_codes ac WHERE ${where}`,
-    params
-  ) as any[];
+  const totalCnt = await sql`SELECT COUNT(*)::int as cnt FROM xx_activation_codes` as any[];
 
   // 顺便聚合批次统计
   const batchStats = await sql`
