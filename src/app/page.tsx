@@ -60,6 +60,7 @@ interface ResourceItem {
   payType?: 'free' | 'code';
   codePrice?: number;
   unlocked?: boolean;
+  lumenCost?: number;  // 2026-06-25 单条定价流明
 }
 
 interface SearchResponse {
@@ -111,6 +112,8 @@ export default function HomePage() {
   const [unlockCode, setUnlockCode] = useState('');
   const [unlockLoading, setUnlockLoading] = useState(false);
   const [unlockError, setUnlockError] = useState('');
+  const [lumenBalance, setLumenBalance] = useState<number>(0);  // 2026-06-25
+  const [unlockMode, setUnlockMode] = useState<'code' | 'lumen'>('lumen');  // 默认走流明
   let toastCounter = 0;
   let copyToastCounter = 0;
 
@@ -222,9 +225,10 @@ export default function HomePage() {
 
   const handleLogout = () => { localStorage.removeItem('token'); localStorage.removeItem('user'); setUser(null); };
 
-  // 2026-06-03 单资源付费 - 解锁处理
+  // 2026-06-03 单资源付费 - 解锁处理 (2026-06-25 + 流明模式)
   const handleUnlock = async () => {
-    if (!unlockItem || !unlockCode.trim()) {
+    if (!unlockItem) return;
+    if (unlockMode === 'code' && !unlockCode.trim()) {
       setUnlockError('请输入激活码');
       return;
     }
@@ -236,10 +240,13 @@ export default function HomePage() {
     setUnlockError('');
     try {
       const token = localStorage.getItem('token') || '';
+      const body: any = { resource_id: unlockItem.id };
+      if (unlockMode === 'code') body.code = unlockCode.trim();
+      else body.use_lumen = true;
       const r = await fetch('/api/resources/unlock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ code: unlockCode.trim(), resource_id: unlockItem.id }),
+        body: JSON.stringify(body),
       });
       const data = await r.json();
       if (data.success) {
@@ -248,9 +255,10 @@ export default function HomePage() {
         if (selectedItem?.id === unlockItem.id) {
           setSelectedItem(prev => prev ? { ...prev, unlocked: true } : prev);
         }
+        if (typeof data.lumen_balance_after === 'number') setLumenBalance(data.lumen_balance_after);
         setUnlockItem(null);
         setUnlockCode('');
-        addToast('success', `🎉 解锁成功: ${data.resource.name}`);
+        addToast('success', `🎉 解锁成功: ${data.resource.name}${unlockMode === 'lumen' ? ` (消耗 ${data.lumen_cost} 流明)` : ''}`);
       } else {
         setUnlockError(data.error || '解锁失败');
       }
@@ -260,7 +268,7 @@ export default function HomePage() {
     setUnlockLoading(false);
   };
 
-  const openUnlock = (item: ResourceItem) => {
+  const openUnlock = async (item: ResourceItem) => {
     if (!user) {
       addToast('error', '请先登录');
       return;
@@ -268,6 +276,13 @@ export default function HomePage() {
     setUnlockItem(item);
     setUnlockCode('');
     setUnlockError('');
+    // 查询当前流明余额
+    try {
+      const token = localStorage.getItem('token') || '';
+      const r = await fetch('/api/user/balance', { headers: { Authorization: `Bearer ${token}` } });
+      const data = await r.json();
+      if (typeof data.balance === 'number') setLumenBalance(data.balance);
+    } catch {}
   };
 
   const handleItemClick = async (item: ResourceItem) => {
@@ -562,6 +577,11 @@ export default function HomePage() {
                       ✓ 已解锁
                     </span>
                   )}
+                  {item.payType === 'code' && (item.lumenCost ?? 1) > 0 && !item.unlocked && (
+                    <span className="px-2 py-0.5 bg-violet-500/80 text-white text-xs rounded font-medium">
+                      💎 {item.lumenCost ?? 1}
+                    </span>
+                  )}
                 </div>
 
                 {/* Overlay + Action */}
@@ -791,12 +811,12 @@ export default function HomePage() {
                         <div className="mt-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-xl">
                           <div className="flex items-center justify-between gap-3">
                             <div>
-                              <div className="text-sm font-medium text-yellow-300">🔒 此资源需要激活码</div>
-                              <div className="text-xs text-white/60 mt-1">起步价 ¥{selectedItem.codePrice || 0} · 8 位激活码</div>
+                              <div className="text-sm font-medium text-yellow-300">🔒 此资源需要激活码 / 流明</div>
+                              <div className="text-xs text-white/60 mt-1">¥{selectedItem.codePrice || 0} · 💎 {selectedItem.lumenCost ?? 1} 流明 · VIP 才能流明解锁</div>
                             </div>
                             <button onClick={() => openUnlock(selectedItem)}
                               className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-sm font-medium shrink-0">
-                              输入激活码
+                              解锁
                             </button>
                           </div>
                           <div className="text-xs text-white/40 mt-2">购买联系：HK 麦盘人微信 / 支付宝扫码</div>
@@ -941,26 +961,50 @@ export default function HomePage() {
             </div>
             <div className="mb-4">
               <div className="text-sm text-white/80 font-medium truncate">{unlockItem.name}</div>
-              <div className="flex items-center gap-2 mt-2">
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
                 <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-300 rounded text-xs">付费资源</span>
                 <span className="text-yellow-300 font-bold">¥{unlockItem.codePrice || 0}</span>
+                <span className="px-2 py-0.5 bg-violet-500/20 text-violet-300 rounded text-xs">💎 {unlockItem.lumenCost ?? 1} 流明</span>
                 <span className="text-xs text-white/40">{unlockItem.category} · #{unlockItem.id}</span>
               </div>
+              <div className="mt-3 px-3 py-2 bg-violet-500/10 border border-violet-500/20 rounded-lg flex items-center justify-between">
+                <span className="text-xs text-white/60">💎 我的流明余额</span>
+                <span className="text-violet-300 font-bold">{lumenBalance}</span>
+              </div>
+            </div>
+            <div className="flex border-b border-white/10 mb-3">
+              <button onClick={() => { setUnlockMode('lumen'); setUnlockError(''); }}
+                className={`px-4 py-2 text-sm ${unlockMode === 'lumen' ? 'text-violet-300 border-b-2 border-violet-400' : 'text-white/40'}`}>
+                💎 流明解锁
+              </button>
+              <button onClick={() => { setUnlockMode('code'); setUnlockError(''); }}
+                className={`px-4 py-2 text-sm ${unlockMode === 'code' ? 'text-yellow-300 border-b-2 border-yellow-400' : 'text-white/40'}`}>
+                🎫 激活码解锁
+              </button>
             </div>
             <div className="space-y-3">
-              <div>
-                <label className="block text-sm text-white/60 mb-1.5">激活码（8 位大小写字母数字）</label>
-                <input
-                  value={unlockCode}
-                  onChange={e => setUnlockCode(e.target.value.toUpperCase().slice(0, 8))}
-                  onKeyDown={e => e.key === 'Enter' && handleUnlock()}
-                  placeholder="如 A3B7X9K2"
-                  maxLength={8}
-                  className="w-full bg-black/40 border border-white/20 rounded-lg px-4 py-3 text-white font-mono text-lg tracking-widest uppercase placeholder-white/20"
-                  autoFocus
-                  disabled={unlockLoading}
-                />
-              </div>
+              {unlockMode === 'code' && (
+                <div>
+                  <label className="block text-sm text-white/60 mb-1.5">激活码（8 位大小写字母数字）</label>
+                  <input
+                    value={unlockCode}
+                    onChange={e => setUnlockCode(e.target.value.toUpperCase().slice(0, 8))}
+                    onKeyDown={e => e.key === 'Enter' && handleUnlock()}
+                    placeholder="如 A3B7X9K2"
+                    maxLength={8}
+                    className="w-full bg-black/40 border border-white/20 rounded-lg px-4 py-3 text-white font-mono text-lg tracking-widest uppercase placeholder-white/20"
+                    autoFocus
+                    disabled={unlockLoading}
+                  />
+                </div>
+              )}
+              {unlockMode === 'lumen' && (
+                <div className="px-3 py-2 bg-black/30 border border-white/10 rounded-lg text-sm text-white/70">
+                  <div className="flex justify-between mb-1"><span>消耗流明：</span><span className="text-violet-300 font-bold">{unlockItem.lumenCost ?? 1}</span></div>
+                  <div className="flex justify-between mb-1"><span>解锁后余额：</span><span className="text-white/80">{Math.max(0, lumenBalance - (unlockItem.lumenCost ?? 1))}</span></div>
+                  <div className="text-xs text-white/40 mt-1">需要 VIP 会员资格 + 足够流明</div>
+                </div>
+              )}
               {unlockError && (
                 <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
                   ✕ {unlockError}
@@ -970,13 +1014,13 @@ export default function HomePage() {
             <div className="flex gap-2 mt-6 justify-end">
               <button onClick={() => setUnlockItem(null)} disabled={unlockLoading}
                 className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm disabled:opacity-30">取消</button>
-              <button onClick={handleUnlock} disabled={unlockLoading || unlockCode.length !== 8}
-                className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-sm font-medium disabled:opacity-30">
-                {unlockLoading ? '解锁中...' : '🔓 解锁'}
+              <button onClick={handleUnlock} disabled={unlockLoading || (unlockMode === 'code' && unlockCode.length !== 8)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-30 ${unlockMode === 'lumen' ? 'bg-violet-600 hover:bg-violet-500' : 'bg-yellow-600 hover:bg-yellow-500'}`}>
+                {unlockLoading ? '解锁中...' : (unlockMode === 'lumen' ? '💎 流明解锁' : '🔓 解锁')}
               </button>
             </div>
             <div className="mt-4 text-xs text-white/40 text-center">
-              购买激活码联系：HK 麦盘人微信 / 支付宝扫码
+              没流明？<Link href="/activate" className="text-violet-300 hover:underline">兑换流明码</Link> · 需要激活码？<Link href="/activate" className="text-yellow-300 hover:underline">兑换 VIP 码</Link>
             </div>
           </div>
         </div>

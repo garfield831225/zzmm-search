@@ -14,6 +14,7 @@ interface Code {
   target_resource_id: number | null;
   target_resource_name: string | null;
   price_at_issue: number;
+  lumen_amount: number;
   is_used: boolean;
   used_by: string | null;
   used_at: string | null;
@@ -39,6 +40,8 @@ const VIP_TEMPLATES = [
   { plan: 'vip_180d',    label: '半年',    emoji: '🎟️', price: 58,  color: 'from-violet-500 to-purple-600' },
   { plan: 'vip_365d',    label: '年卡',    emoji: '🎁', price: 98,  color: 'from-pink-500 to-rose-600' },
   { plan: 'vip_forever', label: '永久',    emoji: '👑', price: 198, color: 'from-amber-500 to-orange-600' },
+  { plan: 'unlock',      label: '单资源',  emoji: '🔓', price: 0,   color: 'from-emerald-500 to-teal-600' },
+  { plan: 'lumen',       label: '流明',    emoji: '💎', price: 0,   color: 'from-fuchsia-500 to-pink-600' },
 ];
 
 const CHANNELS = [
@@ -68,7 +71,12 @@ export default function CodesPage() {
   const [genChannel, setGenChannel] = useState('xy');
   const [genCount, setGenCount] = useState(10);
   const [genBatch, setGenBatch] = useState('');
-  const [genResult, setGenResult] = useState<{ codes: string[]; plan: string; channel: string; batch_id: string; price: number } | null>(null);
+  const [genLumenAmount, setGenLumenAmount] = useState(50);  // 流明数量
+  const [genResourceId, setGenResourceId] = useState<number | null>(null);  // 单资源 ID
+  const [genResourceName, setGenResourceName] = useState('');  // 单资源名称（前端缓存）
+  const [resourceSearch, setResourceSearch] = useState('');
+  const [resourceResults, setResourceResults] = useState<{ id: number; name: string; category: string }[]>([]);
+  const [genResult, setGenResult] = useState<{ codes: string[]; plan: string; channel: string; batch_id: string; price: number; lumen_amount?: number } | null>(null);
   const [toast, setToast] = useState('');
 
   // token 鉴权
@@ -108,24 +116,43 @@ export default function CodesPage() {
   const handleGen = async () => {
     if (!token) { showToast('❌ 请先登录'); return; }
     if (genCount < 1 || genCount > 200) { showToast('❌ 数量 1-200'); return; }
+    if (genPlan === 'unlock' && !genResourceId) { showToast('❌ 请先选择目标资源'); return; }
+    if (genPlan === 'lumen' && (!genLumenAmount || genLumenAmount < 1)) { showToast('❌ 流明数量必须 ≥ 1'); return; }
     setGenLoading(true);
     try {
+      const body: any = { plan: genPlan, channel: genChannel, count: genCount, batch_id: genBatch || undefined };
+      if (genPlan === 'unlock') body.target_resource_id = genResourceId;
+      if (genPlan === 'lumen') body.lumen_amount = genLumenAmount;
       const r = await fetch('/api/admin/codes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ plan: genPlan, channel: genChannel, count: genCount, batch_id: genBatch || undefined }),
+        body: JSON.stringify(body),
       });
       const d = await r.json();
       if (d.error) showToast('❌ ' + d.error);
       else {
-        setGenResult({ codes: d.codes, plan: d.plan, channel: d.channel, batch_id: d.batch_id, price: d.price_at_issue });
+        setGenResult({ codes: d.codes, plan: d.plan, channel: d.channel, batch_id: d.batch_id, price: d.price_at_issue, lumen_amount: d.lumen_amount });
         showToast(`✅ 生成 ${d.codes.length} 个 ${d.channel_label}激活码`);
-        setGenBatch(''); // 清空,下次自动生成新批次
+        setGenBatch('');
         fetchList();
       }
     } catch (e: any) { showToast('❌ ' + e.message); }
     finally { setGenLoading(false); }
   };
+
+  // 单资源搜索 (防抖)
+  useEffect(() => {
+    if (genPlan !== 'unlock') return;
+    if (!resourceSearch.trim()) { setResourceResults([]); return; }
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`/api/search?q=${encodeURIComponent(resourceSearch)}&pageSize=10`, { headers: { Authorization: 'Bearer ' + token } });
+        const d = await r.json();
+        setResourceResults((d.items || []).slice(0, 10));
+      } catch {}
+    }, 300);
+    return () => clearTimeout(t);
+  }, [resourceSearch, genPlan, token]);
 
   const copyText = async (text: string, msg = '已复制') => {
     try { await navigator.clipboard.writeText(text); showToast('✅ ' + msg); } catch { showToast('❌ 复制失败'); }
@@ -248,7 +275,7 @@ export default function CodesPage() {
           </h2>
 
           {/* 模板按钮 */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
             {VIP_TEMPLATES.map(t => (
               <button
                 key={t.plan}
@@ -260,11 +287,49 @@ export default function CodesPage() {
                 }`}
               >
                 <div className="text-2xl mb-1">{t.emoji}</div>
-                <div className="font-semibold text-sm">VIP {t.label}</div>
-                <div className="text-xs text-white/60 mt-1">¥{t.price}</div>
+                <div className="font-semibold text-sm">{t.plan.startsWith('vip') ? `VIP ${t.label}` : t.label}</div>
+                <div className="text-xs text-white/60 mt-1">{t.price > 0 ? `¥${t.price}` : (t.plan === 'lumen' ? '流明数自定义' : '单资源指定')}</div>
               </button>
             ))}
           </div>
+
+          {/* 单资源选择器 (仅 unlock 模式) */}
+          {genPlan === 'unlock' && (
+            <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
+              <label className="block text-xs text-emerald-300 mb-1.5">目标资源（必须 pay_type=code）</label>
+              {genResourceId ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-white">#{genResourceId} · {genResourceName}</span>
+                  <button onClick={() => { setGenResourceId(null); setGenResourceName(''); setResourceSearch(''); }} className="text-xs text-red-300 hover:underline">✕ 清除</button>
+                </div>
+              ) : (
+                <>
+                  <input value={resourceSearch} onChange={e => setResourceSearch(e.target.value)} placeholder="搜资源名（中文/拼音）" className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm" />
+                  {resourceResults.length > 0 && (
+                    <div className="mt-2 max-h-40 overflow-y-auto space-y-1">
+                      {resourceResults.map(r => (
+                        <button key={r.id} onClick={() => { setGenResourceId(r.id); setGenResourceName(r.name); setResourceSearch(''); }} className="w-full text-left px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded text-sm">
+                          <span className="text-emerald-300">#{r.id}</span> · {r.name} <span className="text-xs text-white/40 ml-1">[{r.category}]</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* 流明数输入 (仅 lumen 模式) */}
+          {genPlan === 'lumen' && (
+            <div className="mb-4 p-3 bg-fuchsia-500/10 border border-fuchsia-500/30 rounded-xl">
+              <label className="block text-xs text-fuchsia-300 mb-1.5">每个码充值流明数</label>
+              <div className="flex items-center gap-2">
+                <input type="number" min={1} max={100000} value={genLumenAmount} onChange={e => setGenLumenAmount(parseInt(e.target.value) || 0)} className="w-32 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm font-mono" />
+                <span className="text-sm text-white/60">💎 流明</span>
+                <span className="text-xs text-white/40">建议: 50/100/200/500 (¥{genLumenAmount > 0 ? `约 ${genLumenAmount * 0.1}` : '?'})</span>
+              </div>
+            </div>
+          )}
 
           {/* 渠道 + 数量 + 批次 */}
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
@@ -306,10 +371,10 @@ export default function CodesPage() {
 
           <button
             onClick={handleGen}
-            disabled={genLoading}
+            disabled={genLoading || (genPlan === 'unlock' && !genResourceId)}
             className="w-full py-3 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl font-medium hover:opacity-90 disabled:opacity-50"
           >
-            {genLoading ? '生成中...' : `🎟️ 生成 ${genCount} 个 ${VIP_TEMPLATES.find(t => t.plan === genPlan)?.label}激活码`}
+            {genLoading ? '生成中...' : `🎟️ 生成 ${genCount} 个 ${genPlan === 'unlock' ? '单资源' : genPlan === 'lumen' ? '流明' : (VIP_TEMPLATES.find(t => t.plan === genPlan)?.label || '')}激活码`}
           </button>
 
           {/* 生成结果 */}
@@ -414,8 +479,9 @@ export default function CodesPage() {
             </select>
             <select value={fCodeType} onChange={e => setFCodeType(e.target.value)} className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm">
               <option value="">全部类型</option>
-              <option value="vip">VIP 会员</option>
-              <option value="unlock">单资源</option>
+              <option value="vip">🎫 VIP 会员</option>
+              <option value="unlock">🔓 单资源</option>
+              <option value="lumen">💎 流明</option>
             </select>
             <select value={fStatus} onChange={e => setFStatus(e.target.value)} className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm">
               <option value="">全部状态</option>
@@ -457,7 +523,7 @@ export default function CodesPage() {
                     <td className="py-2 px-2 font-mono text-violet-300 cursor-pointer" onClick={() => copyText(c.code)}>
                       {c.code}
                     </td>
-                    <td className="py-2 px-2 text-xs">{c.code_type === 'vip' ? (c.plan_id || `VIP ${c.duration}天`) : (c.target_resource_name?.slice(0, 15) || `#${c.target_resource_id}`)}</td>
+                    <td className="py-2 px-2 text-xs">{c.code_type === 'vip' ? (c.plan_id || `VIP ${c.duration}天`) : c.code_type === 'lumen' ? `💎 ${c.lumen_amount || 0} 流明` : (c.target_resource_name?.slice(0, 15) || `#${c.target_resource_id}`)}</td>
                     <td className="py-2 px-2">{c.channel === 'wd' ? '🏪' : c.channel === 'xy' ? '🐟' : '-'}</td>
                     <td className="py-2 px-2 font-mono text-xs text-white/60">{c.batch_id || '-'}</td>
                     <td className="py-2 px-2">

@@ -172,7 +172,7 @@ export async function GET(request: NextRequest) {
     // ─── Fetch page ─────────────────────────────────────────────────────────
     const dbRows = await sql(`
       SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
-             r.pay_type, r.code_price,
+             r.pay_type, r.code_price, r.lumen_cost, r.access_level,
              COALESCE(c.release_date, r.created_at::text) as sort_date,
              ${dateWeight} as date_weight,
              CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb
@@ -277,6 +277,7 @@ export async function GET(request: NextRequest) {
         payType: item.pay_type || 'free',
         accessLevel: item.access_level || 'basic',  // 2026-06-04
         codePrice: item.code_price ? Number(item.code_price) : 0,
+        lumenCost: item.lumen_cost ?? 1,  // 2026-06-25 单条定价流明
         unlocked: userUnlockedIds.has(item.id),
         tmdb: tmdbOk && item.tmdb_id ? (tmdbMap.get(item.tmdb_id) || null) : null,
         musicCover: item.category === '音乐' ? (musicCoverMap.get(item.id) || null) : null,

@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
     price_at_issue = 0,
     batch_id = '',
     duration_days = 0,
+    lumen_amount = 0,  // 2026-06-25 流明充值码
   } = body;
 
   const n = Math.min(200, Math.max(1, parseInt(String(count))));
@@ -78,8 +79,12 @@ export async function POST(req: NextRequest) {
     if (!exists[0]) return NextResponse.json({ error: `资源 ${targetId} 不存在或已下架` }, { status: 400 });
     if (exists[0].pay_type !== 'code') return NextResponse.json({ error: `资源 ${targetId} 未配置付费 (pay_type=${exists[0].pay_type})，请先在 pay-config 配置` }, { status: 400 });
     planId = 'unlock'; duration = 0; userGroup = 'free'; codeType = 'unlock';
+  } else if (plan === 'lumen') {
+    const amount = parseInt(String(lumen_amount));
+    if (!amount || amount < 1 || amount > 100000) return NextResponse.json({ error: 'lumen_amount 必须在 1-100000 之间' }, { status: 400 });
+    planId = 'LUMEN-' + amount; duration = 0; userGroup = 'free'; codeType = 'lumen';
   } else {
-    return NextResponse.json({ error: '必须指定 plan (vip_30d/vip_180d/vip_365d/vip_forever/vip_custom/unlock)' }, { status: 400 });
+    return NextResponse.json({ error: '必须指定 plan (vip_30d/vip_180d/vip_365d/vip_forever/vip_custom/unlock/lumen)' }, { status: 400 });
   }
 
   // 价格
@@ -90,6 +95,7 @@ export async function POST(req: NextRequest) {
       const r: any = await sql`SELECT code_price FROM xx_resources WHERE id = ${targetId}`;
       finalPrice = Number(r[0]?.code_price) || 0;
     }
+    else if (codeType === 'lumen') finalPrice = 0;  // 流明码按流明数定价 - 当前 0 标记由卖家手工定价
   }
 
   // 批次名
@@ -108,12 +114,12 @@ export async function POST(req: NextRequest) {
         await sql`
           INSERT INTO xx_activation_codes (
             code, plan_id, user_group, duration, is_used, created_by,
-            code_type, target_resource_id, price_at_issue, created_at,
+            code_type, target_resource_id, price_at_issue, lumen_amount, created_at,
             channel, batch_id
           )
           VALUES (
             ${code}, ${planId}, ${userGroup}, ${duration}, false, ${String(auth.payload.id)},
-            ${codeType}, ${targetId}, ${finalPrice}, NOW(),
+            ${codeType}, ${targetId}, ${finalPrice}, ${codeType === 'lumen' ? parseInt(String(lumen_amount)) : 0}, NOW(),
             ${ch}, ${finalBatch}
           )
         `;
@@ -132,6 +138,7 @@ export async function POST(req: NextRequest) {
     channel: ch, channel_label: channelLabel,
     target_resource_id: targetId,
     target_resource_name: codeType === 'unlock' ? (await sql`SELECT name FROM xx_resources WHERE id = ${targetId}`)[0]?.name : null,
+    lumen_amount: codeType === 'lumen' ? parseInt(String(lumen_amount)) : undefined,
     price_at_issue: finalPrice,
     batch_id: finalBatch,
     errors: errors.length ? errors : undefined,
@@ -168,17 +175,17 @@ export async function GET(req: NextRequest) {
   // 静态 4 个 if 分支
   let rows: any[];
   if (codeType && targetId && channelFilter && batchFilter && statusFilter === 'used') {
-    rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE ac.code_type = ${codeType} AND ac.target_resource_id = ${parseInt(targetId)} AND ac.channel = ${channelFilter} AND ac.batch_id = ${batchFilter} AND ac.is_used = true ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
+    rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.lumen_amount, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE ac.code_type = ${codeType} AND ac.target_resource_id = ${parseInt(targetId)} AND ac.channel = ${channelFilter} AND ac.batch_id = ${batchFilter} AND ac.is_used = true ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
   } else if (!codeType && !targetId && !channelFilter && !batchFilter && !statusFilter) {
-    rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE 1=1 ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
+    rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.lumen_amount, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE 1=1 ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
   } else {
     // 简单方案: 只按 status 过滤, 其它过滤忽略 (前端用 pageSize 控制)
     if (statusFilter === 'used') {
-      rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE ac.is_used = true ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
+      rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.lumen_amount, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE ac.is_used = true ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
     } else if (statusFilter === 'unused') {
-      rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE ac.is_used = false ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
+      rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.lumen_amount, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE ac.is_used = false ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
     } else {
-      rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
+      rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.lumen_amount, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
     }
   }
 

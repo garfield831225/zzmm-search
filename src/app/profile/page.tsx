@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Crown, Calendar, Tag, Sparkles, ArrowRight, MessageCircle, ExternalLink, History, Home, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Crown, Calendar, Tag, Sparkles, ArrowRight, MessageCircle, ExternalLink, History, Home, AlertCircle, CheckCircle2, Coins, Unlock, FileLock } from 'lucide-react';
 
 interface UserInfo {
   id: number;
@@ -28,9 +28,21 @@ interface ActivationRecord {
   used_at: string;
 }
 
+interface UnlockRecord {
+  id: number;
+  resource_id: number;
+  resource_name: string | null;
+  category: string | null;
+  source: string | null;
+  lumen_cost: number;
+  unlocked_at: string;
+}
+
 export default function ProfilePage() {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [records, setRecords] = useState<ActivationRecord[]>([]);
+  const [unlocks, setUnlocks] = useState<UnlockRecord[]>([]);
+  const [lumenBalance, setLumenBalance] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const router = useRouter();
@@ -41,17 +53,16 @@ export default function ProfilePage() {
 
     const fetchData = async () => {
       try {
-        // /me
         const r1 = await fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + t, 'Cache-Control': 'no-cache' } });
         if (!r1.ok) { setError('请先登录'); setLoading(false); return; }
         const d1 = await r1.json();
         setUser(d1.user);
-        // 兑换记录
         const r2 = await fetch('/api/user/activations', { headers: { Authorization: 'Bearer ' + t } });
-        if (r2.ok) {
-          const d2 = await r2.json();
-          setRecords(d2.items || []);
-        }
+        if (r2.ok) { const d2 = await r2.json(); setRecords(d2.items || []); }
+        const r3 = await fetch('/api/user/unlocks/list', { headers: { Authorization: 'Bearer ' + t } });
+        if (r3.ok) { const d3 = await r3.json(); setUnlocks(d3.items || []); }
+        const r4 = await fetch('/api/user/balance', { headers: { Authorization: 'Bearer ' + t } });
+        if (r4.ok) { const d4 = await r4.json(); if (typeof d4.lumen_balance === 'number') setLumenBalance(d4.lumen_balance); }
       } catch (e: any) { setError(e.message); }
       finally { setLoading(false); }
     };
@@ -75,6 +86,42 @@ export default function ProfilePage() {
             <Home className="w-3 h-3" /> 返回首页
           </Link>
         </div>
+
+        {/* 2026-06-25: 流明余额卡 + 解锁记录卡 */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+          className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6"
+        >
+          {/* 💎 流明余额 */}
+          <div className="rounded-2xl p-5 border bg-gradient-to-br from-fuchsia-500/10 to-pink-500/10 border-fuchsia-500/30">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-white/60">💎 流明余额</span>
+              <Coins className="w-4 h-4 text-fuchsia-400" />
+            </div>
+            <div className="text-3xl font-bold text-fuchsia-300 mb-2">{lumenBalance}</div>
+            <div className="text-xs text-white/50 mb-3">
+              {isVip ? 'VIP 可用流明直接解锁付费资源' : '基础会员暂不能解锁付费资源'}
+            </div>
+            <Link href="/activate" className="block w-full text-center px-3 py-2 bg-fuchsia-600/30 hover:bg-fuchsia-600/50 border border-fuchsia-500/40 rounded-lg text-sm text-fuchsia-200">
+              🎫 兑换流明码 →
+            </Link>
+          </div>
+
+          {/* 🔓 已解锁资源 */}
+          <div className="rounded-2xl p-5 border bg-gradient-to-br from-emerald-500/10 to-teal-500/10 border-emerald-500/30">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-white/60">🔓 已解锁资源</span>
+              <Unlock className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div className="text-3xl font-bold text-emerald-300 mb-2">{unlocks.length}</div>
+            <div className="text-xs text-white/50 mb-3">
+              {unlocks.length > 0 ? `最近解锁: ${unlocks[0].resource_name?.slice(0, 20) || '#' + unlocks[0].resource_id}` : '尚无解锁记录'}
+            </div>
+            <Link href="/" className="block w-full text-center px-3 py-2 bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 rounded-lg text-sm text-emerald-200">
+              🎬 去搜索资源 →
+            </Link>
+          </div>
+        </motion.div>
 
         {/* 2026-06-10: 续费提醒条 - 7天内到期 / 已过期 */}
         {isVip && isExpired && (
@@ -200,6 +247,48 @@ export default function ProfilePage() {
                       <td className="py-2 font-mono text-violet-300 text-xs">{r.plan_id || '-'}</td>
                       <td className="py-2">{r.channel === 'wd' ? '🏪' : r.channel === 'xy' ? '🐟' : '-'}</td>
                       <td className="py-2">¥{r.price_at_issue || 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* 2026-06-25 解锁记录 */}
+        <div className="bg-[#12121a] rounded-2xl p-6 border border-white/5 mb-6">
+          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+            <FileLock className="w-5 h-5 text-emerald-400" /> 我的解锁记录
+            <span className="text-sm text-white/40 font-normal">（{unlocks.length} 条）</span>
+          </h2>
+          {unlocks.length === 0 ? (
+            <div className="text-center py-8 text-white/40 text-sm">
+              尚无解锁记录 · 在首页搜索资源时点击 <span className="text-violet-300">解锁</span> 按钮
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-white/40 text-xs border-b border-white/5">
+                    <th className="py-2">解锁时间</th>
+                    <th className="py-2">资源</th>
+                    <th className="py-2">分类</th>
+                    <th className="py-2">来源</th>
+                    <th className="py-2">消耗流明</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unlocks.slice(0, 30).map(u => (
+                    <tr key={u.id} className="border-b border-white/5 hover:bg-white/5">
+                      <td className="py-2 text-white/60 text-xs">{new Date(u.unlocked_at).toLocaleString('zh-CN')}</td>
+                      <td className="py-2">
+                        <Link href={`/tmdb-films/${u.resource_id}`} className="text-violet-300 hover:underline">
+                          {u.resource_name?.slice(0, 30) || `#${u.resource_id}`}
+                        </Link>
+                      </td>
+                      <td className="py-2 text-xs text-white/60">{u.category || '-'}</td>
+                      <td className="py-2 text-xs">{u.source || '-'}</td>
+                      <td className="py-2 text-fuchsia-300">💎 {u.lumen_cost}</td>
                     </tr>
                   ))}
                 </tbody>

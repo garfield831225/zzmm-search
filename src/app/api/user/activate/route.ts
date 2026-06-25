@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
     // 查码 (带 channel/batch_id 信息)
     const codes = await sql`
       SELECT id, code, code_type, plan_id, duration, user_group, target_resource_id,
-             price_at_issue, is_used, used_by, used_at, expires_at, channel, batch_id
+             price_at_issue, lumen_amount, is_used, used_by, used_at, expires_at, channel, batch_id
       FROM xx_activation_codes WHERE code = ${code} LIMIT 1
     `;
     if (!codes[0]) return NextResponse.json({ error: '激活码无效' }, { status: 404 });
@@ -126,6 +126,34 @@ export async function POST(req: NextRequest) {
         });
       } catch (e: any) {
         return NextResponse.json({ error: '激活失败: ' + e.message }, { status: 500 });
+      }
+    }
+
+    // === 流明充值码 (2026-06-25) ===
+    if (c.code_type === 'lumen') {
+      const amount = c.lumen_amount || 0;
+      if (amount <= 0) return NextResponse.json({ error: '流明数量无效' }, { status: 400 });
+      try {
+        // 标记码已用 + 累加流明 (UPSERT xx_user_lumen)
+        const updated = await sql`
+          INSERT INTO xx_user_lumen (user_id, balance, updated_at)
+          VALUES (${userId}, ${amount}, NOW())
+          ON CONFLICT (user_id) DO UPDATE SET balance = xx_user_lumen.balance + ${amount}, updated_at = NOW()
+          RETURNING balance
+        ` as any[];
+        const balanceAfter = updated[0]?.balance ?? amount;
+        await sql`UPDATE xx_activation_codes SET is_used = true, used_by = ${userId}, used_at = NOW() WHERE id = ${c.id}`;
+        await sql`INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description)
+                  VALUES (${userId}, ${amount}, ${balanceAfter}, 'credit', ${code}, 'lumen_code_redeem')`.catch(() => {});
+        return NextResponse.json({
+          success: true, code_type: 'lumen',
+          lumen_amount: amount,
+          lumen_balance_after: balanceAfter,
+          channel: c.channel, batch_id: c.batch_id,
+          message: `✅ 充值成功！获得 ${amount} 流明，当前余额 ${balanceAfter}`,
+        });
+      } catch (e: any) {
+        return NextResponse.json({ error: '充值失败: ' + e.message }, { status: 500 });
       }
     }
 
