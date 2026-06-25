@@ -16,8 +16,8 @@ export async function GET(req: NextRequest) {
   const offset = (page - 1) * pageSize;
 
   try {
-    const nameFilter = q ? `AND r.name ILIKE '%${esc(q)}%'` : '1=1';
-    const payFilter = payType ? `AND r.pay_type = '${esc(payType)}'` : '1=1';
+    const nameFilter = q ? `r.name ILIKE '%${esc(q)}%'` : '1=1';
+    const payFilter = payType ? `r.pay_type = '${esc(payType)}'` : '1=1';
 
     const cnt = await sql(`SELECT COUNT(*) as cnt FROM xx_resources r WHERE r.status = 'active' AND ${nameFilter} AND ${payFilter}`) as any[];
     const total = parseInt(cnt?.[0]?.cnt || '0');
