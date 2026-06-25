@@ -61,6 +61,8 @@ interface ResourceItem {
   codePrice?: number;
   unlocked?: boolean;
   lumenCost?: number;  // 2026-06-25 单条定价流明
+  accessTier?: 'document' | 'vip' | 'unlock' | 'free';  // 2026-06-25 资源分级
+  accessLevel?: string;  // 2026-06-25 兼容旧 access_level 字段
 }
 
 interface SearchResponse {
@@ -566,6 +568,27 @@ export default function HomePage() {
                 {/* Source Badge */}
                 <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
                   <span className="px-2 py-0.5 bg-pink-600/80 text-xs rounded">{item.source}</span>
+                  {/* 2026-06-25: access_tier 标识 */}
+                  {item.accessLevel === 'vip' && (
+                    <span className="px-2 py-0.5 bg-gradient-to-r from-amber-500 to-orange-500 text-black text-xs rounded font-medium">
+                      👑 VIP
+                    </span>
+                  )}
+                  {item.accessLevel === 'code' && (
+                    <span className="px-2 py-0.5 bg-gradient-to-r from-yellow-500 to-amber-500 text-black text-xs rounded font-medium">
+                      💎 单资源付费
+                    </span>
+                  )}
+                  {item.accessLevel === 'basic' && (
+                    <span className="px-2 py-0.5 bg-sky-500/30 border border-sky-500/40 text-sky-300 text-xs rounded">
+                      📚 泽泽妈文档
+                    </span>
+                  )}
+                  {item.accessLevel === 'free' && (
+                    <span className="px-2 py-0.5 bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs rounded">
+                      🆓 免费
+                    </span>
+                  )}
                   {/* 2026-06-03 单资源付费标记 */}
                   {item.payType === 'code' && !item.unlocked && (
                     <span className="px-2 py-0.5 bg-yellow-500/90 text-black text-xs rounded font-medium">

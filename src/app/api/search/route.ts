@@ -138,9 +138,11 @@ export async function GET(request: NextRequest) {
     if (['admin', 'vip'].includes(userGroup)) {
       accessLevelFilter = "(r.access_level IN ('basic', 'vip', 'code', 'free'))";
     } else if (['basic', 'member'].includes(userGroup)) {
+      // basic 用户 (泽泽妈文档激活码激活后的等级) → 能看 document 类资源
       accessLevelFilter = "(r.access_level IN ('basic', 'free'))";
     } else {
-      accessLevelFilter = "(r.access_level IN ('basic', 'free'))";
+      // 未登录/普通 free 用户 → 只能看 free 资源 (泽泽妈文档不可见)
+      accessLevelFilter = "(r.access_level = 'free')";
     }
     // 额外: code 资源 (单资源付费) 需要在 xx_user_unlocks 有记录 → 这里只过 access_level, 具体逻辑在 list 阶段补
     const basicZezheOnly = process.env.BASIC_ZEZHE_ONLY === 'true';
@@ -172,7 +174,7 @@ export async function GET(request: NextRequest) {
     // ─── Fetch page ─────────────────────────────────────────────────────────
     const dbRows = await sql(`
       SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
-             r.pay_type, r.code_price, r.lumen_cost, r.access_level,
+             r.pay_type, r.code_price, r.lumen_cost, r.access_level, r.access_tier,
              COALESCE(c.release_date, r.created_at::text) as sort_date,
              ${dateWeight} as date_weight,
              CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb
@@ -276,6 +278,7 @@ export async function GET(request: NextRequest) {
         viewCount: item.view_count || 0,
         payType: item.pay_type || 'free',
         accessLevel: item.access_level || 'basic',  // 2026-06-04
+        accessTier: item.access_tier || 'document',  // 2026-06-25 资源分级
         codePrice: item.code_price ? Number(item.code_price) : 0,
         lumenCost: item.lumen_cost ?? 1,  // 2026-06-25 单条定价流明
         unlocked: userUnlockedIds.has(item.id),

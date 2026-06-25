@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '注册太频繁，请 1 小时后再试', code: 'rate_limited', resetIn: Math.ceil(rl.resetIn / 1000) }, { status: 429 });
     }
 
-    const { username, password, captcha } = await req.json();
+    const { username, password, captcha, invite_code } = await req.json();
 
     const storedCaptcha = req.cookies.get('captcha_code')?.value || '';
     if (!captcha || !storedCaptcha || captcha.toLowerCase() !== storedCaptcha.toLowerCase()) {
@@ -32,7 +32,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '用户名至少3位，密码至少6位' }, { status: 400 });
     }
 
+    // 2026-06-25: 必须有有效邀请码
+    if (!invite_code || typeof invite_code !== 'string') {
+      return NextResponse.json({ error: '请输入邀请码', code: 'invite_required' }, { status: 400 });
+    }
+
     const sql = neon(process.env.DATABASE_URL || '');
+
+    // 验邀请码
+    const inv = await sql`SELECT id, is_used, expires_at FROM xx_invite_codes WHERE code = ${invite_code.trim().toUpperCase()} LIMIT 1` as any[];
+    if (!inv[0]) return NextResponse.json({ error: '邀请码无效', code: 'invalid_invite' }, { status: 400 });
+    if (inv[0].is_used) return NextResponse.json({ error: '邀请码已被使用', code: 'invite_used' }, { status: 409 });
+    if (inv[0].expires_at && new Date(inv[0].expires_at) < new Date()) {
+      return NextResponse.json({ error: '邀请码已过期', code: 'invite_expired' }, { status: 410 });
+    }
 
     // 检查用户名是否已存在
     const exist = await sql`SELECT id FROM xx_users WHERE username = ${username}`;
@@ -43,14 +56,18 @@ export async function POST(req: NextRequest) {
     // 加密密码
     const hashed = bcrypt.hashSync(password, 10);
 
-    // 创建用户（默认普通会员）
+    // 创建用户（默认 'user' 未激活组，必须用激活码才能看泽泽妈文档）
     const result = await sql`
-      INSERT INTO xx_users (username, password_hash, user_group, expire_at, status, created_at, updated_at)
-      VALUES (${username}, ${hashed}, 'member', NOW() + INTERVAL '30 days', 'active', NOW(), NOW())
+      INSERT INTO xx_users (username, password_hash, user_group, status, created_at, updated_at)
+      VALUES (${username}, ${hashed}, 'user', 'active', NOW(), NOW())
       RETURNING id, username, user_group, expire_at
     `;
 
     const user = (result as any[])[0];
+
+    // 标记邀请码已用
+    await sql`UPDATE xx_invite_codes SET is_used = true, used_by = ${user.id}, used_at = NOW() WHERE id = ${inv[0].id}`;
+
     const token = jwt.sign(
       { id: user.id, username: user.username, group: user.user_group },
       JWT_SECRET,

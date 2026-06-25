@@ -61,6 +61,7 @@ const PUBLIC_PATHS = [
   '/api/user/unlocks',         // 解锁记录列表 (后端 Bearer 鉴权)
   '/api/admin/pay-config',     // pay-config CRUD (后端 adminOnly 鉴权)
   '/api/admin/stats',          // 详细统计 (后端 adminOnly 鉴权, 含 /detailed 子路径)
+  '/api/admin/invites',        // 邀请码管理 (后端 adminOnly 鉴权)
   // /api/resources/unlock 资源解锁 (后端 Bearer 鉴权, 双模式) - 用 startsWith 通配
   // /api/resources/[id]/unlock-status 动态路由也走 unlock 路径检查
 ];

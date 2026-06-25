@@ -216,6 +216,9 @@ export default function AdminPage() {
             <a href="/admin/blacklist" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
               黑名单
             </a>
+            <a href="/admin/invites" className="px-3 py-1.5 rounded text-sm bg-white/5 hover:bg-white/10 text-white/80 no-underline">
+              🎟️ 邀请码
+            </a>
           </div>
 
           {/* 📥 资源 */}

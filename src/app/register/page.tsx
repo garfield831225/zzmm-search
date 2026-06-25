@@ -9,6 +9,7 @@ export default function RegisterPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPwd, setConfirmPwd] = useState('');
+  const [inviteCode, setInviteCode] = useState('');  // 2026-06-25 必须邀请码
   const [captcha, setCaptcha] = useState('');
   const [captchaUrl, setCaptchaUrl] = useState('/api/captcha?' + Date.now());
   const [loading, setLoading] = useState(false);
@@ -33,12 +34,17 @@ export default function RegisterPage() {
       return;
     }
 
+    if (!inviteCode.trim()) {
+      setError('请输入邀请码（向客服索取）');
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, captcha }),
+        body: JSON.stringify({ username, password, captcha, invite_code: inviteCode.trim() }),
       });
       const data = await res.json();
 
@@ -108,6 +114,23 @@ export default function RegisterPage() {
                 onChange={(e) => setConfirmPwd(e.target.value)}
                 placeholder="再次输入密码"
                 className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-violet-500/50"
+                required
+              />
+            </div>
+
+            {/* 2026-06-25 必须邀请码 */}
+            <div>
+              <label className="block text-sm text-white/60 mb-2">
+                <span className="text-emerald-400">🎟️ 邀请码</span>
+                <span className="text-xs text-white/40 ml-2">向客服索取（如 INV-XXXX-XXXX-XXXX）</span>
+              </label>
+              <input
+                type="text"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                placeholder="INV-XXXX-XXXX-XXXX"
+                maxLength={20}
+                className="w-full bg-emerald-500/5 border border-emerald-500/30 rounded-xl px-4 py-3 text-white font-mono placeholder-white/30 focus:outline-none focus:border-emerald-500/50"
                 required
               />
             </div>
