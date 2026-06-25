@@ -37,7 +37,16 @@ export async function GET(req: NextRequest) {
       signal: AbortSignal.timeout(5000),
     });
     const j = await r.json();
-    return NextResponse.json({ ok: true, bridge_status: j });
+    return NextResponse.json({
+      ok: true,
+      bridge_status: j,
+      debug: {
+        bridge_url: BRIDGE_URL,
+        bridge_token_len: BRIDGE_TOKEN.length,
+        bridge_token_prefix: BRIDGE_TOKEN.slice(0, 30),
+        nas_status_code: r.status,
+      }
+    });
   } catch (e: any) {
     return NextResponse.json({ error: 'bridge 不可达: ' + e.message }, { status: 502 });
   }
