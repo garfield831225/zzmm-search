@@ -65,12 +65,12 @@ export async function POST(req: NextRequest) {
   // 取资源: 没指定 ID = 最近一批导入的; 指定 = 指定 ID 列表
   let items: any[];
   if (Array.isArray(body.resource_ids) && body.resource_ids.length) {
-    const r = await sql`SELECT id, name, type, source, source_id, description, poster_url, tmdb_id, category, sub_type
+    const r = await sql`SELECT id, name, category, type, link, link_code, size, source, tmdb_id, sub_type, access_level
                         FROM xx_resources WHERE id = ANY(${body.resource_ids})` as any[];
     items = r;
   } else if (body.since_minutes) {
     // 最近 N 分钟导入的
-    const r = await sql`SELECT id, name, type, source, source_id, description, poster_url, tmdb_id, category, sub_type
+    const r = await sql`SELECT id, name, category, type, link, link_code, size, source, tmdb_id, sub_type, access_level
                         FROM xx_resources
                         WHERE created_at > NOW() - (${body.since_minutes}::int * INTERVAL '1 minute')
                         ORDER BY id DESC LIMIT 500` as any[];
@@ -81,14 +81,40 @@ export async function POST(req: NextRequest) {
 
   if (!items.length) return NextResponse.json({ ok: true, count: 0, message: '没有资源可推' });
 
-  // 取每个资源的链接
-  const ids = items.map(i => i.id);
-  const links = await sql`SELECT resource_id, url, password, size FROM xx_resource_links WHERE resource_id = ANY(${ids})` as any[];
+  // 把资源映射成 mov 真人要的 6 必填字段: user_id, account_id, name, category, type, files
+  // category 中文 -> mov 8 值; type -> mov 4 值
+  const catMap: Record<string, string> = {
+    '电影': 'movie', '剧集': 'tv', '动漫': 'anime', '纪录片': 'doc',
+    '综艺': 'variety', '演唱会': 'concert', '音乐': 'music',
+    'REMUX': 'movie', '原盘': 'movie', '系列电影': 'movie', '合集': 'movie',
+  };
+  const typeMap: Record<string, string> = {
+    'movie': 'movie', 'tv': 'tv', 'single': 'single', 'album': 'album',
+  };
 
-  const itemsWithLinks = items.map(it => ({
-    ...it,
-    links: links.filter(l => l.resource_id === it.id),
-  }));
+  const movItems = items.map(it => {
+    const movCat = catMap[it.category] || 'movie';
+    const movType = typeMap[it.type] || (movCat === 'tv' ? 'tv' : 'movie');
+    const files = it.link ? [{
+      url: it.link,
+      password: it.link_code || '',
+      size: it.size || '',
+    }] : [];
+    return {
+      user_id: 'import_bridge',
+      account_id: 9,
+      name: it.name,
+      category: movCat,
+      type: movType,
+      files,
+      // 辅助字段
+      source: it.source,
+      tmdb_id: it.tmdb_id || null,
+      sub_type: it.sub_type || null,
+      access_level: it.access_level || 'basic',
+      original_id: it.id,
+    };
+  });
 
   // 推 import-bridge
   try {
@@ -99,7 +125,7 @@ export async function POST(req: NextRequest) {
         'X-Bridge-Token': BRIDGE_TOKEN,
       },
       body: JSON.stringify({
-        items: itemsWithLinks,
+        items: movItems,
         batch_id: body.batch_id || `zzmm-${Date.now()}`,
       }),
       signal: AbortSignal.timeout(25000),
@@ -107,7 +133,8 @@ export async function POST(req: NextRequest) {
     const j = await r.json();
     return NextResponse.json({
       ok: j.ok,
-      pushed: itemsWithLinks.length,
+      pushed: movItems.length,
+      sample: movItems.slice(0, 2),
       bridge_resp: j,
     });
   } catch (e: any) {
