@@ -157,28 +157,8 @@ export default function AdminPage() {
     setLoading(false);
   };
 
-  if (!authed) {
-    return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center p-4">
-        <div className="bg-[#12121a] rounded-2xl p-8 w-full max-w-sm border border-white/5">
-          <h2 className="text-xl font-bold mb-6 text-center">管理后台登录</h2>
-          <input
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="输入管理员密钥"
-            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-violet-500/50 mb-4"
-          />
-          <button
-            onClick={() => { localStorage.setItem('adminToken', token); setAuthed(true); }}
-            className="w-full py-3 bg-violet-600 rounded-xl font-semibold hover:opacity-90"
-          >
-            进入后台
-          </button>
-        </div>
-      </div>
-    );
-  }
+  // 登录 - 由 /admin/layout.tsx 统一处理
+  if (!authed) return null;
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white">

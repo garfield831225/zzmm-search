@@ -112,22 +112,8 @@ export default function InvitesPage() {
     } catch (e: any) { showToast('error', e.message); }
   };
 
-  if (!authed) {
-    return (
-      <div className="min-h-screen bg-[#0a0a0f] text-white flex items-center justify-center p-4">
-        <div className="max-w-md w-full bg-[#12121a] rounded-2xl p-6 border border-white/10">
-          <h1 className="text-2xl font-bold mb-2 flex items-center gap-2"><UserPlus className="w-6 h-6 text-emerald-400" /> 邀请码管理</h1>
-          <p className="text-sm text-white/40 mb-4">一次性邀请码 · 用户注册时必须输入</p>
-          <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="粘贴你的 zzmm_token"
-            className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-emerald-500/50" />
-          <button onClick={() => { if (token) { localStorage.setItem('zzmm_token', token); setAuthed(true); } }} disabled={!token}
-            className="w-full mt-4 py-3 bg-emerald-600 rounded-xl hover:opacity-90 disabled:opacity-50 font-medium">
-            进入管理
-          </button>
-        </div>
-      </div>
-    );
-  }
+  // 登录 - 由 /admin/layout.tsx 统一处理
+  if (!authed) return null;
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white p-4 sm:p-6">

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv } from 'lucide-react';
+import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv, Shield } from 'lucide-react';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
@@ -386,6 +386,12 @@ export default function HomePage() {
                     <ShoppingCart size={14} className="transition-transform group-hover:scale-110" />
                     <span>购物车</span>
                   </Link>
+                  {user?.group === 'admin' && (
+                    <Link href="/admin" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 rounded-lg text-sm font-medium transition-all duration-200 text-white hover:shadow-[0_0_12px_rgba(139,92,246,0.5)] hover:scale-105 border border-violet-400/40">
+                      <Shield size={14} className="transition-transform group-hover:scale-110" />
+                      <span>🎛️ 管理后台</span>
+                    </Link>
+                  )}
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
