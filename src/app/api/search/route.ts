@@ -134,15 +134,16 @@ export async function GET(request: NextRequest) {
       } catch { /* 未登录或无效 token → userGroup='user' */ }
     }
     // 2026-06-09: 按 userGroup 动态生成 access_level 过滤
-    // admin/vip → 全部; basic → basic+code; user → basic
+    // admin/vip → 全部; basic → document(泽泽妈文档)+单资源付费; user → 空
+    // 2026-06-26: 没 free 类别了, 未登录/user 组一律返空 → 必须激活 basic
     if (['admin', 'vip'].includes(userGroup)) {
-      accessLevelFilter = "(r.access_level IN ('basic', 'vip', 'code', 'free'))";
+      accessLevelFilter = "(r.access_level IN ('basic', 'vip', 'code'))";
     } else if (['basic', 'member'].includes(userGroup)) {
-      // basic 用户 (泽泽妈文档激活码激活后的等级) → 能看 document 类资源
-      accessLevelFilter = "(r.access_level IN ('basic', 'free'))";
+      // basic 用户 (泽泽妈文档激活码激活后的等级) → 能看泽泽妈文档 + 单资源付费
+      accessLevelFilter = "(r.access_level IN ('basic', 'code'))";
     } else {
-      // 未登录/普通 free 用户 → 只能看 free 资源 (泽泽妈文档不可见)
-      accessLevelFilter = "(r.access_level = 'free')";
+      // 未登录 / 普通 free / user 组 → 0 条结果, 必须先去激活
+      accessLevelFilter = "(1=0)";
     }
     // 额外: code 资源 (单资源付费) 需要在 xx_user_unlocks 有记录 → 这里只过 access_level, 具体逻辑在 list 阶段补
     const basicZezheOnly = process.env.BASIC_ZEZHE_ONLY === 'true';

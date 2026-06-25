@@ -568,7 +568,7 @@ export default function HomePage() {
                 {/* Source Badge */}
                 <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
                   <span className="px-2 py-0.5 bg-pink-600/80 text-xs rounded">{item.source}</span>
-                  {/* 2026-06-25: access_tier 标识 */}
+                  {/* 2026-06-25: access_tier 标识 - 2026-06-26 没 free 类, 只 3 种 */}
                   {item.accessLevel === 'vip' && (
                     <span className="px-2 py-0.5 bg-gradient-to-r from-amber-500 to-orange-500 text-black text-xs rounded font-medium">
                       👑 VIP
@@ -582,11 +582,6 @@ export default function HomePage() {
                   {item.accessLevel === 'basic' && (
                     <span className="px-2 py-0.5 bg-sky-500/30 border border-sky-500/40 text-sky-300 text-xs rounded">
                       📚 泽泽妈文档
-                    </span>
-                  )}
-                  {item.accessLevel === 'free' && (
-                    <span className="px-2 py-0.5 bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs rounded">
-                      🆓 免费
                     </span>
                   )}
                   {/* 2026-06-03 单资源付费标记 */}
