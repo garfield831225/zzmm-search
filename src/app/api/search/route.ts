@@ -84,6 +84,9 @@ export async function GET(request: NextRequest) {
     const pageSize = Math.min(150, Math.max(1, parseInt(searchParams.get('pageSize') || '30')));
     const sheet = searchParams.get('sheet') || '';
     const zone = searchParams.get('zone') || 'film';
+    // 2026-06-26: /library 公开资源库 - 登录后可见 (basic/user 都行)
+    // zone=library 时不走强 access_level 过滤, 让 user 组也能浏览
+    const isLibraryZone = zone === 'library';
 
     // ─── WHERE clauses (inline strings — no param placeholders) ─────────────
     const catFilter = category === '全部' && zone === 'film'
@@ -144,7 +147,11 @@ export async function GET(request: NextRequest) {
     // 2026-06-09: 按 userGroup 动态生成 access_level 过滤
     // admin/vip → 全部; basic → document(泽泽妈文档)+单资源付费; user → 空
     // 2026-06-26: 没 free 类别了, 未登录/user 组一律返空 → 必须激活 basic
-    if (['admin', 'vip'].includes(userGroup)) {
+    // 2026-06-26: /library 公开资源库例外 - 任何登录用户都能看 document 资源
+    if (isLibraryZone) {
+      // /library 公开页: 登录后都能看 basic 资源 (document/泽泽妈文档)
+      accessLevelFilter = "(r.access_level IN ('basic', 'code'))";
+    } else if (['admin', 'vip'].includes(userGroup)) {
       accessLevelFilter = "(r.access_level IN ('basic', 'vip', 'code'))";
     } else if (['basic', 'member'].includes(userGroup)) {
       // basic 用户 (泽泽妈文档激活码激活后的等级) → 能看泽泽妈文档 + 单资源付费
