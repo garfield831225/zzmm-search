@@ -123,27 +123,26 @@ export async function GET(request: NextRequest) {
 
     // 2026-06-06: 预解析 userGroup（用于 import_channel 灰度过滤）
     // 灰度开关 BASIC_ZEZHE_ONLY=true 才生效；默认 false → 不影响老用户
+    // 2026-06-26: 任何 zone 都要解析 userGroup (library/nonfilm 也要根据权限过滤)
     let userGroup: string = 'user';
-    if (zone === 'film') {
-      try {
-        // 2026-06-26: 同时支持 Bearer header 和 zzmm_token cookie (前者优先)
-        let token: string | null = null;
-        const authHeader = request.headers.get('authorization');
-        if (authHeader?.startsWith('Bearer ')) {
-          token = authHeader.replace('Bearer ', '');
-        } else {
-          const cookieToken = request.cookies.get('zzmm_token')?.value;
-          if (cookieToken) token = cookieToken;
-        }
-        if (token) {
-          const payload = jwt.verify(token, (process.env.JWT_SECRET || 'cLWhs2015')) as any;
-          const userId = String(payload.id);
-          userGroup = (payload.group || 'user').toLowerCase();
-          const userRow = await sql`SELECT user_group FROM xx_users WHERE id = ${userId} LIMIT 1`;
-          if (userRow[0]?.user_group) userGroup = String(userRow[0].user_group).toLowerCase();
-        }
-      } catch { /* 未登录或无效 token → userGroup='user' */ }
-    }
+    try {
+      // 2026-06-26: 同时支持 Bearer header 和 zzmm_token cookie (前者优先)
+      let token: string | null = null;
+      const authHeader = request.headers.get('authorization');
+      if (authHeader?.startsWith('Bearer ')) {
+        token = authHeader.replace('Bearer ', '');
+      } else {
+        const cookieToken = request.cookies.get('zzmm_token')?.value;
+        if (cookieToken) token = cookieToken;
+      }
+      if (token) {
+        const payload = jwt.verify(token, (process.env.JWT_SECRET || 'cLWhs2015')) as any;
+        const userId = String(payload.id);
+        userGroup = (payload.group || 'user').toLowerCase();
+        const userRow = await sql`SELECT user_group FROM xx_users WHERE id = ${userId} LIMIT 1`;
+        if (userRow[0]?.user_group) userGroup = String(userRow[0].user_group).toLowerCase();
+      }
+    } catch { /* 未登录或无效 token → userGroup='user' */ }
     // 2026-06-09: 按 userGroup 动态生成 access_level 过滤
     // admin/vip → 全部; basic → document(泽泽妈文档)+单资源付费; user → 空
     // 2026-06-26: 没 free 类别了, 未登录/user 组一律返空 → 必须激活 basic
