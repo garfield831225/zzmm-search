@@ -82,6 +82,7 @@ export async function GET(request: NextRequest) {
     const sort = searchParams.get('sort') || 'release_date';
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
     const pageSize = Math.min(150, Math.max(1, parseInt(searchParams.get('pageSize') || '30')));
+    const sheet = searchParams.get('sheet') || '';
     const zone = searchParams.get('zone') || 'film';
 
     // ─── WHERE clauses (inline strings — no param placeholders) ─────────────
@@ -158,7 +159,10 @@ export async function GET(request: NextRequest) {
     const importChannelFilter = (basicZezheOnly && !isVipPlus)
       ? `(r.import_channel = 'zezhe')` : '1=1';
 
-    const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${regionFilter} AND ${yearFilter} AND ${nameFilter} AND ${accessLevelFilter} AND ${importChannelFilter}`;
+    // 2026-06-26: 21 sheet 文档库模式 - 按 sheet (doc_sheet 字段) 过滤
+    const sheetFilter = sheet ? `(r.doc_sheet = '${esc(sheet)}')` : '1=1';
+
+    const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${regionFilter} AND ${yearFilter} AND ${nameFilter} AND ${accessLevelFilter} AND ${importChannelFilter} AND ${sheetFilter}`;
 
     // 排序逻辑：
     //   1) has_tmdb DESC（有 TMDB 排前面）
@@ -188,6 +192,7 @@ export async function GET(request: NextRequest) {
     // ─── Fetch page ─────────────────────────────────────────────────────────
     const dbRows = await sql(`
       SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
+             r.doc_sheet, r.sub_type, r.lumen_cost,
              r.pay_type, r.code_price, r.lumen_cost, r.access_level, r.access_tier,
              COALESCE(c.release_date, r.created_at::text) as sort_date,
              ${dateWeight} as date_weight,
@@ -288,6 +293,9 @@ export async function GET(request: NextRequest) {
         size: item.size || '',
         type: item.type || '',
         tags: item.tags ? (Array.isArray(item.tags) ? item.tags : []) : [],
+        docSheet: item.doc_sheet || '',
+        subType: item.sub_type || '',
+        tmdbIdRaw: item.tmdb_id || '',
         tmdbId: tmdbOk ? (item.tmdb_id || null) : null,
         viewCount: item.view_count || 0,
         payType: item.pay_type || 'free',

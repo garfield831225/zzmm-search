@@ -4,7 +4,17 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 
-const ALL_CATEGORIES = ['全部', '电影', '剧集', '动漫', '少儿频道', '综艺', '纪录片', '音乐', '体育', '演唱会', '原盘', 'REMUX', '系列电影', '合集'];
+const ALL_SHEETS = [
+  '全部',
+  '国产剧', '欧美剧', '韩日剧', '港台剧',
+  '外语电影', '华语电影', '动画电影',
+  '动漫', '纪录片', '综艺', '演唱会',
+  '系列电影', '每日更新',
+  '原盘资源', '4K原盘', 'REMUX',
+  '音乐', '体育赛事', '少儿频道',
+  '合集',
+];
+
 const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '夸克网盘', '123网盘', '天翼云盘', '磁力链接', 'ed2k链接', '迅雷链接'];
 const SOURCE_KEY_MAP: Record<string, string> = {
   '115网盘': '115', '百度网盘': 'baidu', '阿里云盘': 'aliyun',
@@ -17,18 +27,26 @@ const SOURCE_DISPLAY_MAP: Record<string, string> = {
   'magnet': '磁力链接', 'ed2k': 'ed2k链接', 'thunder': '迅雷链接',
 };
 
-const CAT_ICONS: Record<string, string> = {
-  '电影': '🎬', '剧集': '📺', '动漫': '🈴', '少儿频道': '🧒', '综艺': '🎭',
-  '纪录片': '📽️', '音乐': '🎵', '体育': '⚽',
-  '演唱会': '🎤', '原盘': '💿', 'REMUX': '🔧', '系列电影': '🎞️', '合集': '📦',
+const SHEET_ICONS: Record<string, string> = {
+  '国产剧': '🇨🇳', '欧美剧': '🇺🇸', '韩日剧': '🇯🇵', '港台剧': '🇭🇰',
+  '外语电影': '🎬', '华语电影': '🎥', '动画电影': '🎞️',
+  '动漫': '🈴', '纪录片': '📽️', '综艺': '🎭', '演唱会': '🎤',
+  '系列电影': '🎞️', '每日更新': '🆕',
+  '原盘资源': '💿', '4K原盘': '4️⃣', 'REMUX': '🔧',
+  '音乐': '🎵', '体育赛事': '⚽', '少儿频道': '🧒',
+  '合集': '📦',
 };
 
 interface Toast { id: number; type: 'success' | 'copy' | 'error'; message: string; }
-interface Resource { id: number; name: string; link: string; link_code: string; source: string; category: string; size: string; }
+interface Resource {
+  id: number; name: string; link: string; linkCode?: string; source: string; category: string;
+  size?: string; type?: string; tags?: string[]; docSheet?: string; subType?: string;
+  tmdbIdRaw?: string; viewCount?: number;
+}
 
 export default function LibraryPage() {
   const [query, setQuery] = useState('');
-  const [category, setCategory] = useState('全部');
+  const [sheet, setSheet] = useState('全部');
   const [source, setSource] = useState('全部');
   const [items, setItems] = useState<Resource[]>([]);
   const [total, setTotal] = useState(0);
@@ -56,20 +74,21 @@ export default function LibraryPage() {
   const fetchItems = useCallback(async (p = 1) => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page: p.toString(), pageSize: pageSize.toString() });
+      const params = new URLSearchParams({ page: p.toString(), pageSize: pageSize.toString(), zone: 'library' });
       if (query) params.set('q', query);
-      if (category !== '全部') params.set('category', category);
+      if (sheet !== '全部') params.set('sheet', sheet);
       if (source !== '全部') params.set('source', source);
       const res = await fetch(`/api/search?${params}`);
       const data = await res.json();
-      setItems(p === 1 ? (data.items || []) : (prev: any[]) => [...prev, ...(data.items || [])]);
+      if (p === 1) setItems(data.items || []);
+      else setItems(prev => [...prev, ...(data.items || [])]);
       setTotal(data.total || 0);
       setPage(p);
     } catch { addToast('error', '加载失败'); }
     finally { setLoading(false); }
-  }, [query, category, source, pageSize, addToast]);
+  }, [query, sheet, source, pageSize, addToast]);
 
-  useEffect(() => { fetchItems(1); }, [category, source]);
+  useEffect(() => { fetchItems(1); }, [sheet, source]);
 
   const handleSearch = (e: React.FormEvent) => { e.preventDefault(); fetchItems(1); };
 
@@ -77,13 +96,13 @@ export default function LibraryPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-white border-b border-gray-200 shadow-sm">
-        <div className="max-w-8xl mx-auto px-4 py-3">
+        <div className="max-w-[1600px] mx-auto px-4 py-3">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-3">
               <Link href="/" className="w-9 h-9 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center text-lg">📋</Link>
               <div>
                 <h1 className="text-lg font-bold text-gray-900">资源库</h1>
-                <p className="text-xs text-gray-400">全类型搜索 · {total.toLocaleString()} 条</p>
+                <p className="text-xs text-gray-400">21 个分类 · {total.toLocaleString()} 条</p>
               </div>
             </div>
             <Link href="/" className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs transition text-gray-600">← 影视区</Link>
@@ -102,12 +121,12 @@ export default function LibraryPage() {
             </button>
           </form>
 
-          {/* Category filter */}
+          {/* Sheet filter - 21 sheet 文档库分类 */}
           <div className="flex gap-2 overflow-x-auto pb-2">
-            {ALL_CATEGORIES.map(cat => (
-              <button key={cat} onClick={() => { setCategory(cat); setPage(1); }}
-                className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition ${category === cat ? 'bg-violet-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-100 border border-gray-200'}`}>
-                {CAT_ICONS[cat] || '📁'} {cat}
+            {ALL_SHEETS.map(s => (
+              <button key={s} onClick={() => { setSheet(s); setPage(1); }}
+                className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition ${sheet === s ? 'bg-violet-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-100 border border-gray-200'}`}>
+                {s === '全部' ? '📁' : (SHEET_ICONS[s] || '📁')} {s}
               </button>
             ))}
           </div>
@@ -125,51 +144,86 @@ export default function LibraryPage() {
       </header>
 
       {/* Table */}
-      <main className="max-w-8xl mx-auto px-4 py-4">
+      <main className="max-w-[1600px] mx-auto px-4 py-4">
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-          {/* Table header */}
-          <div className="grid grid-cols-[80px_1fr_100px_100px_120px] gap-2 px-4 py-2.5 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-500 uppercase tracking-wide">
+          {/* Table header: 分类 / sheet / 名称 / 来源 / 大小 / 提取码 / 国别 / TMDB / 操作 */}
+          <div className="grid grid-cols-[60px_70px_1fr_80px_70px_70px_70px_70px_100px] gap-2 px-3 py-2 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-500 uppercase tracking-wide">
             <div>分类</div>
+            <div>Sheet</div>
             <div>名称</div>
             <div>来源</div>
             <div>大小</div>
+            <div>提取码</div>
+            <div>国别</div>
+            <div>TMDB</div>
             <div>操作</div>
           </div>
 
           {/* Table rows */}
-          {items.map((item) => (
-            <div key={item.id}
-              className="grid grid-cols-[80px_1fr_100px_100px_120px] gap-2 px-4 py-2.5 border-b border-gray-100 hover:bg-violet-50/30 transition text-sm items-center group">
-              <div>
-                <span className="text-base">{CAT_ICONS[item.category] || '📁'}</span>
-                <div className="text-xs text-gray-400">{item.category}</div>
+          {items.map((item) => {
+            const tmdbMatched = item.tmdbIdRaw && item.tmdbIdRaw !== 'NOMATCH' && item.tmdbIdRaw !== 'GARBLED' && item.tmdbIdRaw.length >= 4;
+            const country = item.subType || (item.tags && item.tags[0]) || '';
+            return (
+              <div key={item.id}
+                className="grid grid-cols-[60px_70px_1fr_80px_70px_70px_70px_70px_100px] gap-2 px-3 py-2 border-b border-gray-100 hover:bg-violet-50/30 transition text-sm items-center">
+                {/* 分类 */}
+                <div>
+                  <div className="text-base">{SHEET_ICONS[item.docSheet || ''] || '📁'}</div>
+                  <div className="text-[10px] text-gray-400 truncate">{item.category || '—'}</div>
+                </div>
+                {/* Sheet */}
+                <div className="text-xs text-gray-600 truncate" title={item.docSheet}>{item.docSheet || '—'}</div>
+                {/* 名称 */}
+                <div className="min-w-0">
+                  <div className="text-gray-900 font-medium text-sm leading-snug line-clamp-2" title={item.name}>{item.name}</div>
+                </div>
+                {/* 来源 */}
+                <div className="text-xs text-gray-500 truncate">{SOURCE_DISPLAY_MAP[item.source] || item.source}</div>
+                {/* 大小 */}
+                <div className="text-xs text-gray-400">{item.size || '—'}</div>
+                {/* 提取码 */}
+                <div className="text-xs">
+                  {item.linkCode ? (
+                    <button onClick={() => handleCopy(item.linkCode!)} className="px-2 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded text-[11px] font-mono" title="点击复制提取码">
+                      {item.linkCode}
+                    </button>
+                  ) : <span className="text-gray-300">—</span>}
+                </div>
+                {/* 国别 */}
+                <div className="text-xs text-gray-500 truncate">{country || '—'}</div>
+                {/* TMDB */}
+                <div className="text-xs">
+                  {tmdbMatched ? (
+                    <a href={`https://www.themoviedb.org/${item.type === 'tv' ? 'tv' : 'movie'}/${item.tmdbIdRaw}`}
+                       target="_blank" rel="noopener noreferrer"
+                       className="px-2 py-0.5 bg-green-100 hover:bg-green-200 text-green-700 rounded text-[11px] font-mono">
+                      🎬 {item.tmdbIdRaw}
+                    </a>
+                  ) : item.tmdbIdRaw === 'NOMATCH' ? (
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-[11px]">未匹配</span>
+                  ) : item.tmdbIdRaw === 'GARBLED' ? (
+                    <span className="px-2 py-0.5 bg-red-100 text-red-500 rounded text-[11px]">乱码</span>
+                  ) : (
+                    <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-[11px]">未匹配</span>
+                  )}
+                </div>
+                {/* 操作 */}
+                <div>
+                  {isMagnetOrEd2k(item.link) ? (
+                    <button onClick={() => handleCopy(item.link)}
+                      className="px-3 py-1 bg-violet-600 hover:bg-violet-500 rounded text-[11px] text-white font-medium transition">
+                      📋 复制
+                    </button>
+                  ) : (
+                    <a href={item.link} target="_blank" rel="noopener noreferrer"
+                      className="inline-block px-3 py-1 bg-violet-600 hover:bg-violet-500 rounded text-[11px] text-white font-medium transition">
+                      🔗 打开
+                    </a>
+                  )}
+                </div>
               </div>
-              <div className="min-w-0">
-                <div className="text-gray-900 font-medium text-sm leading-snug line-clamp-2">{item.name}</div>
-              </div>
-              <div className="text-xs text-gray-500 truncate">{SOURCE_DISPLAY_MAP[item.source] || item.source}</div>
-              <div className="text-xs text-gray-400">{item.size || '—'}</div>
-              <div>
-                {isMagnetOrEd2k(item.link) ? (
-                  <button
-                    onClick={() => handleCopy(item.link)}
-                    className="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs text-white font-medium transition whitespace-nowrap"
-                  >
-                    📋 复制
-                  </button>
-                ) : (
-                  <a
-                    href={item.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-block px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs text-white font-medium transition whitespace-nowrap"
-                  >
-                    🔗 打开
-                  </a>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
 
           {items.length === 0 && !loading && (
             <div className="py-16 text-center text-gray-400 text-sm">
