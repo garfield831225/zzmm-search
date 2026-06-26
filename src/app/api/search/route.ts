@@ -147,10 +147,15 @@ export async function GET(request: NextRequest) {
     // 2026-06-09: 按 userGroup 动态生成 access_level 过滤
     // admin/vip → 全部; basic → document(泽泽妈文档)+单资源付费; user → 空
     // 2026-06-26: 没 free 类别了, 未登录/user 组一律返空 → 必须激活 basic
-    // 2026-06-26: /library 公开资源库例外 - 任何登录用户都能看 document 资源
+    // 2026-06-26: /library 公开资源库 - basic+ 才能看, user 组和未登录 → 0 条
     if (isLibraryZone) {
-      // /library 公开页: 登录后都能看 basic 资源 (document/泽泽妈文档)
-      accessLevelFilter = "(r.access_level IN ('basic', 'code'))";
+      // /library 公开页: 必须 basic/vip/admin 才能看 (用户要求)
+      if (['admin', 'vip', 'basic', 'member'].includes(userGroup)) {
+        accessLevelFilter = "(r.access_level IN ('basic', 'vip', 'code'))";
+      } else {
+        // 未登录 / user 组 → 0 条
+        accessLevelFilter = "(1=0)";
+      }
     } else if (['admin', 'vip'].includes(userGroup)) {
       accessLevelFilter = "(r.access_level IN ('basic', 'vip', 'code'))";
     } else if (['basic', 'member'].includes(userGroup)) {
