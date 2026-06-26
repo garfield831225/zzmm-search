@@ -4,15 +4,40 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv, Shield } from 'lucide-react';
+import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv, Shield, TrendingUp, Clock, Star } from 'lucide-react';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
 
-const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频道', '综艺', '演唱会', '纪录片', '原盘', 'REMUX', '系列电影'];
+// 2026-06-26: 筛选器重做 - 只保留泽泽妈文档实际分类 (按资源数倒序)
+const CATEGORIES = [
+  { id: '全部', label: '全部', icon: '✨' },
+  { id: '电影', label: '电影', icon: '🎬' },
+  { id: '剧集', label: '剧集', icon: '📺' },
+  { id: '原盘', label: '原盘', icon: '💿' },
+  { id: '动漫', label: '动漫', icon: '🎨' },
+  { id: '纪录片', label: '纪录片', icon: '📚' },
+  { id: '演唱会', label: '演唱会', icon: '🎤' },
+  { id: '综艺', label: '综艺', icon: '🎉' },
+  { id: '音乐', label: '音乐', icon: '🎵' },
+  { id: '系列电影', label: '系列电影', icon: '📀' },
+  { id: 'REMUX', label: 'REMUX', icon: '🔰' },
+  { id: '连载', label: '连载', icon: '⏳' },
+  { id: '体育', label: '体育', icon: '⚽' },
+  { id: '合集', label: '合集', icon: '📦' },
+];
 const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '夸克网盘', '磁力链接', 'ed2k链接'];
-const REGIONS = ['全部', '大陆', '欧美', '日韩', '港澳台'];
-const YEARS = ['全部', '2026', '2025', '2024', '2023', '2022', '2021', '2020', '2010-2019', '2000-2009'];
+// 2026-06-26: 区域 5 大类 (按用户视角, 不按 country code)
+const REGIONS = [
+  { id: '全部', label: '全部' },
+  { id: '大陆', label: '🇨🇳 大陆' },
+  { id: '港澳台', label: '🇭🇰 港澳台' },
+  { id: '欧美', label: '🇺🇸 欧美' },
+  { id: '日韩', label: '🇯🇵 日韩' },
+  { id: '其他', label: '🌍 其他' },
+];
+// 2026-06-26: 年代从数据库动态生成, 这里先放 5 年分组 (近 30 年)
+const YEARS = ['全部', '2025', '2024', '2023', '2022', '2021', '2020-2024', '2015-2019', '2010-2014', '更早'];
 
 interface DownloadToast {
   id: number;
@@ -92,7 +117,7 @@ export default function HomePage() {
   const [source, setSource] = useState('全部');
   const [region, setRegion] = useState('全部');
   const [year, setYear] = useState('全部');
-  const [sort, setSort] = useState('release_date');
+  const [sort, setSort] = useState('hot');  // 2026-06-26 默认按热度
   const [pageSize, setPageSize] = useState(30);
   const [items, setItems] = useState<ResourceItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -450,37 +475,42 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Filter Bar */}
-          <div className="flex flex-col gap-2 mt-4">
-            {/* 分类 */}
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+{/* Filter Bar - 重做: 单行紧凑布局 */}
+          <div className="mt-4 bg-[#12121a]/60 rounded-xl p-3 border border-white/5 space-y-2">
+            {/* 分类 - 大按钮网格 */}
+            <div className="flex gap-1.5 flex-wrap">
               {CATEGORIES.map((cat) => (
-                <button key={cat} onClick={() => setCategory(cat)}
-                  className={`px-4 py-1.5 rounded-full text-sm whitespace-nowrap transition shrink-0 ${category === cat ? 'bg-violet-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{cat}</button>
+                <button key={cat.id} onClick={() => setCategory(cat.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition flex items-center gap-1 ${category === cat.id ? 'bg-violet-600 text-white font-medium shadow-lg shadow-violet-600/30' : 'bg-white/5 text-white/70 hover:bg-white/10'}`}>
+                  <span>{cat.icon}</span>{cat.label}
+                </button>
               ))}
             </div>
-            {/* 来源 */}
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-              {SOURCES.map((src) => (
-                <button key={src} onClick={() => setSource(src)}
-                  className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition shrink-0 ${source === src ? 'bg-pink-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{src}</button>
-              ))}
-            </div>
-            {/* 地区 */}
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-              <span className="text-xs text-white/30 self-center mr-1 shrink-0">地区</span>
-              {REGIONS.map((r) => (
-                <button key={r} onClick={() => setRegion(r)}
-                  className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition shrink-0 ${region === r ? 'bg-orange-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{r}</button>
-              ))}
-            </div>
-            {/* 年份 */}
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-              <span className="text-xs text-white/30 self-center mr-1 shrink-0">年份</span>
-              {YEARS.map((y) => (
-                <button key={y} onClick={() => setYear(y)}
-                  className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition shrink-0 ${year === y ? 'bg-cyan-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{y}</button>
-              ))}
+            {/* 来源 + 区域 + 年份 一行 */}
+            <div className="flex gap-2 flex-wrap items-center text-xs">
+              <span className="text-white/30 shrink-0">📦</span>
+              <div className="flex gap-1 flex-wrap">
+                {SOURCES.map((src) => (
+                  <button key={src} onClick={() => setSource(src)}
+                    className={`px-2 py-0.5 rounded text-xs whitespace-nowrap transition ${source === src ? 'bg-pink-600 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>{src}</button>
+                ))}
+              </div>
+              <span className="text-white/20">|</span>
+              <span className="text-white/30 shrink-0">🌏</span>
+              <div className="flex gap-1 flex-wrap">
+                {REGIONS.map((r) => (
+                  <button key={r.id} onClick={() => setRegion(r.id)}
+                    className={`px-2 py-0.5 rounded text-xs whitespace-nowrap transition ${region === r.id ? 'bg-orange-600 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>{r.label}</button>
+                ))}
+              </div>
+              <span className="text-white/20">|</span>
+              <span className="text-white/30 shrink-0">📅</span>
+              <div className="flex gap-1 flex-wrap">
+                {YEARS.map((y) => (
+                  <button key={y} onClick={() => setYear(y)}
+                    className={`px-2 py-0.5 rounded text-xs whitespace-nowrap transition ${year === y ? 'bg-cyan-600 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'}`}>{y}</button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -488,30 +518,42 @@ export default function HomePage() {
 
       {/* Content */}
       <main className="max-w-7xl mx-auto px-4 py-6">
-        {/* Sort & Size Bar */}
+        {/* Sort & Size Bar - 重做: 默认按热度 */}
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4 px-1">
           <div className="flex items-center gap-2">
             <span className="text-xs text-white/40">排序</span>
             <div className="flex gap-1">
+              <button onClick={() => setSort('hot')}
+                className={`px-3 py-1.5 rounded-lg text-xs transition flex items-center gap-1 ${sort === 'hot' ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white font-medium' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>
+                <TrendingUp className="w-3 h-3" /> 热度
+              </button>
+              <button onClick={() => setSort('rating')}
+                className={`px-3 py-1.5 rounded-lg text-xs transition flex items-center gap-1 ${sort === 'rating' ? 'bg-amber-600 text-white font-medium' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>
+                <Star className="w-3 h-3" /> 评分
+              </button>
               <button onClick={() => setSort('release_date')}
-                className={`px-3 py-1 rounded-full text-xs transition ${sort === 'release_date' ? 'bg-violet-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>🎬 上映</button>
+                className={`px-3 py-1.5 rounded-lg text-xs transition flex items-center gap-1 ${sort === 'release_date' ? 'bg-violet-600 text-white font-medium' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>
+                <Film className="w-3 h-3" /> 上映
+              </button>
               <button onClick={() => setSort('added_time')}
-                className={`px-3 py-1 rounded-full text-xs transition ${sort === 'added_time' ? 'bg-violet-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>📅 上架</button>
+                className={`px-3 py-1.5 rounded-lg text-xs transition flex items-center gap-1 ${sort === 'added_time' ? 'bg-emerald-600 text-white font-medium' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>
+                <Clock className="w-3 h-3" /> 上架
+              </button>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-white/40 hidden sm:inline">每页</span>
             <div className="flex gap-1">
-              {[30, 90, 150].map((s) => (
+              {[30, 60, 120].map((s) => (
                   <button key={s} onClick={() => { latestRef.current = { ...latestRef.current, pageSize: s }; setPageSize(s); }}
-                  className={`px-3 py-1 rounded-full text-xs transition ${pageSize === s ? 'bg-pink-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{s}</button>
-              ))}
+                  className={`px-2.5 py-1 rounded text-xs transition ${pageSize === s ? 'bg-pink-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{s}</button>
+                ))}
             </div>
           </div>
         </div>
 
         {/* Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
           {(() => {
             // 2026-06-03: 连载/剧集/动漫/综艺 按 category + tmdb_id 折叠
             // 显示最新一条 + "+N 集"徽章
@@ -542,94 +584,61 @@ export default function HomePage() {
             <motion.div key={item.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               className="group cursor-pointer" onClick={() => handleItemClick(item)}
             >
-              {/* Poster */}
-              <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-3">
+              {/* Poster - 干净简洁 */}
+              <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-2 shadow-lg group-hover:shadow-violet-500/20 transition-shadow">
                 {item.tmdb?.poster_path ? (
                   <img src={`${TMDB_IMAGE_BASE}${item.tmdb.poster_path}`} alt={item.name}
                     className="w-full h-full object-cover transition group-hover:scale-105"
                     onError={(e) => { (e.target as HTMLImageElement).src = TMDB_IMAGE_FALLBACK; }} />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-violet-900/30 to-pink-900/30">🎬</div>
+                  <div className="w-full h-full flex items-center justify-center text-5xl bg-gradient-to-br from-violet-900/30 to-pink-900/30">🎬</div>
                 )}
 
-                {/* Bottom Info Bar */}
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-2 pt-6 pb-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-white/80">{item.tmdb?.release_date?.slice(0, 4) || ''}</span>
+                {/* 仅显示 2 个最关键徽章: 左上 access_tier, 右上 多集 */}
+                {item.accessLevel === 'vip' && (
+                  <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-gradient-to-r from-amber-500 to-orange-500 text-black text-[10px] rounded font-bold">👑 VIP</div>
+                )}
+                {item.accessLevel === 'code' && (
+                  <div className="absolute top-2 left-2 px-1.5 py-0.5 bg-yellow-500 text-black text-[10px] rounded font-bold">💎¥{item.codePrice || 0}</div>
+                )}
+                {/* 同 TMDB 多片 */}
+                {extraCount > 0 && (
+                  <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-amber-500 text-black text-[10px] rounded font-bold">
+                    +{extraCount} 片
+                  </div>
+                )}
+
+                {/* 底部: 年份 + 评分 (一行紧凑) */}
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent px-2 pt-4 pb-1.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-white/80">{item.tmdb?.release_date?.slice(0, 4) || (item.size ? '' : '未知年份')}</span>
                     {item.tmdb?.vote_average && (
-                      <StarRating score={parseFloat(item.tmdb.vote_average)} />
+                      <span className="flex items-center gap-0.5 text-amber-300">
+                        ⭐ {parseFloat(item.tmdb.vote_average).toFixed(1)}
+                      </span>
                     )}
                   </div>
                 </div>
 
-                {/* Tags */}
-                <div className="absolute top-2 left-2 flex flex-wrap gap-1">
-                  {item.tags?.slice(0, 2).map((tag) => (
-                    <span key={tag} className="px-2 py-0.5 bg-violet-600/80 text-xs rounded">{tag}</span>
-                  ))}
-                  {/* 2026-06-03: 同 TMDB 多集徽章 */}
-                  {extraCount > 0 && (
-                    <span className="px-2 py-0.5 bg-amber-500/90 text-black text-xs rounded font-medium">
-                      +{extraCount} 集
-                    </span>
-                  )}
-                </div>
-
-                {/* Source Badge */}
-                <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
-                  <span className="px-2 py-0.5 bg-pink-600/80 text-xs rounded">{item.source}</span>
-                  {/* 2026-06-25: access_tier 标识 - 2026-06-26 没 free 类, 只 3 种 */}
-                  {item.accessLevel === 'vip' && (
-                    <span className="px-2 py-0.5 bg-gradient-to-r from-amber-500 to-orange-500 text-black text-xs rounded font-medium">
-                      👑 VIP
-                    </span>
-                  )}
-                  {item.accessLevel === 'code' && (
-                    <span className="px-2 py-0.5 bg-gradient-to-r from-yellow-500 to-amber-500 text-black text-xs rounded font-medium">
-                      💎 单资源付费
-                    </span>
-                  )}
-                  {item.accessLevel === 'basic' && (
-                    <span className="px-2 py-0.5 bg-sky-500/30 border border-sky-500/40 text-sky-300 text-xs rounded">
-                      📚 泽泽妈文档
-                    </span>
-                  )}
-                  {/* 2026-06-03 单资源付费标记 */}
-                  {item.payType === 'code' && !item.unlocked && (
-                    <span className="px-2 py-0.5 bg-yellow-500/90 text-black text-xs rounded font-medium">
-                      ¥{item.codePrice || 0} 解锁
-                    </span>
-                  )}
-                  {item.payType === 'code' && item.unlocked && (
-                    <span className="px-2 py-0.5 bg-green-500/90 text-white text-xs rounded font-medium">
-                      ✓ 已解锁
-                    </span>
-                  )}
-                  {item.payType === 'code' && (item.lumenCost ?? 1) > 0 && !item.unlocked && (
-                    <span className="px-2 py-0.5 bg-violet-500/80 text-white text-xs rounded font-medium">
-                      💎 {item.lumenCost ?? 1}
-                    </span>
-                  )}
-                </div>
-
-                {/* Overlay + Action */}
-                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+                {/* Hover 操作按钮 - 底部居中 */}
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
                   {isMagnetOrEd2k(item.link) ? (
                     <button onClick={(e) => { e.stopPropagation(); handleCopyLink(item.link, e); }}
-                      className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-sm font-medium">📋 复制链接</button>
+                      className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-xs font-medium">📋 复制</button>
                   ) : (
                     <button onClick={(e) => { e.stopPropagation(); handleDirectOpen(item.link, e); }}
-                      className="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium">🔗 打开</button>
+                      className="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs font-medium">🔗 打开</button>
                   )}
                 </div>
               </div>
 
-              {/* Info */}
-              <div className="space-y-1">
-                <h3 className="font-medium text-sm line-clamp-2 leading-tight">{item.name}</h3>
-                <div className="flex items-center gap-2 text-xs text-white/40">
-                  <span>{item.category}</span>
-                  {item.size && <span>📦 {item.size}</span>}
+              {/* Info: 片名 1 行 + 元数据 1 行 */}
+              <div className="space-y-0.5">
+                <h3 className="font-medium text-sm text-white/90 line-clamp-2 leading-tight min-h-[2.5em]">{item.name}</h3>
+                <div className="flex items-center gap-1.5 text-[11px] text-white/40 leading-tight">
+                  <span className="text-white/50">{item.category}</span>
+                  {item.size && <span>· 📦 {item.size}</span>}
+                  {item.unlocked && <span className="text-emerald-400">· ✓已解锁</span>}
                 </div>
               </div>
             </motion.div>

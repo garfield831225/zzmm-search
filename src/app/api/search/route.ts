@@ -172,7 +172,13 @@ export async function GET(request: NextRequest) {
     END)`;
     const orderClause = sort === 'added_time'
       ? `has_tmdb DESC, ${dateWeight}, r.created_at DESC`
-      : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`;
+      : sort === 'hot'
+        // 2026-06-26: 热度 = (view_count + 1) * (TMDB 投票数 / 100 + 1), 再降序
+        ? `has_tmdb DESC, ((COALESCE(r.view_count, 0) + 1) * (COALESCE(c.vote_count, 0) / 100.0 + 1)) DESC, ${dateWeight}`
+        : sort === 'rating'
+          // 评分 = TMDB vote_average (高到低), 有数据优先
+          ? `has_tmdb DESC, c.vote_average DESC NULLS LAST, c.vote_count DESC, ${dateWeight}`
+          : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`;
     const offset = (page - 1) * pageSize;
 
     // ─── Count ────────────────────────────────────────────────────────────────
