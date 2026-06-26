@@ -208,7 +208,11 @@ export default function HomePage() {
       if (reg !== '全部') params.set('region', reg);
       if (yr !== '全部') params.set('year', yr);
       params.set('sort', s);
-      const res = await fetch(`/api/search?${params}`);
+      // 2026-06-26: 传 Bearer token 让 search API 识别 admin/basic/vip user_group, 否则永远 0 条
+      const token = localStorage.getItem('token') || '';
+      const res = await fetch(`/api/search?${params}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       const data: SearchResponse = await res.json();
       setItems(data.items ?? []);
       setTotal(data.total ?? 0);

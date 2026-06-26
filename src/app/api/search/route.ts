@@ -122,9 +122,16 @@ export async function GET(request: NextRequest) {
     let userGroup: string = 'user';
     if (zone === 'film') {
       try {
+        // 2026-06-26: 同时支持 Bearer header 和 zzmm_token cookie (前者优先)
+        let token: string | null = null;
         const authHeader = request.headers.get('authorization');
         if (authHeader?.startsWith('Bearer ')) {
-          const token = authHeader.replace('Bearer ', '');
+          token = authHeader.replace('Bearer ', '');
+        } else {
+          const cookieToken = request.cookies.get('zzmm_token')?.value;
+          if (cookieToken) token = cookieToken;
+        }
+        if (token) {
           const payload = jwt.verify(token, (process.env.JWT_SECRET || 'cLWhs2015')) as any;
           const userId = String(payload.id);
           userGroup = (payload.group || 'user').toLowerCase();
