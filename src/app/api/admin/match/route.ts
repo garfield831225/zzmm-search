@@ -307,6 +307,22 @@ function subTypeToTmdb(subType: string | null): 'movie' | 'tv' {
 async function matchOne(rawName: string, category: string, subType: string | null): Promise<{ id: string; tmdb_type: 'movie' | 'tv'; poster: string; title: string; vote: number; year: string } | 'GARBLED' | 'NOMATCH'> {
   if (isGarbled(rawName)) return 'GARBLED';
 
+  // 2026-06-26: 直接从名字里提取 {tmdb-XXXXX} 占位符（之前泽泽妈的资源名里带这个）
+  const tmdbMatch = rawName.match(/\{tmdb-(\d+)\}/);
+  if (tmdbMatch) {
+    const tmdbId = tmdbMatch[1];
+    let tmdbType: 'movie' | 'tv' = 'movie';
+    if (['剧集', '动漫', '综艺', '少儿频道'].includes(category)) tmdbType = 'tv';
+    return {
+      id: tmdbId,
+      tmdb_type: tmdbType,
+      poster: '',
+      title: rawName.replace(/\s*\{tmdb-\d+\}/, '').trim(),
+      vote: 0,
+      year: '',
+    };
+  }
+
   const { cleanName, year, season } = cleanFolderName(rawName);
   if (cleanName.length < 2) return 'NOMATCH';
 
