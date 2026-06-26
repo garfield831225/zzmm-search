@@ -173,11 +173,11 @@ export async function GET(request: NextRequest) {
     const orderClause = sort === 'added_time'
       ? `has_tmdb DESC, ${dateWeight}, r.created_at DESC`
       : sort === 'hot'
-        // 2026-06-26: 热度 = (view_count + 1) * (TMDB 投票数 / 100 + 1), 再降序
-        ? `has_tmdb DESC, ((COALESCE(r.view_count, 0) + 1) * (COALESCE(c.vote_count, 0) / 100.0 + 1)) DESC, ${dateWeight}`
+        // 2026-06-26: 热度 = view_count + TMDB 投票数/100 + 最近天数加分, 整数计算避免类型不匹配
+        ? `has_tmdb DESC, (COALESCE(r.view_count, 0) + COALESCE(NULLIF(c.vote_count, '')::int, 0) / 100) DESC, ${dateWeight}`
         : sort === 'rating'
           // 评分 = TMDB vote_average (高到低), 有数据优先
-          ? `has_tmdb DESC, c.vote_average DESC NULLS LAST, c.vote_count DESC, ${dateWeight}`
+          ? `has_tmdb DESC, c.vote_average DESC NULLS LAST, COALESCE(NULLIF(c.vote_count, '')::int, 0) DESC, ${dateWeight}`
           : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`;
     const offset = (page - 1) * pageSize;
 
