@@ -292,6 +292,28 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, 
         return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
       }
     }
+    // 2026-07-09 第三优先: sub-string 匹配 (TMDB 候选名是 cleanName + 季/集/国别等后缀)
+    // 例: clean="心间错" → TMDB 候选="心间错 第一季" → 包含关系, 且 cn.length >= 2
+    // 限制: tn - cn <= 6 字符 (后缀不能太长, 避免错配"情书"→"给阿嫲的情书")
+    for (const c of candidates) {
+      if (!isPreferred(category, type, c.status)) continue;
+      const t = c.result.title || c.result.name || '';
+      if (!t) continue;
+      const tn = norm(t);
+      if (tn.includes(cn) && cn.length >= 2 && tn.length - cn.length <= 6) {
+        return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
+      }
+    }
+    // 第四优先: 前缀匹配 (cleanName 是 tn 的开头, 防止"长名"候选)
+    for (const c of candidates) {
+      if (!isPreferred(category, type, c.status)) continue;
+      const t = c.result.title || c.result.name || '';
+      if (!t) continue;
+      const tn = norm(t);
+      if (tn.startsWith(cn) && cn.length >= 2) {
+        return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
+      }
+    }
     return null;
   } catch { return null; }
 }
