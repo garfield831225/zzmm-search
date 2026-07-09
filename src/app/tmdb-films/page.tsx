@@ -279,7 +279,7 @@ function Card({ item, idx, router }: { item: Item; idx: number; router: any }) {
     const r = item;
     return (
       <div
-        onClick={() => router.push(`/tmdb-films/${r.tmdb_id}?type=${r.tmdb_type}`)}
+        onClick={() => router.push(`/tmdb/${r.tmdb_type}/${r.tmdb_id}`)}
         className="group cursor-pointer"
       >
         <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-gray-800 transition-all duration-300 group-hover:scale-105 group-hover:shadow-2xl group-hover:shadow-violet-500/30 group-hover:ring-2 group-hover:ring-violet-500/50">
@@ -355,7 +355,7 @@ function Card({ item, idx, router }: { item: Item; idx: number; router: any }) {
   const r = item;
   return (
     <div
-      onClick={() => router.push(`/tmdb-films/${r.tmdb_id}?type=${r.tmdb_type}`)}
+      onClick={() => router.push(`/tmdb/${r.tmdb_type}/${r.tmdb_id}`)}
       className="group cursor-pointer"
     >
       <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-gray-800 transition-all duration-300 group-hover:scale-105 group-hover:shadow-2xl group-hover:shadow-pink-500/30 group-hover:ring-2 group-hover:ring-pink-500/50">

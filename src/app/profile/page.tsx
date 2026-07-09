@@ -36,6 +36,8 @@ interface UnlockRecord {
   source: string | null;
   lumen_cost: number;
   unlocked_at: string;
+  resource_type?: string | null;  // 2026-07-10 加: movie/tv
+  tmdb_id?: string | null;
 }
 
 export default function ProfilePage() {
@@ -282,7 +284,7 @@ export default function ProfilePage() {
                     <tr key={u.id} className="border-b border-white/5 hover:bg-white/5">
                       <td className="py-2 text-white/60 text-xs">{new Date(u.unlocked_at).toLocaleString('zh-CN')}</td>
                       <td className="py-2">
-                        <Link href={`/tmdb-films/${u.resource_id}`} className="text-violet-300 hover:underline">
+                        <Link href={`/tmdb/${u.resource_type || 'movie'}/${u.tmdb_id || u.resource_id}`} className="text-violet-300 hover:underline">
                           {u.resource_name?.slice(0, 30) || `#${u.resource_id}`}
                         </Link>
                       </td>

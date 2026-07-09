@@ -486,6 +486,7 @@ export async function GET(req: Request) {
   const batchSize = Math.min(1000, Math.max(50, parseInt(searchParams.get('batchSize') || '500')));
   const fromId = parseInt(searchParams.get('fromId') || '0');  // 2026-07-09: 支持跳过老资源
   const recoverMode = searchParams.get('recover') === '1';
+  console.log('[match GET]', { batchSize, fromId, recoverMode });
 
   try {
     // 2026-06-04 恢复模式: 用 SQL CTE 找对应 cache 然后 UPDATE（不用 CROSS JOIN）
@@ -543,18 +544,12 @@ export async function GET(req: Request) {
         AND status = 'active'
         AND name IS NOT NULL
         AND LENGTH(name) > 5
-        -- 必须含中文字符（2026-07-09 修：position(E'\u4e00'...) 和 chr(19968) 在 Neon serverless Pool
-        --    都不解析 unicode codepoint, 只能字面匹配。改用 ~ 正则, 驱动层支持 \u escape）
         AND name ~ '[\u4e00-\u9fff]'
         AND category NOT IN ('音乐', '体育', '合集', '学习资料', '其他', '游戏', '电子书', '精品课', '文档')
-        -- 2026-07-09: 支持 ?fromId=350000 跳过老资源
         AND id > ${fromId}
-        -- 2026-06-05: 修复 round-robin 反复扫前 500 条已 NOMATCH 记录的 bug
-        -- 只取 5 分钟内没尝试过的（NULL 或 > 5 分钟前的重试）
         AND (last_attempt_at IS NULL OR last_attempt_at < NOW() - INTERVAL '5 minutes')
       ORDER BY id
       LIMIT ${batchSize}
-      FOR UPDATE SKIP LOCKED
     ` as any[];
 
     if (!rows.length) {

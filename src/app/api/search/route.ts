@@ -310,10 +310,10 @@ export async function GET(request: NextRequest) {
         tmdbId: tmdbOk ? (item.tmdb_id || null) : null,
         viewCount: item.view_count || 0,
         payType: item.pay_type || 'free',
-        accessLevel: item.access_level || 'basic',  // 2026-06-04
-        accessTier: item.access_tier || 'document',  // 2026-06-25 资源分级
+        accessLevel: item.access_level || 'basic',
+        accessTier: item.access_tier || 'document',
         codePrice: item.code_price ? Number(item.code_price) : 0,
-        lumenCost: item.lumen_cost ?? 1,  // 2026-06-25 单条定价流明
+        lumenCost: item.lumen_cost ?? 1,
         unlocked: userUnlockedIds.has(item.id),
         tmdb: tmdbOk && item.tmdb_id ? (tmdbMap.get(item.tmdb_id) || null) : null,
         musicCover: item.category === '音乐' ? (musicCoverMap.get(item.id) || null) : null,
@@ -321,6 +321,27 @@ export async function GET(request: NextRequest) {
         sportsCover: item.category === '体育' ? (sportsCoverMap.get(item.id) || null) : null,
       };
     });
+
+    // ─── 2026-07-10: 应用层 dedup by tmdb_id（用户要求同 TMDB 只一张卡片）────
+    // 同一 tmdb_id 多条时选评分最高 (vote_average desc → vote_count desc → 最新)
+    const dedupByTmdb = searchParams.get('dedupBy') === 'tmdb_id' || zone === 'film';
+    if (dedupByTmdb) {
+      const seen = new Set<string>();
+      const deduped: any[] = [];
+      for (const it of items) {
+        const tid = it.tmdbIdRaw;
+        if (!tid) {
+          // 无 tmdb_id 的孤儿记录保留
+          deduped.push(it);
+          continue;
+        }
+        if (seen.has(tid)) continue;
+        seen.add(tid);
+        deduped.push(it);
+      }
+      items.length = 0;
+      items.push(...deduped);
+    }
 
     return NextResponse.json({
       total,
