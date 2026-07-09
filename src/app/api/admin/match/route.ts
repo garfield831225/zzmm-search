@@ -96,7 +96,8 @@ function cleanFolderName(raw: string): { cleanName: string; year: string; season
   // 2026-06-03: 在主流程入口就剥掉「第X季」「Sxx」「(YYYY)」字样，避免干扰 TMDB 搜索
   // 例：「乘风第七季」→ 「乘风」,「开始推理吧 第四季」→ 「开始推理吧」
   // 例：「老友记 第一季（1994）」→ 「老友记」（不剥 year 不然搜不到 Friends 1994）
-  // 2026-07-09: 新加常见后缀 token 剥除 (杜比视界/杜比音效/IMAX 增强版/4K 修复/导演剪辑/终极版/加长版 等)
+  // 2026-07-09: 新加常见后缀 token 剥除
+  // 2026-07-09: 智能续集识别 - "真人快打2" 搜不到时, 降级搜 "真人快打" (TMDB 用系列名)
   raw = raw
     .replace(/第[一二三四五六七八九十\d]+季/g, '')
     .replace(/S\d{1,2}(?=[^\d]|$)/gi, '')
@@ -105,6 +106,9 @@ function cleanFolderName(raw: string): { cleanName: string; year: string; season
     .replace(/\s+(杜比视界|杜比音效|Dolby\s*Vision|Dolby\s*Atmos|IMAX\s*Enhanced|IMAX|4K\s*修复|导演剪辑版?|终极版|加长版|特别版|抢先版|正式版|国语配音|国配|港版|台版|美版|日版|韩版|欧版|东南亚版|英版|重制版|修复版|高码|高码率)\s*$/i, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
+
+  // 2026-07-09: 如果尾部是 "X" 或 "XX" (纯数字), 可能是续集. 主搜失败后, 在 matchOne 里降级搜不带数字版
+  // 这里不直接剥, 由 matchOne 决定
 
   // A1: 片名.规格（排除片名.年份）
   const firstDot = raw.indexOf('.');
@@ -269,34 +273,23 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, 
 
     // 2026-06-03 修：必须 1:1 严格匹配（length 相等 + norm 完全相等）才返回
     // 修复「情书」被错配到「给阿嫲的情书」（子串命中但长度差 3 倍）
+    // 2026-07-09 改: 1:1 匹配也去掉 isPreferred 过滤 (用户原话"宁可错配别漏配", 状态过滤导致 100% 漏配)
     const norm = (s: string) => s.toLowerCase().replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '');
     const cn = norm(name);
-    // 第一优先：按 category 偏好状态 + 1:1 匹配
-    for (const c of candidates) {
-      if (!isPreferred(category, type, c.status)) continue;
-      const t = c.result.title || c.result.name || '';
-      if (!t) continue;
-      const tn = norm(t);
-      if (tn.length !== cn.length) continue;  // 长度必须相等
-      if (tn === cn) {
-        return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
-      }
-    }
-    // 第二优先：其他允许的状态 + 1:1 匹配
+    // 第一优先: 1:1 匹配 (任何状态)
     for (const c of candidates) {
       const t = c.result.title || c.result.name || '';
       if (!t) continue;
       const tn = norm(t);
-      if (tn.length !== cn.length) continue;
-      if (tn === cn) {
+      if (tn.length === cn.length && tn === cn) {
         return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
       }
     }
     // 2026-07-09 第三优先: sub-string 匹配 (TMDB 候选名是 cleanName + 季/集/国别等后缀)
     // 例: clean="心间错" → TMDB 候选="心间错 第一季" → 包含关系, 且 cn.length >= 2
     // 限制: tn - cn <= 6 字符 (后缀不能太长, 避免错配"情书"→"给阿嫲的情书")
+    // 不走 isPreferred 过滤 (用户原话"匹配不上是你的问题", 宁可错配别漏配)
     for (const c of candidates) {
-      if (!isPreferred(category, type, c.status)) continue;
       const t = c.result.title || c.result.name || '';
       if (!t) continue;
       const tn = norm(t);
@@ -306,7 +299,6 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, 
     }
     // 第四优先: 前缀匹配 (cleanName 是 tn 的开头, 防止"长名"候选)
     for (const c of candidates) {
-      if (!isPreferred(category, type, c.status)) continue;
       const t = c.result.title || c.result.name || '';
       if (!t) continue;
       const tn = norm(t);
@@ -402,6 +394,28 @@ async function matchOne(rawName: string, category: string, subType: string | nul
             vote: result.vote_average || 0,
             year: (result.release_date || result.first_air_date || '').slice(0, 4) || year,
           };
+        }
+      }
+    }
+
+    // 2026-07-09: 降级搜不带尾部数字的版本 (续集匹配系列名)
+    // "真人快打2" 搜不到时, 搜 "真人快打" 让 TMDB 返回系列第一季
+    const noTrailingNum = cleanName.replace(/[\s:：\-]?\d{1,2}\s*$/, '').trim();
+    if (noTrailingNum !== cleanName && noTrailingNum.length >= 2) {
+      for (const s of strategies) {
+        for (const type of typeOrder) {
+          const result = await searchTmdb(noTrailingNum, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length);
+          keyIdx++;
+          if (result) {
+            return {
+              id: String(result.id),
+              tmdb_type: type,
+              poster: result.poster_path ? `${TMDB_IMG}${result.poster_path}` : '',
+              title: result.title || result.name || noTrailingNum,
+              vote: result.vote_average || 0,
+              year: (result.release_date || result.first_air_date || '').slice(0, 4) || year,
+            };
+          }
         }
       }
     }
