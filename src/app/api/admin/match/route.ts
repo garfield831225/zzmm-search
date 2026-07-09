@@ -260,14 +260,15 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, 
     const data = await res.json();
     if (!data.results?.length) return null;
 
-    // 先收集所有候选的 status
+    // 先收集所有候选的 status (2026-07-09: 用 search result 自带的 status, 不再调 getTmdbDetails - 慢 + 60s 限制)
+    // search result 里 status 字段对 tv 是 'Returning Series'/'Ended'/'Canceled'/'In Production'/'Planned'
+    // 对 movie 是 'Released'/'In Production'/'Planned'/'Canceled'/'Rumored'
     const candidates: Array<{ result: any; status: string | undefined }> = [];
     for (const r of data.results) {
-      const detail = await getTmdbDetails(String(r.id), type, keyIndex);
-      if (!detail) continue;
-      if (!isStatusOk(type, detail.status)) continue;  // 黑名单直接跳
-      candidates.push({ result: r, status: detail.status });
-      if (candidates.length >= 8) break;  // 限制每个搜索最多 8 个候选，避免过多 detail 调用
+      const status = r.status || (type === 'tv' ? r.status || 'Unknown' : r.release_date ? 'Released' : 'Unknown');
+      if (!isStatusOk(type, status)) continue;  // 黑名单直接跳
+      candidates.push({ result: r, status });
+      if (candidates.length >= 8) break;
     }
     if (candidates.length === 0) return null;
 
@@ -483,6 +484,7 @@ export async function GET(req: Request) {
 
   const sql = neon(process.env.DATABASE_URL || '');
   const batchSize = Math.min(1000, Math.max(50, parseInt(searchParams.get('batchSize') || '500')));
+  const fromId = parseInt(searchParams.get('fromId') || '0');  // 2026-07-09: 支持跳过老资源
   const recoverMode = searchParams.get('recover') === '1';
 
   try {
@@ -541,9 +543,12 @@ export async function GET(req: Request) {
         AND status = 'active'
         AND name IS NOT NULL
         AND LENGTH(name) > 5
-        -- 必须含中文字符（用 position 函数代替正则，避开 Neon $1 占位符问题）
-        AND (position(E'\u4e00' in name) > 0 OR position(E'\u9fff' in name) > 0)
+        -- 必须含中文字符（2026-07-09 修：position(E'\u4e00'...) 和 chr(19968) 在 Neon serverless Pool
+        --    都不解析 unicode codepoint, 只能字面匹配。改用 ~ 正则, 驱动层支持 \u escape）
+        AND name ~ '[\u4e00-\u9fff]'
         AND category NOT IN ('音乐', '体育', '合集', '学习资料', '其他', '游戏', '电子书', '精品课', '文档')
+        -- 2026-07-09: 支持 ?fromId=350000 跳过老资源
+        AND id > ${fromId}
         -- 2026-06-05: 修复 round-robin 反复扫前 500 条已 NOMATCH 记录的 bug
         -- 只取 5 分钟内没尝试过的（NULL 或 > 5 分钟前的重试）
         AND (last_attempt_at IS NULL OR last_attempt_at < NOW() - INTERVAL '5 minutes')
