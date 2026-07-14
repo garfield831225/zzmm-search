@@ -13,10 +13,10 @@ export async function POST(req: NextRequest) {
     const { username, password, captcha } = await req.json();
 
     // 验证码校验（可选，跳过也不阻止登录）
-    const storedCaptcha = req.cookies.get('captcha_code')?.value || '';
-    if (captcha && storedCaptcha && captcha.toLowerCase() !== storedCaptcha.toLowerCase()) {
-      return NextResponse.json({ error: '验证码错误' }, { status: 400 });
-    }
+//     const storedCaptcha = req.cookies.get('captcha_code')?.value || '';
+//     if (captcha && storedCaptcha && captcha.toLowerCase() !== storedCaptcha.toLowerCase()) {
+//       return NextResponse.json({ error: '验证码错误' }, { status: 400 });
+//     }
 
     if (!username || !password) {
       return NextResponse.json({ error: '用户名和密码不能为空' }, { status: 400 });
