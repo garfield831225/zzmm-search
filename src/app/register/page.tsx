@@ -18,6 +18,7 @@ export default function RegisterPage() {
 
   const refreshCaptcha = () => {
     setCaptchaUrl('/api/captcha?' + Date.now());
+    setCaptcha(""); // 2026-07-14: 修法 A, 点图片刷新时清空 input, 避免旧码错配新 cookie
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
