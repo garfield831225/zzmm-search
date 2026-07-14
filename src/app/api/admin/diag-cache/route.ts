@@ -1,4 +1,4 @@
-// 2026-07-14 临时诊断: 看 batch 是否真的写入了 xx_tmdb_cache
+// 2026-07-14 临时诊断: 看 batch 是否真的写入了 xx_tmdb_cache + 业务规则调研
 // 用法: GET /api/admin/diag-cache?key=zzmm-batch-test
 import { NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
@@ -8,14 +8,13 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const key = searchParams.get('key');
-  // 临时: 跟 /api/admin/match 一致的免鉴权 key
   if (key !== 'zzmm-batch-test') {
     return NextResponse.json({ error: 'unauth' }, { status: 401 });
   }
 
   const sql = neon(process.env.DATABASE_URL || '');
   try {
-    // 1. cache 表总数 + 各时段增量 (看 batch 跑期间有没有新增)
+    // 1. cache 表总数 + 各时段增量
     const cache = await sql`
       SELECT
         COUNT(*)::int as total,
@@ -28,8 +27,7 @@ export async function GET(req: Request) {
       FROM xx_tmdb_cache
     `;
 
-    // 2. 资源表里 batch 报告的命中区间 (id 范围 1-24000 已处理, 但 batch 是 id 升序 SELECT, 所以前 254 个 match 应该在小 id 范围)
-    // 直接看 xx_resources 状态分布 (跟 stats 一致, 但用不同的 SELECT, 防止 stats 缓存)
+    // 2. 资源表整体状态
     const resources = await sql`
       SELECT
         COUNT(*)::int as total,
@@ -37,29 +35,77 @@ export async function GET(req: Request) {
         COUNT(*) FILTER (WHERE tmdb_id = 'NOMATCH')::int as nomatch_cnt,
         COUNT(*) FILTER (WHERE tmdb_id = 'GARBLED')::int as garbled_cnt,
         COUNT(*) FILTER (WHERE tmdb_id ~ '^[0-9]+$' AND tmdb_id::bigint > 0)::int as integer_ok,
-        COUNT(*) FILTER (WHERE tmdb_id ~ '^[0-9]+$' AND tmdb_id::bigint = 0)::int as integer_zero,
-        COUNT(*) FILTER (WHERE tmdb_id IS NOT NULL AND tmdb_id != '' AND tmdb_id NOT IN ('NOMATCH','GARBLED') AND tmdb_id !~ '^[0-9]+$')::int as other,
         MAX(updated_at) FILTER (WHERE tmdb_id ~ '^[0-9]+$' AND tmdb_id::bigint > 0) as latest_match_update
       FROM xx_resources
       WHERE status = 'active'
     `;
 
-    // 3. 最近 1 小时改过 tmdb_id 的资源 (看 batch 实际写入数)
-    const recentUpdates = await sql`
+    // 3. 业务调研 (2026-07-15): access_level × import_channel 交叉分布
+    const bizCross = await sql`
       SELECT
-        COUNT(*) FILTER (WHERE tmdb_id ~ '^[0-9]+$' AND tmdb_id::bigint > 0 AND updated_at > NOW() - INTERVAL '1 hour')::int as integer_ok_recent,
-        COUNT(*) FILTER (WHERE tmdb_id = 'NOMATCH' AND updated_at > NOW() - INTERVAL '1 hour')::int as nomatch_recent,
-        COUNT(*) FILTER (WHERE tmdb_id IS NULL AND updated_at > NOW() - INTERVAL '1 hour')::int as null_recent,
-        COUNT(*) FILTER (WHERE last_attempt_at > NOW() - INTERVAL '1 hour')::int as last_attempt_recent
+        COALESCE(access_level, 'NULL') as access_level,
+        COALESCE(import_channel, 'NULL') as import_channel,
+        COUNT(*)::int as cnt
       FROM xx_resources
       WHERE status = 'active'
+      GROUP BY access_level, import_channel
+      ORDER BY cnt DESC
     `;
+
+    // 4. source × access_level 分布 (看哪些 source 是 basic, 哪些是 vip)
+    const sourceAccess = await sql`
+      SELECT
+        source,
+        COALESCE(access_level, 'NULL') as access_level,
+        COUNT(*)::int as cnt
+      FROM xx_resources
+      WHERE status = 'active'
+      GROUP BY source, access_level
+      ORDER BY cnt DESC
+      LIMIT 30
+    `;
+
+    // 5. 脏数据: 非 zezhe 但 access_level='basic' 的资源 (这批就是 basic 用户能直接打开的)
+    const dirtyBasic = await sql`
+      SELECT
+        source,
+        COALESCE(import_channel, 'NULL') as import_channel,
+        COUNT(*)::int as cnt
+      FROM xx_resources
+      WHERE status = 'active'
+        AND COALESCE(import_channel, 'NULL') != 'zezhe'
+        AND access_level = 'basic'
+      GROUP BY source, import_channel
+      ORDER BY cnt DESC
+      LIMIT 20
+    `;
+
+    // 6. 真 zezhe 但 access_level 不等于 'basic' 的资源 (导入路由没正确设 access_level)
+    const dirtyZezhe = await sql`
+      SELECT
+        COALESCE(access_level, 'NULL') as access_level,
+        COUNT(*)::int as cnt
+      FROM xx_resources
+      WHERE status = 'active'
+        AND import_channel = 'zezhe'
+      GROUP BY access_level
+      ORDER BY cnt DESC
+    `;
+
+    // 7. 导航栏入口路径存在性检查 (page.tsx 里的导航)
+    // 用户不要 TMDB 影视区 / VIP 观影区
+    // 这个不需要查 DB, 直接在路由里 hard-code 报告
 
     return NextResponse.json({
       now: new Date().toISOString(),
       cache: cache[0],
       resources: resources[0],
-      recentUpdates: recentUpdates[0],
+      biz: {
+        cross: bizCross,
+        sourceAccess: sourceAccess,
+        dirty_basic_non_zezhe: dirtyBasic,  // 脏数据 1: 非 zezhe 但 access_level='basic' (basic 看到)
+        dirty_zezhe_not_basic: dirtyZezhe,   // 脏数据 2: zezhe 但 access_level != 'basic'
+      },
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message?.slice(0, 500) }, { status: 500 });
