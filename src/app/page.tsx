@@ -63,6 +63,7 @@ interface ResourceItem {
   lumenCost?: number;  // 2026-06-25 单条定价流明
   accessTier?: 'document' | 'vip' | 'unlock' | 'free';  // 2026-06-25 资源分级
   accessLevel?: string;  // 2026-06-25 兼容旧 access_level 字段
+  importChannel?: string;  // 2026-07-14 泽泽妈专属标识
 }
 
 interface SearchResponse {
@@ -577,6 +578,12 @@ export default function HomePage() {
 
                 {/* Source Badge */}
                 <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
+                  {/* 2026-07-14 泽泽妈专属标识 (import_channel='zezhe') */}
+                  {item.importChannel === 'zezhe' && (
+                    <span className="px-2 py-0.5 bg-gradient-to-r from-rose-500 to-pink-500 text-white text-xs rounded font-medium shadow-sm flex items-center gap-1">
+                      <span>👑</span><span>泽泽妈</span>
+                    </span>
+                  )}
                   <span className="px-2 py-0.5 bg-pink-600/80 text-xs rounded">{item.source}</span>
                   {/* 2026-06-25: access_tier 标识 - 2026-06-26 没 free 类, 只 3 种 */}
                   {item.accessLevel === 'vip' && (

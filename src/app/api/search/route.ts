@@ -204,7 +204,7 @@ export async function GET(request: NextRequest) {
     const dbRows = await sql(`
       SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
              r.doc_sheet, r.sub_type, r.lumen_cost,
-             r.pay_type, r.code_price, r.lumen_cost, r.access_level, r.access_tier,
+             r.pay_type, r.code_price, r.lumen_cost, r.access_level, r.access_tier, r.import_channel,
              COALESCE(c.release_date, r.created_at::text) as sort_date,
              ${dateWeight} as date_weight,
              CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb
@@ -312,6 +312,8 @@ export async function GET(request: NextRequest) {
         payType: item.pay_type || 'free',
         accessLevel: item.access_level || 'basic',
         accessTier: item.access_tier || 'document',
+        importChannel: item.import_channel || '',
+
         codePrice: item.code_price ? Number(item.code_price) : 0,
         lumenCost: item.lumen_cost ?? 1,
         unlocked: userUnlockedIds.has(item.id),
