@@ -158,8 +158,9 @@ export async function GET(request: NextRequest) {
     } else if (['admin', 'vip'].includes(userGroup)) {
       accessLevelFilter = "(r.access_level IN ('basic', 'vip', 'code'))";
     } else if (['basic', 'member'].includes(userGroup)) {
-      // basic 用户 (泽泽妈文档激活码激活后的等级) → 能看泽泽妈文档 + 单资源付费
-      accessLevelFilter = "(r.access_level IN ('basic', 'code'))";
+      // 2026-07-15 修正: basic 用户也看全部资源 (VIP 锁 = 前端展示, 不卡后端)
+      // 旧的 "(r.access_level IN ('basic', 'code'))" 会让 basic 看不到 vip 资源, 违反业务规则
+      accessLevelFilter = "1=1";
     } else {
       // 未登录 / 普通 free / user 组 → 0 条结果, 必须先去激活
       accessLevelFilter = "(1=0)";

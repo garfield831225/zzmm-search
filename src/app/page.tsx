@@ -292,7 +292,21 @@ export default function HomePage() {
     } catch {}
   };
 
+  // 2026-07-15: VIP 锁 - basic 用户看非 zezhe 资源时禁止打开 (前端展示锁)
+  const isVipLocked = (item: ResourceItem): boolean => {
+    if (!user) return false;
+    if (user.group !== 'basic') return false;  // 只有 basic 用户才会被锁
+    if (item.importChannel === 'zezemom_excel') return false;  // 泽泽妈永远不锁
+    if (item.accessLevel === 'code') return false;  // 单资源付费走流明解锁
+    return true;  // 其他都锁
+  };
+
   const handleItemClick = async (item: ResourceItem) => {
+    // 2026-07-15: VIP 锁拦截
+    if (isVipLocked(item)) {
+      addToast('error', '🔒 VIP 资源，basic 用户不可直接打开，请升级 VIP');
+      return;
+    }
     setSelectedItem(item);
     setHistoryExpanded(false);
     setTmdbCredits(null);
@@ -370,6 +384,7 @@ export default function HomePage() {
               {user ? (
                 <div className="flex items-center gap-2">
                   <span className="px-3 py-1.5 bg-violet-600/30 rounded-lg text-sm text-violet-300">{user.username}</span>
+                  {/* 2026-07-15 隐藏: 用户要求不要显示 TMDB 影视区 + VIP 观影区 入口
                   <Link href="/tmdb-films" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/20 hover:bg-pink-600/50 rounded-lg text-sm transition-all duration-200 text-pink-300 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
                     <Film size={14} className="transition-transform group-hover:scale-110" />
                     <span>TMDB 影视区</span>
@@ -378,6 +393,7 @@ export default function HomePage() {
                     <Tv size={14} className="transition-transform group-hover:scale-110" />
                     <span>VIP 观影区</span>
                   </Link>
+                  */}
 <Link href="/nonfilm" className="group flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/50 rounded-lg text-sm transition-all duration-200 text-cyan-300 hover:shadow-[0_0_12px_rgba(34,211,238,0.4)] hover:scale-105">
                     <Music size={14} className="transition-transform group-hover:scale-110" />
                     <span>非影视区</span>
@@ -578,14 +594,21 @@ export default function HomePage() {
 
                 {/* Source Badge */}
                 <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
-                  {/* 2026-07-14 泽泽妈专属标识 (import_channel='zezhe') */}
-                  {item.importChannel === 'zezhe' && (
+                  {/* 2026-07-15 泽泽妈专属标识 (import_channel='zezemom_excel') - 修正: 实际值是 'zezemom_excel' 不是 'zezhe' */}
+                  {item.importChannel === 'zezemom_excel' && (
                     <span className="px-2 py-0.5 bg-gradient-to-r from-rose-500 to-pink-500 text-white text-xs rounded font-medium shadow-sm flex items-center gap-1">
                       <span>👑</span><span>泽泽妈</span>
                     </span>
                   )}
                   <span className="px-2 py-0.5 bg-pink-600/80 text-xs rounded">{item.source}</span>
-                  {/* 2026-06-25: access_tier 标识 - 2026-06-26 没 free 类, 只 3 种 */}
+                  {/* 2026-07-15 修正: 资源 access_level='basic' 不一定都是泽泽妈 - 脏数据 (baidu/quark) 也被标了 basic
+                      应该按 import_channel='zezemom_excel' 判定, 才是真泽泽妈文档 */}
+                  {/* 2026-07-15 VIP 锁: basic 用户看非 zezhe 资源时显示锁 (前端展示, 不卡后端) */}
+                  {user?.group === 'basic' && item.importChannel !== 'zezemom_excel' && item.accessLevel !== 'code' && (
+                    <span className="px-2 py-0.5 bg-gradient-to-r from-amber-500 to-orange-500 text-black text-xs rounded font-medium flex items-center gap-1">
+                      <span>🔒</span><span>VIP 锁</span>
+                    </span>
+                  )}
                   {item.accessLevel === 'vip' && (
                     <span className="px-2 py-0.5 bg-gradient-to-r from-amber-500 to-orange-500 text-black text-xs rounded font-medium">
                       👑 VIP
@@ -596,7 +619,7 @@ export default function HomePage() {
                       💎 单资源付费
                     </span>
                   )}
-                  {item.accessLevel === 'basic' && (
+                  {item.importChannel === 'zezemom_excel' && (
                     <span className="px-2 py-0.5 bg-sky-500/30 border border-sky-500/40 text-sky-300 text-xs rounded">
                       📚 泽泽妈文档
                     </span>
