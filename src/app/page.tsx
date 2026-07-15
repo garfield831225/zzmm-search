@@ -644,7 +644,13 @@ export default function HomePage() {
 
                 {/* Overlay + Action */}
                 <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
-                  {isMagnetOrEd2k(item.link) ? (
+                  {/* 2026-07-15 VIP 锁: basic 用户看非 zezhe 资源时, 中间按钮也禁用 */}
+                  {isVipLocked(item) ? (
+                    <button onClick={(e) => { e.stopPropagation(); addToast('error', '🔒 VIP 资源，basic 用户不可直接打开，请升级 VIP'); }}
+                      className="px-4 py-2 bg-amber-600/80 rounded-lg text-sm font-medium flex items-center gap-1">
+                      <span>🔒</span><span>升级 VIP 解锁</span>
+                    </button>
+                  ) : isMagnetOrEd2k(item.link) ? (
                     <button onClick={(e) => { e.stopPropagation(); handleCopyLink(item.link, e); }}
                       className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-sm font-medium">📋 复制链接</button>
                   ) : (
