@@ -64,6 +64,7 @@ const PUBLIC_PATHS = [
   '/api/admin/invites',        // 邀请码管理 (后端 adminOnly 鉴权)
   '/api/admin/test-tmdb',      // TMDB 调试 endpoint (临时)
   '/api/admin/diag-cache',     // 2026-07-14 临时诊断: 看 batch 是否写入 xx_tmdb_cache
+  '/api/admin/diag-tables',    // 2026-07-15 临时诊断: 看 cover 表是否存在
   // /api/resources/unlock 资源解锁 (后端 Bearer 鉴权, 双模式) - 用 startsWith 通配
   // /api/resources/[id]/unlock-status 动态路由也走 unlock 路径检查
 ];
