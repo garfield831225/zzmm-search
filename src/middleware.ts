@@ -68,6 +68,7 @@ const PUBLIC_PATHS = [
   '/api/admin/diag-bearer',    // 2026-07-15 临时诊断: 模拟 basic 用户调 search
   '/api/admin/diag-reclassify', // 2026-07-15 临时诊断: 查非 zezhe 资源分布 + 关键词命中
   '/api/admin/diag-null',       // 2026-07-15 临时诊断: 查 16k NULL 实际是 115 还是其他
+  '/api/admin/diag-all',        // 2026-07-15 临时诊断: 全面调研 (xx_games/非115/关键词)
   // /api/resources/unlock 资源解锁 (后端 Bearer 鉴权, 双模式) - 用 startsWith 通配
   // /api/resources/[id]/unlock-status 动态路由也走 unlock 路径检查
 ];
