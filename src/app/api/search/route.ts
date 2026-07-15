@@ -194,7 +194,11 @@ export async function GET(request: NextRequest) {
         : sort === 'rating'
           // 评分 = TMDB vote_average (高到低), 有数据优先
           ? `has_tmdb DESC, c.vote_average DESC NULLS LAST, COALESCE(NULLIF(c.vote_count, '')::int, 0) DESC, ${dateWeight}`
-          : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`;
+          : sort === 'cover_first'
+            // 2026-07-15 非影视区: 有封面的排前面 (musicCover/coverCache/sportsCover 任意非空)
+            // 用 LEFT JOIN + 0/1 判定, COALESCE 兼容 zone='film' 时这些表为空的场景
+            ? `has_cover DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`
+            : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`;
     const offset = (page - 1) * pageSize;
 
     // ─── Count ────────────────────────────────────────────────────────────────
@@ -208,7 +212,12 @@ export async function GET(request: NextRequest) {
              r.pay_type, r.code_price, r.lumen_cost, r.access_level, r.access_tier, r.import_channel,
              COALESCE(c.release_date, r.created_at::text) as sort_date,
              ${dateWeight} as date_weight,
-             CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb
+             CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb,
+             -- 2026-07-15 非影视区 cover_first 排序: 任一 cover 表有记录 = 1
+             CASE WHEN EXISTS (SELECT 1 FROM xx_music_cache m WHERE m.resource_id = r.id)
+                   OR EXISTS (SELECT 1 FROM xx_cover_cache cc WHERE cc.resource_id = r.id)
+                   OR EXISTS (SELECT 1 FROM xx_sports_cache s WHERE s.resource_id = r.id)
+                  THEN 1 ELSE 0 END as has_cover
       FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
       WHERE ${whereClause}
       ORDER BY ${orderClause}
