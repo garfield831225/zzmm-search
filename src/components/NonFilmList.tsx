@@ -279,9 +279,16 @@ export default function NonFilmList({ category, title, icon, description, accent
       {/* Content - 列表布局无海报 */}
       <main className="max-w-6xl mx-auto px-4 py-6">
         {items.length === 0 && !loading ? (
-          <div className="text-center py-20 text-gray-400">
+          <div className="text-center py-16 bg-white border border-gray-100 rounded-2xl">
             <div className="text-5xl mb-3">{icon}</div>
-            <p>暂无数据</p>
+            <p className="text-gray-700 font-medium">该分类暂无数据</p>
+            <p className="text-xs text-gray-400 mt-2 mb-4">原始 21-sheet Excel 中没有「{category}」分类，从未导入</p>
+            <Link
+              href="/admin/import"
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-sm rounded-lg transition"
+            >
+              <span>📥</span><span>去后台导入数据</span>
+            </Link>
           </div>
         ) : (
           <div className="space-y-2">
