@@ -12,7 +12,7 @@
     },
     {
       "path": "/api/cron/tg-l3-worker",
-      "schedule": "0 3,15 * * *"
+      "schedule": "0 3 * * *"
     }
   ]
 }
