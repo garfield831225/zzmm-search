@@ -76,6 +76,7 @@ const PUBLIC_PATHS = [
   '/api/admin/dryrun-activate', // 2026-07-16 临时诊断: 16k inactive 激活预览+执行
   '/api/admin/fix-109',         // 2026-07-16 临时诊断: 把 109 tg 资源改成 vip 一致性
   '/api/admin/diag-migrate-tg-l3', // 2026-07-16 TG L3 一次性迁移 (l3_from 列 + xx_telegram_l3_queue 表)
+  '/api/admin/diag-admin-group',  // 2026-07-16 查 admin 用户真实 group
   '/api/admin/diag-library-zones',  // 2026-07-16 验证 /library 三区 SQL 过滤
   '/api/admin/import/tg-json',   // 2026-07-16 TG JSON 上传导入 (VIP/admin, 内部鉴权)
   '/api/admin/import/tg-l3-worker', // 2026-07-16 TG L3 worker (status + process, VIP/admin)
