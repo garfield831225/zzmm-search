@@ -86,7 +86,12 @@ export async function GET(request: NextRequest) {
     const zone = searchParams.get('zone') || 'film';
     // 2026-06-26: /library 公开资源库 - 登录后可见 (basic/user 都行)
     // zone=library 时不走强 access_level 过滤, 让 user 组也能浏览
+    // 2026-07-16: /library 拆 3 区 (library_zezhe / library_vip / library_code)
     const isLibraryZone = zone === 'library';
+    const isLibraryZezhe = zone === 'library_zezhe';
+    const isLibraryVip = zone === 'library_vip';
+    const isLibraryCode = zone === 'library_code';
+    const isAnyLibraryZone = isLibraryZone || isLibraryZezhe || isLibraryVip || isLibraryCode;
 
     // ─── WHERE clauses (inline strings — no param placeholders) ─────────────
     const catFilter = category === '全部' && zone === 'film'
@@ -147,8 +152,8 @@ export async function GET(request: NextRequest) {
     // admin/vip → 全部; basic → document(泽泽妈文档)+单资源付费; user → 空
     // 2026-06-26: 没 free 类别了, 未登录/user 组一律返空 → 必须激活 basic
     // 2026-06-26: /library 公开资源库 - basic+ 才能看, user 组和未登录 → 0 条
-    if (isLibraryZone) {
-      // /library 公开页: 必须 basic/vip/admin 才能看 (用户要求)
+    if (isAnyLibraryZone) {
+      // 2026-07-16: 3 大区都按权限开放 (basic/vip/admin 都能浏览, 锁/付费在前端)
       if (['admin', 'vip', 'basic', 'member'].includes(userGroup)) {
         accessLevelFilter = "(r.access_level IN ('basic', 'vip', 'code'))";
       } else {
@@ -174,7 +179,19 @@ export async function GET(request: NextRequest) {
     // 2026-06-26: 21 sheet 文档库模式 - 按 sheet (doc_sheet 字段) 过滤
     const sheetFilter = sheet ? `(r.doc_sheet = '${esc(sheet)}')` : '1=1';
 
-    const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${regionFilter} AND ${yearFilter} AND ${nameFilter} AND ${accessLevelFilter} AND ${importChannelFilter} AND ${sheetFilter}`;
+    // 2026-07-16: 3 大区硬过滤 (3 选 1)
+    let libraryZoneFilter = '1=1';
+    if (isLibraryZezhe) {
+      libraryZoneFilter = "(r.import_channel = 'zezemom_excel')";
+    } else if (isLibraryVip) {
+      // VIP 区: 非 zezemom_excel 且 非 code (单资源付费)
+      libraryZoneFilter = "((r.import_channel IS NULL OR r.import_channel != 'zezemom_excel') AND (r.pay_type IS NULL OR r.pay_type != 'code'))";
+    } else if (isLibraryCode) {
+      // 独立付费区: pay_type = 'code'
+      libraryZoneFilter = "(r.pay_type = 'code')";
+    }
+
+    const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${regionFilter} AND ${yearFilter} AND ${nameFilter} AND ${accessLevelFilter} AND ${importChannelFilter} AND ${sheetFilter} AND ${libraryZoneFilter}`;
 
     // 排序逻辑：
     //   1) has_tmdb DESC（有 TMDB 排前面）
@@ -188,16 +205,19 @@ export async function GET(request: NextRequest) {
     END)`;
     const orderClause = sort === 'added_time'
       ? `has_tmdb DESC, ${dateWeight}, r.created_at DESC`
-      : sort === 'hot'
-        // 2026-06-26: 热度 = view_count + TMDB 投票数/100 + 最近天数加分, 整数计算避免类型不匹配
-        ? `has_tmdb DESC, (COALESCE(r.view_count, 0) + COALESCE(NULLIF(c.vote_count, '')::int, 0) / 100) DESC, ${dateWeight}`
-        : sort === 'rating'
-          // 评分 = TMDB vote_average (高到低), 有数据优先
-          ? `has_tmdb DESC, c.vote_average DESC NULLS LAST, COALESCE(NULLIF(c.vote_count, '')::int, 0) DESC, ${dateWeight}`
-          : sort === 'cover_first'
-            // 2026-07-15 非影视区: 有封面的排前面 (xx_cover_cache 不存在, 用 music/sports)
-            ? `has_cover DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`
-            : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`;
+      : sort === 'import_time_asc'
+        // 2026-07-16 /library 文档库: 按导入时间从先到后 (oldest first), 用户要求
+        ? `r.created_at ASC, r.id ASC`
+        : sort === 'hot'
+          // 2026-06-26: 热度 = view_count + TMDB 投票数/100 + 最近天数加分, 整数计算避免类型不匹配
+          ? `has_tmdb DESC, (COALESCE(r.view_count, 0) + COALESCE(NULLIF(c.vote_count, '')::int, 0) / 100) DESC, ${dateWeight}`
+          : sort === 'rating'
+            // 评分 = TMDB vote_average (高到低), 有数据优先
+            ? `has_tmdb DESC, c.vote_average DESC NULLS LAST, COALESCE(NULLIF(c.vote_count, '')::int, 0) DESC, ${dateWeight}`
+            : sort === 'cover_first'
+              // 2026-07-15 非影视区: 有封面的排前面 (xx_cover_cache 不存在, 用 music/sports)
+              ? `has_cover DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`
+              : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`;
     const offset = (page - 1) * pageSize;
 
     // ─── Count ────────────────────────────────────────────────────────────────
