@@ -31,17 +31,16 @@ async function unlockWithLumen(sql: any, userId: string, resourceId: number) {
   const r = resources[0];
   const lumenCost = r.lumen_cost || 1;
 
-  // 2. 查用户 VIP 状态 (JOIN xx_user_lumen 拿 balance)
+  // 2. 查用户状态 (JOIN xx_user_lumen 拿 balance)
+  // 2026-07-16 业务规则修正: 独立付费 (code) 资源, basic 和 vip 都需要流明解锁
+  // 不再卡 VIP 资格, 只检查流明余额
   const users = await sql`SELECT u.id, u.user_group, u.expire_at, COALESCE(l.balance, 0) as lumen_balance
                             FROM xx_users u
                             LEFT JOIN xx_user_lumen l ON l.user_id = u.id
                             WHERE u.id = ${userId} LIMIT 1` as any[];
   if (!users[0]) return { error: '用户不存在', status: 401 };
   const u = users[0];
-  const isVip = (u.user_group === 'vip' || u.user_group === 'admin') && (!u.expire_at || new Date(u.expire_at) > new Date());
-  if (!isVip) {
-    return { error: '需要 VIP 会员才能解锁资源', need: 'vip', status: 403 };
-  }
+  const isAdmin = u.user_group === 'admin';
 
   // 3. 检查已解锁
   const existing = await sql`SELECT id FROM xx_user_unlocks WHERE user_id = ${userId} AND resource_id = ${resourceId} LIMIT 1` as any[];
