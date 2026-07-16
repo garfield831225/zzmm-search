@@ -25,6 +25,7 @@ interface Card {
 const CARDS: Card[] = [
   // ===== 资源管理 (zzmm-search 内部) =====
   { id: 'import', title: '泽泽妈文档导入', desc: '21 sheet 文档批量导入', icon: Upload, href: '/admin/import', category: '资源管理', color: 'text-violet-700', bg: 'bg-violet-50 hover:bg-violet-100' },
+  { id: 'import-tg', title: 'TG 频道导入', desc: 'result.json → VIP 锁资源 (L1+L2+L3 队列)', icon: Network, href: '/admin/import-tg', category: '资源管理', color: 'text-cyan-700', bg: 'bg-cyan-50 hover:bg-cyan-100' },
   { id: 'match', title: 'TMDB 匹配', desc: '单条手动匹配 / 占位符识别', icon: Target, href: '/admin/match', category: '资源管理', color: 'text-blue-700', bg: 'bg-blue-50 hover:bg-blue-100' },
   { id: 'tg-organize', title: 'TG 群整理', desc: '115 群消息审核入库', icon: ListChecks, href: '/admin/tg-organize', category: '资源管理', color: 'text-cyan-700', bg: 'bg-cyan-50 hover:bg-cyan-100' },
   { id: 'pay-config', title: '单条付费配置', desc: '按类别/资源设 unlock 价格', icon: DollarSign, href: '/admin/pay-config', category: '资源管理', color: 'text-emerald-700', bg: 'bg-emerald-50 hover:bg-emerald-100' },
