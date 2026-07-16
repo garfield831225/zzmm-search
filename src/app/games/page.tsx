@@ -82,6 +82,8 @@ export default function GamesPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{ id: number; msg: string; type: 'success' | 'error' } | null>(null);
+  // 2026-07-16 VIP 锁: basic 用户看 VIP 游戏时禁止打开
+  const [userGroup, setUserGroup] = useState<string>('user');
   let toastCounter = 0;
 
   const addToast = useCallback((msg: string, type: 'success' | 'error' = 'success') => {
@@ -89,6 +91,19 @@ export default function GamesPage() {
     setToast({ id, msg, type });
     setTimeout(() => setToast(null), 3000);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      if (u.group) setUserGroup(String(u.group).toLowerCase());
+    } catch {}
+  }, []);
+
+  // 2026-07-16: basic 用户对 VIP 游戏禁止打开
+  const isGameVipLocked = (g: Game): boolean => {
+    return userGroup === 'basic' && g.is_vip_only;
+  };
 
   // 加载平台
   useEffect(() => {
@@ -274,8 +289,18 @@ export default function GamesPage() {
                   key={g.id}
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="group relative bg-slate-900 border border-slate-800 rounded-xl overflow-hidden hover:border-amber-500/50 transition-all hover:scale-[1.02] cursor-pointer"
-                  onClick={() => window.location.href = `/games/${g.id}`}
+                  className={`group relative bg-slate-900 border rounded-xl overflow-hidden transition-all hover:scale-[1.02] ${
+                    isGameVipLocked(g)
+                      ? 'border-amber-500/60 cursor-not-allowed opacity-90'
+                      : 'border-slate-800 hover:border-amber-500/50 cursor-pointer'
+                  }`}
+                  onClick={() => {
+                    if (isGameVipLocked(g)) {
+                      addToast('🔒 VIP 游戏，basic 用户不可直接打开，请升级 VIP', 'error');
+                      return;
+                    }
+                    window.location.href = `/games/${g.id}`;
+                  }}
                 >
                   {/* 封面 */}
                   <div className="relative aspect-[3/4] bg-gradient-to-br from-slate-800 to-slate-900">
@@ -289,10 +314,14 @@ export default function GamesPage() {
                     <div className={`absolute top-2 left-2 px-2 py-0.5 rounded text-xs font-medium text-white bg-gradient-to-r ${PLATFORM_COLORS[g.platform] || 'from-slate-500 to-slate-700'}`}>
                       {g.platform}
                     </div>
-                    {/* VIP 锁 */}
+                    {/* VIP 锁 - 2026-07-16: basic 用户显示更醒目的锁 */}
                     {g.is_vip_only && (
-                      <div className="absolute top-2 right-2 px-1.5 py-0.5 rounded text-xs font-medium bg-amber-500/90 text-slate-900">
-                        👑 VIP
+                      <div className={`absolute top-2 right-2 px-1.5 py-0.5 rounded text-xs font-medium ${
+                        isGameVipLocked(g)
+                          ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-900 shadow-lg ring-2 ring-amber-300/50'
+                          : 'bg-amber-500/90 text-slate-900'
+                      }`}>
+                        {isGameVipLocked(g) ? '🔒 VIP 锁' : '👑 VIP'}
                       </div>
                     )}
                     {/* 匹配中 */}

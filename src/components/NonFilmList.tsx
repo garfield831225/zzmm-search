@@ -23,6 +23,9 @@ interface ResourceItem {
   musicCover: { artist: string; album: string; cover_url: string } | null;
   sportsCover: { team_name: string; team_alternate: string; stadium: string; league: string; badge_url: string; banner_url: string; description: string } | null;
   coverCache: { cover_url: string; source: string; extra_data: any } | null;
+  // 2026-07-16 VIP 锁需要
+  importChannel?: string;
+  accessLevel?: string;
   payType: string;
   codePrice: number;
   lumenCost: number;
@@ -82,7 +85,25 @@ export default function NonFilmList({ category, title, icon, description, accent
   const [unlockLoading, setUnlockLoading] = useState(false);
   const [unlockError, setUnlockError] = useState('');
   const [lumenBalance, setLumenBalance] = useState(0);
+  // 2026-07-16 VIP 锁: basic 用户看非 zezhe 资源时禁止操作
+  const [userGroup, setUserGroup] = useState<string>('user');
   const toastCounter = useRef(0);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      if (u.group) setUserGroup(String(u.group).toLowerCase());
+    } catch {}
+  }, []);
+
+  // 2026-07-16: VIP 锁判定 - basic 用户对非 zezhe 资源禁止打开/复制/解锁
+  const isVipLocked = (item: ResourceItem): boolean => {
+    if (userGroup !== 'basic') return false;
+    if (item.importChannel === 'zezemom_excel') return false;
+    if (item.accessLevel === 'code') return false;  // code 走流明解锁
+    return true;
+  };
 
   const addToast = useCallback((type: string, message: string) => {
     const id = ++toastCounter.current;
@@ -318,6 +339,12 @@ export default function NonFilmList({ category, title, icon, description, accent
                   <h3 className="font-medium text-sm leading-tight line-clamp-1 text-gray-900">{item.name}</h3>
                   <div className="flex flex-wrap items-center gap-1.5 mt-1 text-xs text-gray-400">
                     <span className="px-1.5 py-0.5 bg-cyan-100 text-cyan-700 rounded">{item.source}</span>
+                    {/* 2026-07-16 VIP 锁 badge: basic 看非 zezhe 时直接显示锁 */}
+                    {isVipLocked(item) && (
+                      <span className="px-1.5 py-0.5 bg-gradient-to-r from-amber-500 to-orange-500 text-black rounded font-medium flex items-center gap-0.5">
+                        🔒 VIP 锁
+                      </span>
+                    )}
                     {item.formatTags.slice(0, 3).map((t) => (
                       <span key={t} className="px-1.5 py-0.5 bg-violet-100 text-violet-700 rounded">{t}</span>
                     ))}
@@ -327,9 +354,16 @@ export default function NonFilmList({ category, title, icon, description, accent
                   </div>
                 </div>
 
-                {/* 右侧操作 */}
+                {/* 右侧操作 - 2026-07-16 VIP 锁: basic 看非 zezhe 时按钮全部锁住 */}
                 <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                  {item.payType === 'code' && !item.unlocked ? (
+                  {isVipLocked(item) ? (
+                    <button
+                      onClick={() => addToast('error', '🔒 VIP 资源，basic 用户不可直接打开，请升级 VIP')}
+                      className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 text-black text-xs rounded-lg font-medium flex items-center gap-1"
+                    >
+                      <span>🔒</span><span>VIP 锁</span>
+                    </button>
+                  ) : item.payType === 'code' && !item.unlocked ? (
                     <button
                       onClick={() => openUnlock(item)}
                       className="px-3 py-1.5 bg-gradient-to-r from-yellow-500 to-amber-500 text-black text-xs rounded-lg font-medium"
@@ -431,13 +465,23 @@ export default function NonFilmList({ category, title, icon, description, accent
               {selectedItem.sportsCover?.team_name && <p className="text-sm text-gray-600 mb-1">🏆 {selectedItem.sportsCover.team_name} · {selectedItem.sportsCover.league}</p>}
               <button
                 onClick={() => {
+                  // 2026-07-16 VIP 锁: 详情弹窗里也卡
+                  if (isVipLocked(selectedItem)) {
+                    addToast('error', '🔒 VIP 资源，basic 用户不可直接打开，请升级 VIP');
+                    return;
+                  }
                   if (selectedItem.payType === 'code' && !selectedItem.unlocked) openUnlock(selectedItem);
                   else if (isMagnetOrEd2k(selectedItem.link)) handleCopyLink(selectedItem.link);
                   else handleDownload(selectedItem.id, selectedItem.link);
                 }}
-                className="w-full mt-3 p-3 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-white font-medium flex items-center justify-center gap-2"
+                className={`w-full mt-3 p-3 rounded-lg text-white font-medium flex items-center justify-center gap-2 ${
+                  isVipLocked(selectedItem)
+                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-black'
+                    : 'bg-cyan-600 hover:bg-cyan-500'
+                }`}
               >
-                {selectedItem.payType === 'code' && !selectedItem.unlocked ? `💎 ${selectedItem.lumenCost || 1} 流明解锁` :
+                {isVipLocked(selectedItem) ? '🔒 升级 VIP 解锁' :
+                  selectedItem.payType === 'code' && !selectedItem.unlocked ? `💎 ${selectedItem.lumenCost || 1} 流明解锁` :
                   isMagnetOrEd2k(selectedItem.link) ? '📋 复制链接' : '⬇ 立即打开'}
               </button>
             </motion.div>
