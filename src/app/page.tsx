@@ -251,7 +251,19 @@ export default function HomePage() {
 
   useEffect(() => { fetchItems(1); }, [category, source, region, year, sort, pageSize]);
 
-  const handleLogout = () => { localStorage.removeItem('token'); localStorage.removeItem('user'); setUser(null); };
+  // 2026-07-17: 真正退出 - 清 httpOnly cookie + localStorage + 跳 /
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch {}
+    localStorage.removeItem('token');
+    localStorage.removeItem('zzmm_token');
+    localStorage.removeItem('adminToken');
+    localStorage.removeItem('user');
+    setUser(null);
+    router.push('/');
+    router.refresh();
+  };
 
   // 2026-06-03 单资源付费 - 解锁处理 (2026-06-25 + 流明模式)
   const handleUnlock = async () => {

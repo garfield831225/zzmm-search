@@ -9,6 +9,7 @@ const PUBLIC_PATHS = [
   '/api/auth/login',
   '/api/auth/register',
   '/api/auth/me',
+  '/api/auth/logout', // 2026-07-17 退出登录 (清 httpOnly cookie)
   '/api/captcha',
   '/api/search',
   '/api/admin/match-stats',

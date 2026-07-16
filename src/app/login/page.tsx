@@ -12,40 +12,48 @@ export default function LoginPage() {
   const [captchaUrl, setCaptchaUrl] = useState('/api/captcha?' + Date.now());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [currentUser, setCurrentUser] = useState<{ username: string; group: string } | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const router = useRouter();
 
-  // 2026-07-16: 已登录访问 /login 自动跳到 redirect 或 /
+  // 2026-07-17: 只查"是否已登录"用于顶部提示，**绝不自动跳转**
+  // 之前自动跳转导致换帐号不可能，必须让用户能重新填表
   useEffect(() => {
-    const syncAndRedirect = async () => {
-      let token = localStorage.getItem('token') || localStorage.getItem('zzmm_token') || '';
-      if (!token) {
-        try {
-          const r = await fetch('/api/auth/me', { credentials: 'include' });
-          if (r.ok) {
-            const d = await r.json();
+    const check = async () => {
+      try {
+        const r = await fetch('/api/auth/me', { credentials: 'include' });
+        if (r.ok) {
+          const d = await r.json();
+          if (d.user) {
+            setCurrentUser({ username: d.user.username, group: d.user.user_group });
+            // 同步到 localStorage (让 admin/layout 等能立即读到)
             if (d.token) {
               localStorage.setItem('token', d.token);
               localStorage.setItem('zzmm_token', d.token);
-              if (d.user) {
-                localStorage.setItem('user', JSON.stringify({
-                  id: d.user.id, username: d.user.username,
-                  group: d.user.user_group, expire_at: d.user.expire_at,
-                }));
-              }
-              token = d.token;
+            }
+            if (d.user) {
+              localStorage.setItem('user', JSON.stringify({
+                id: d.user.id, username: d.user.username,
+                group: d.user.user_group, expire_at: d.user.expire_at,
+              }));
             }
           }
-        } catch {}
-      }
-      if (token) {
-        const params = new URLSearchParams(window.location.search);
-        const redirect = params.get('redirect') || '/';
-        router.push(redirect);
-      }
+        }
+      } catch {}
     };
-    syncAndRedirect();
-  }, [router]);
+    check();
+  }, []);
+
+  const handleLogoutAndStay = async () => {
+    try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); } catch {}
+    localStorage.removeItem('token');
+    localStorage.removeItem('zzmm_token');
+    localStorage.removeItem('adminToken');
+    localStorage.removeItem('user');
+    setCurrentUser(null);
+    setUsername('');
+    setPassword('');
+  };
 
   const refreshCaptcha = () => {
     setCaptchaUrl('/api/captcha?' + Date.now());
@@ -100,6 +108,23 @@ export default function LoginPage() {
               <p className="text-sm text-white/40">登录账号</p>
             </div>
           </div>
+
+          {/* 2026-07-17: 已登录提示 + 切换账号按钮 */}
+          {currentUser && (
+            <div className="mb-5 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs">
+              <div className="text-amber-200 mb-1">
+                当前已登录为 <b>{currentUser.username}</b> ({currentUser.group})
+              </div>
+              <div className="text-white/50 mb-2">想换账号？先点下面退出，再填新账号密码</div>
+              <button
+                type="button"
+                onClick={handleLogoutAndStay}
+                className="px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 rounded text-xs transition"
+              >
+                🚪 退出当前账号
+              </button>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
