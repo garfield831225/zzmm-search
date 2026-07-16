@@ -441,10 +441,10 @@ export default function HomePage() {
                     <span>购物车</span>
                   </Link>
                   {user?.group === 'admin' && (
-                    <Link href="/admin" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 rounded-lg text-sm font-medium transition-all duration-200 text-white hover:shadow-[0_0_12px_rgba(139,92,246,0.5)] hover:scale-105 border border-violet-400/40">
+                    <a href="/admin" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 rounded-lg text-sm font-medium transition-all duration-200 text-white hover:shadow-[0_0_12px_rgba(139,92,246,0.5)] hover:scale-105 border border-violet-400/40">
                       <Shield size={14} className="transition-transform group-hover:scale-110" />
                       <span>🎛️ 管理后台</span>
-                    </Link>
+                    </a>
                   )}
                 </div>
               ) : (
