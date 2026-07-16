@@ -178,17 +178,38 @@ export default function HomePage() {
   const [mustActivate, setMustActivate] = useState(false);
   useEffect(() => {
     setMounted(true);
-    const stored = localStorage.getItem('user');
-    if (stored) {
-      try {
-        const u = JSON.parse(stored);
-        setUser(u);
-        // 2026-06-04: 按 group 判断（'user' = 未激活；'basic'/'vip' = 已激活）
-        setMustActivate(!u.group || u.group === 'user');
-      } catch {}
-    } else {
-      setMustActivate(false);
-    }
+    // 2026-07-16: localStorage 兜底 - 刷新/新窗口时可能丢了, 但 cookie 还在
+    // 调 /api/auth/me 同步 localStorage
+    const sync = async () => {
+      let stored = localStorage.getItem('user');
+      if (!stored) {
+        try {
+          const r = await fetch('/api/auth/me', { credentials: 'include' });
+          if (r.ok) {
+            const d = await r.json();
+            if (d.token) {
+              localStorage.setItem('token', d.token);
+            }
+            if (d.user) {
+              const u = {
+                id: d.user.id, username: d.user.username,
+                group: d.user.user_group, expire_at: d.user.expire_at,
+              };
+              localStorage.setItem('user', JSON.stringify(u));
+              stored = JSON.stringify(u);
+            }
+          }
+        } catch {}
+      }
+      if (stored) {
+        try {
+          const u = JSON.parse(stored);
+          setUser(u);
+          setMustActivate(!u.group || u.group === 'user');
+        } catch {}
+      }
+    };
+    sync();
   }, []);
 
   // 用 ref 记录最新 state，在 effect 调用 fetchItems 之前同步最新值

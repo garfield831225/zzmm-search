@@ -15,6 +15,38 @@ export default function LoginPage() {
   const imgRef = useRef<HTMLImageElement>(null);
   const router = useRouter();
 
+  // 2026-07-16: 已登录访问 /login 自动跳到 redirect 或 /
+  useEffect(() => {
+    const syncAndRedirect = async () => {
+      let token = localStorage.getItem('token') || localStorage.getItem('zzmm_token') || '';
+      if (!token) {
+        try {
+          const r = await fetch('/api/auth/me', { credentials: 'include' });
+          if (r.ok) {
+            const d = await r.json();
+            if (d.token) {
+              localStorage.setItem('token', d.token);
+              localStorage.setItem('zzmm_token', d.token);
+              if (d.user) {
+                localStorage.setItem('user', JSON.stringify({
+                  id: d.user.id, username: d.user.username,
+                  group: d.user.user_group, expire_at: d.user.expire_at,
+                }));
+              }
+              token = d.token;
+            }
+          }
+        } catch {}
+      }
+      if (token) {
+        const params = new URLSearchParams(window.location.search);
+        const redirect = params.get('redirect') || '/';
+        router.push(redirect);
+      }
+    };
+    syncAndRedirect();
+  }, [router]);
+
   const refreshCaptcha = () => {
     setCaptchaUrl('/api/captcha?' + Date.now());
     setCaptcha(""); // 2026-07-14: 修法 A, 点图片刷新时清空 input, 避免旧码错配新 cookie

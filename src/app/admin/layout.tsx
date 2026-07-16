@@ -12,23 +12,52 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     setMounted(true);
-    const token = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
-    const userStr = localStorage.getItem('user') || '';
-    if (!token) {
-      router.push(`/login?redirect=${encodeURIComponent(pathname)}`);
-      return;
-    }
-    try {
-      const u = JSON.parse(userStr);
-      if (u.group !== 'admin') {
-        // 不是 admin, 重定向到首页 (普通用户看到 forbidden 提示)
-        router.push('/?forbidden=admin');
+    // 2026-07-16: 修 redirect loop - localStorage 可能因刷新/新窗口/缓存丢失
+    // 但 httpOnly cookie 还在 → 调 /api/auth/me 通过 cookie 重新同步 localStorage
+    const syncAndCheck = async () => {
+      let token = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || localStorage.getItem('adminToken') || '';
+      let userStr = localStorage.getItem('user') || '';
+
+      // 兜底: localStorage 没 token, 但 cookie 可能在 → 调 /api/auth/me 验证
+      if (!token || !userStr) {
+        try {
+          const r = await fetch('/api/auth/me', { credentials: 'include' });
+          if (r.ok) {
+            const d = await r.json();
+            if (d.token) {
+              localStorage.setItem('token', d.token);
+              localStorage.setItem('adminToken', d.token);
+              localStorage.setItem('zzmm_token', d.token);
+              token = d.token;
+            }
+            if (d.user) {
+              const u = {
+                id: d.user.id, username: d.user.username,
+                group: d.user.user_group, expire_at: d.user.expire_at,
+              };
+              localStorage.setItem('user', JSON.stringify(u));
+              userStr = JSON.stringify(u);
+            }
+          }
+        } catch {}
+      }
+
+      if (!token) {
+        router.push(`/login?redirect=${encodeURIComponent(pathname)}`);
         return;
       }
-      setAuthed(true);
-    } catch {
-      router.push('/login?redirect=' + encodeURIComponent(pathname));
-    }
+      try {
+        const u = JSON.parse(userStr);
+        if (u.group !== 'admin') {
+          router.push('/?forbidden=admin');
+          return;
+        }
+        setAuthed(true);
+      } catch {
+        router.push('/login?redirect=' + encodeURIComponent(pathname));
+      }
+    };
+    syncAndCheck();
   }, [router, pathname]);
 
   if (!mounted || !authed) {
