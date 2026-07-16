@@ -1,113 +1,50 @@
-'use client';
-import { useEffect, useState } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+// 2026-07-17: 重写 - 完全服务端鉴权，绕开所有 localStorage 坑
+// 之前用 'use client' 查 localStorage / /api/auth/me 都不可靠
+// 这次直接用 next/headers cookies() + jwt verify, 在 server 端判定 admin
+import { cookies } from 'next/headers';
+import jwt from 'jsonwebtoken';
+import { redirect } from 'next/navigation';
+import { neon } from '@neondatabase/serverless';
 import Link from 'next/link';
-import { Shield, Home, Lock } from 'lucide-react';
+import { Shield, Home } from 'lucide-react';
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const [authed, setAuthed] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export const dynamic = 'force-dynamic';
 
-  useEffect(() => {
-    setMounted(true);
-    // 2026-07-16: 修 redirect loop - 优先 localStorage, 失败再 /api/auth/me, 5秒超时
-    const syncAndCheck = async () => {
-      let token = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || localStorage.getItem('adminToken') || '';
-      let userStr = localStorage.getItem('user') || '';
+const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
-      // 路径 1: localStorage 完整 → 直接放行
-      if (token && userStr) {
-        try {
-          const u = JSON.parse(userStr);
-          if (u.group === 'admin') {
-            setAuthed(true);
-            return;
-          }
-        } catch {}
-      }
+export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies();
+  const token = cookieStore.get('zzmm_token')?.value || cookieStore.get('token')?.value || '';
 
-      // 路径 2: localStorage 缺 → 调 /api/auth/me (5s 超时)
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
-        const r = await fetch('/api/auth/me', { credentials: 'include', signal: controller.signal });
-        clearTimeout(timeout);
-        if (r.ok) {
-          const d = await r.json();
-          if (d.token) {
-            localStorage.setItem('token', d.token);
-            localStorage.setItem('adminToken', d.token);
-            localStorage.setItem('zzmm_token', d.token);
-            token = d.token;
-          }
-          if (d.user) {
-            const u = {
-              id: d.user.id, username: d.user.username,
-              group: d.user.user_group, expire_at: d.user.expire_at,
-            };
-            localStorage.setItem('user', JSON.stringify(u));
-            userStr = JSON.stringify(u);
-          }
-        } else {
-          setError('API 返回 ' + r.status);
-        }
-      } catch (e: any) {
-        setError('同步失败: ' + (e?.message || 'timeout') + ' — 请重试');
-      }
-
-      // 路径 3: 验证结果
-      if (!token || !userStr) {
-        setError('localStorage 和 cookie 都没拿到用户信息, 请重新登录');
-        return;
-      }
-      try {
-        const u = JSON.parse(userStr);
-        if (u.group !== 'admin') {
-          router.push('/?forbidden=admin');
-          return;
-        }
-        setAuthed(true);
-      } catch (e: any) {
-        setError('user 解析失败: ' + e.message);
-      }
-    };
-    syncAndCheck();
-  }, [router, pathname]);
-
-  if (!mounted) {
-    return (
-      <div className="min-h-screen bg-[#0a0a0f] text-white flex items-center justify-center">
-        <div className="text-white/40 text-sm">加载中...</div>
-      </div>
-    );
+  if (!token) {
+    // 没 token → 跳 login (从 query 拿 redirect 维持原路径)
+    redirect('/login?redirect=/admin');
   }
 
-  if (!authed) {
-    return (
-      <div className="min-h-screen bg-[#0a0a0f] text-white flex items-center justify-center p-4">
-        <div className="max-w-md text-center">
-          <div className="text-4xl mb-3">🔐</div>
-          <div className="text-white/60 text-sm mb-2">{error || '验证管理员身份...'}</div>
-          <div className="text-white/30 text-xs mb-4">
-            URL: {pathname}<br />
-            token: {localStorage.getItem('token') ? '✓' : '✗'} ·
-            user: {localStorage.getItem('user') ? '✓' : '✗'} ·
-            cookie: 自动随请求发送
-          </div>
-          <div className="flex gap-2 justify-center">
-            <button onClick={() => window.location.reload()} className="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm">
-              🔄 刷新重试
-            </button>
-            <button onClick={() => router.push('/login?redirect=' + encodeURIComponent(pathname))} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm">
-              重新登录
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+  let payload: any;
+  try {
+    payload = jwt.verify(token, JWT_SECRET);
+  } catch {
+    redirect('/login?redirect=/admin');
+  }
+
+  // 直接查 DB 拿真实 user_group (不能信 JWT 里的 group, 可能过期/被改)
+  let user: { id: number; username: string; user_group: string } | null = null;
+  try {
+    const sql = neon(process.env.DATABASE_URL || '');
+    const rows = await sql`SELECT id, username, user_group FROM xx_users WHERE id = ${payload.id} LIMIT 1` as any[];
+    if (rows[0]) user = rows[0];
+  } catch (e) {
+    // DB 失败 - 降级用 JWT 里的 group
+    user = { id: payload.id, username: payload.username, user_group: payload.group || 'user' };
+  }
+
+  if (!user) {
+    redirect('/login?redirect=/admin');
+  }
+
+  if (user.user_group !== 'admin') {
+    redirect('/?forbidden=admin');
   }
 
   return (
@@ -118,6 +55,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <div className="flex items-center gap-1.5 text-violet-300 font-semibold">
             <Shield className="w-3.5 h-3.5" />
             管理后台
+            <span className="ml-2 text-white/40 font-normal">({user.username})</span>
           </div>
           <span className="text-white/20">|</span>
           <Link href="/admin" className="text-white/60 hover:text-white">🏠 总览</Link>
