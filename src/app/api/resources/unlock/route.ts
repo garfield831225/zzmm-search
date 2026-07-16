@@ -46,25 +46,32 @@ async function unlockWithLumen(sql: any, userId: string, resourceId: number) {
   const existing = await sql`SELECT id FROM xx_user_unlocks WHERE user_id = ${userId} AND resource_id = ${resourceId} LIMIT 1` as any[];
   if (existing[0]) return { error: '您已解锁过此资源', status: 409 };
 
-  // 4. 检查流明余额
-  if ((u.lumen_balance || 0) < lumenCost) {
+  // 4. 检查流明余额 (admin 跳过, 不消耗流明)
+  if (!isAdmin && (u.lumen_balance || 0) < lumenCost) {
     return { error: `流明不足, 需要 ${lumenCost} 个, 当前 ${u.lumen_balance || 0}`, need: 'lumen', cost: lumenCost, balance: u.lumen_balance || 0, status: 402 };
   }
 
-  // 5. 扣流明 (xx_user_lumen) + 写 unlock 记录 (用 RETURNING 拿新值)
+  // 5. 扣流明 (admin 跳过) + 写 unlock 记录 (用 RETURNING 拿新值)
   try {
-    const updated = await sql`UPDATE xx_user_lumen SET balance = balance - ${lumenCost}, updated_at = NOW() WHERE user_id = ${userId} RETURNING balance` as any[];
-    await sql`INSERT INTO xx_user_unlocks (user_id, resource_id, lumen_cost, unlocked_at) VALUES (${userId}, ${resourceId}, ${lumenCost}, NOW())`;
-    // 写流水
-    const balanceAfter = updated[0]?.balance ?? 0;
-    await sql`INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description)
-              VALUES (${userId}, ${-lumenCost}, ${balanceAfter}, 'debit', null, ${'resource_unlock:' + resourceId})`.catch(() => {});
+    let balanceAfter = u.lumen_balance || 0;
+    if (!isAdmin) {
+      const updated = await sql`UPDATE xx_user_lumen SET balance = balance - ${lumenCost}, updated_at = NOW() WHERE user_id = ${userId} RETURNING balance` as any[];
+      await sql`INSERT INTO xx_user_unlocks (user_id, resource_id, lumen_cost, unlocked_at) VALUES (${userId}, ${resourceId}, ${lumenCost}, NOW())`;
+      // 写流水
+      balanceAfter = updated[0]?.balance ?? 0;
+      await sql`INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description)
+                VALUES (${userId}, ${-lumenCost}, ${balanceAfter}, 'debit', null, ${'resource_unlock:' + resourceId})`.catch(() => {});
+    } else {
+      // admin: 写 unlock 记录 (lumen_cost=0), 不扣流明, 不写流水
+      await sql`INSERT INTO xx_user_unlocks (user_id, resource_id, lumen_cost, unlocked_at) VALUES (${userId}, ${resourceId}, 0, NOW())`;
+    }
     return {
       success: true,
-      message: `解锁成功! 消耗 ${lumenCost} 流明`,
+      message: isAdmin ? `解锁成功! (admin 免流明)` : `解锁成功! 消耗 ${lumenCost} 流明`,
       resource: { id: r.id, name: r.name },
-      lumen_cost: lumenCost,
+      lumen_cost: isAdmin ? 0 : lumenCost,
       lumen_balance_after: balanceAfter,
+      is_admin_bypass: isAdmin,
     };
   } catch (e: any) {
     return { error: '解锁失败: ' + e.message, status: 500 };

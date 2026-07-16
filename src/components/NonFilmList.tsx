@@ -98,11 +98,18 @@ export default function NonFilmList({ category, title, icon, description, accent
   }, []);
 
   // 2026-07-16: VIP 锁判定 - basic 用户对非 zezhe 资源禁止打开/复制/解锁
+  // 2026-07-16 v2: admin 全部开放 (含 code 资源), basic + vip 对 code 走流明解锁
   const isVipLocked = (item: ResourceItem): boolean => {
+    if (userGroup === 'admin') return false;  // admin 全部开放
     if (userGroup !== 'basic') return false;
     if (item.importChannel === 'zezemom_excel') return false;
     if (item.accessLevel === 'code') return false;  // code 走流明解锁
     return true;
+  };
+
+  // admin 看 code 资源不需要解锁按钮, 直接打开
+  const isAdminDirectOpen = (item: ResourceItem): boolean => {
+    return userGroup === 'admin' && item.accessLevel === 'code';
   };
 
   const addToast = useCallback((type: string, message: string) => {
@@ -354,7 +361,7 @@ export default function NonFilmList({ category, title, icon, description, accent
                   </div>
                 </div>
 
-                {/* 右侧操作 - 2026-07-16 VIP 锁: basic 看非 zezhe 时按钮全部锁住 */}
+                {/* 右侧操作 - 2026-07-16 VIP 锁: basic 看非 zezhe 时按钮全部锁住; admin 全部直接打开 */}
                 <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
                   {isVipLocked(item) ? (
                     <button
@@ -363,6 +370,25 @@ export default function NonFilmList({ category, title, icon, description, accent
                     >
                       <span>🔒</span><span>VIP 锁</span>
                     </button>
+                  ) : isAdminDirectOpen(item) ? (
+                    // admin + code 资源: 直接显示 🔓 admin 免流明 + 直接打开
+                    isMagnetOrEd2k(item.link) ? (
+                      <button
+                        onClick={() => handleCopyLink(item.link)}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg flex items-center gap-1"
+                        title="admin 免流明"
+                      >
+                        🔓 复制
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleDownload(item.id, item.link)}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded-lg flex items-center gap-1"
+                        title="admin 免流明"
+                      >
+                        🔓 打开
+                      </button>
+                    )
                   ) : item.payType === 'code' && !item.unlocked ? (
                     <button
                       onClick={() => openUnlock(item)}
@@ -470,6 +496,12 @@ export default function NonFilmList({ category, title, icon, description, accent
                     addToast('error', '🔒 VIP 资源，basic 用户不可直接打开，请升级 VIP');
                     return;
                   }
+                  // admin + code 资源: 跳过 unlock, 直接打开
+                  if (isAdminDirectOpen(selectedItem)) {
+                    if (isMagnetOrEd2k(selectedItem.link)) handleCopyLink(selectedItem.link);
+                    else handleDownload(selectedItem.id, selectedItem.link);
+                    return;
+                  }
                   if (selectedItem.payType === 'code' && !selectedItem.unlocked) openUnlock(selectedItem);
                   else if (isMagnetOrEd2k(selectedItem.link)) handleCopyLink(selectedItem.link);
                   else handleDownload(selectedItem.id, selectedItem.link);
@@ -477,10 +509,13 @@ export default function NonFilmList({ category, title, icon, description, accent
                 className={`w-full mt-3 p-3 rounded-lg text-white font-medium flex items-center justify-center gap-2 ${
                   isVipLocked(selectedItem)
                     ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-black'
+                    : isAdminDirectOpen(selectedItem)
+                    ? 'bg-emerald-600 hover:bg-emerald-500'
                     : 'bg-cyan-600 hover:bg-cyan-500'
                 }`}
               >
                 {isVipLocked(selectedItem) ? '🔒 升级 VIP 解锁' :
+                  isAdminDirectOpen(selectedItem) ? '🔓 立即打开 (admin)' :
                   selectedItem.payType === 'code' && !selectedItem.unlocked ? `💎 ${selectedItem.lumenCost || 1} 流明解锁` :
                   isMagnetOrEd2k(selectedItem.link) ? '📋 复制链接' : '⬇ 立即打开'}
               </button>
