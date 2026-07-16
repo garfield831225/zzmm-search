@@ -71,6 +71,7 @@ const PUBLIC_PATHS = [
   '/api/admin/diag-all',        // 2026-07-15 临时诊断: 全面调研 (xx_games/非115/关键词)
   '/api/admin/diag-access',     // 2026-07-15 临时诊断: 按 access_level 查 3 段分类逻辑
   '/api/admin/diag-full',       // 2026-07-16 临时诊断: 全库表 + vip 文档找法
+  '/api/admin/diag-exclusive',  // 2026-07-16 临时诊断: exclusive_zone + resources 表深查
   // /api/resources/unlock 资源解锁 (后端 Bearer 鉴权, 双模式) - 用 startsWith 通配
   // /api/resources/[id]/unlock-status 动态路由也走 unlock 路径检查
 ];
