@@ -102,6 +102,9 @@ export async function POST(req: NextRequest) {
     return 'tg_baidu';
   })();
 
+  // 2026-07-18: 网盘白名单 - 非网盘链接 (导航站/TG 频道主页) 直接不入库
+  const NETDISK_SOURCES = new Set(['115', 'baidu', 'quark', 'aliyun', 'xunlei', '123', 'uc', 'tianyi', 'yidong', 'magnet', 'ed2k']);
+
   // 4. 遍历 messages, 提取链接 + 分类
   // 2026-07-17 改造: 1 消息 = 1 资源 + N 链接 (主链接入 xx_resources, 副链接入 xx_resource_links)
   // 主链接按 SOURCE_SORT 优先级选 (1=115 优先, 10=磁力最后)
@@ -110,6 +113,7 @@ export async function POST(req: NextRequest) {
   const byCategory: Record<string, number> = {};
   const bySource: Record<string, number> = {};
   let skippedNoLink = 0;
+  let skippedNonDisk = 0;
 
   for (const msg of messages) {
     if (!msg || msg.type !== 'message') continue;
@@ -123,7 +127,18 @@ export async function POST(req: NextRequest) {
     }
 
     // 分离 L1 (直链) + L2 (telegra.ph)
-    const l1Links = links.filter(l => l.type !== 'telegra_ph');
+    // 2026-07-18: 业务规则 - 非网盘链接 (other) 直接不入库
+    //   网盘白名单: 115/baidu/quark/aliyun/xunlei/123/uc/tianyi/yidong/magnet/ed2k
+    //   telegra_ph 走 L2 队列
+    //   other (导航站/TG 频道主页) 跳过
+    const l1Links = links.filter(l => {
+      if (l.type === 'telegra_ph') return false;
+      if (!NETDISK_SOURCES.has(l.type)) {
+        skippedNonDisk++;
+        return false;
+      }
+      return true;
+    });
     const l2Links = links.filter(l => l.type === 'telegra_ph');
 
     // 业务规则: 所有 TG 导入 = VIP + pay_type=vip (basic 用户会被锁, VIP 直接开)
@@ -355,6 +370,7 @@ export async function POST(req: NextRequest) {
     summary: {
       total_messages: messages.length,
       skipped_no_link: skippedNoLink,
+      skipped_non_disk: skippedNonDisk,
       l1: { candidates: candidates.length, inserted: l1Inserted, skipped: l1Skipped, failed: l1Failed, links_inserted: l1LinksInserted },
       l2: { candidates: l2Candidates.length, inserted: l2Inserted, queue_added: l2QueueAdded, skipped: l2Skipped, failed: l2Failed },
     },
