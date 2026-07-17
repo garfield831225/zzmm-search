@@ -86,6 +86,7 @@ const PUBLIC_PATHS = [
   '/api/diag-delete-link',        // 2026-07-17 diag: 验证 admin/links DELETE 端点
   '/api/diag-import-result',      // 2026-07-18 diag: TG 导入 + 匹配统计
   '/api/diag-recent-tg',          // 2026-07-18 diag: 最近 N 小时 TG 新增
+  '/api/diag-migrate-unique',     // 2026-07-18 diag: 改 UNIQUE 约束
   '/api/diag-test-tg-import',     // 2026-07-18 diag: 模拟 admin 测 tg-json 端点
   '/api/diag-schema',             // 2026-07-18 diag: 查 schema
   '/api/admin/dedup-links',       // 2026-07-18 链接去重 (按 url 保留最新)
