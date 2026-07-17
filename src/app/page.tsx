@@ -978,17 +978,28 @@ export default function HomePage() {
                                   <button onClick={async (e) => {
                                     e.preventDefault();
                                     if (!confirm(`删除 ${l.source} 链接?`)) return;
-                                    const r = await fetch('/api/admin/links', {
-                                      method: 'DELETE', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
-                                      body: JSON.stringify({ resourceId: selectedItem.id, source: l.source })
-                                    });
-                                    const d = await r.json();
-                                    if (d.ok) {
-                                      addToast('success', d.resourceDeleted ? '🗑️ 已删除 (资源无链接, 已软删)' : '🗑️ 已删除');
-                                      // 本地更新链接
-                                      setSelectedItem(prev => prev ? { ...prev, links: prev.links?.filter(x => x.source !== l.source) } : prev);
-                                    } else {
-                                      addToast('error', '❌ ' + (d.error || '删除失败'));
+                                    const token = getToken();
+                                    if (!token) {
+                                      addToast('error', '❌ 未登录或 token 失效, 请重新登录');
+                                      return;
+                                    }
+                                    try {
+                                      const r = await fetch('/api/admin/links', {
+                                        method: 'DELETE',
+                                        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+                                        body: JSON.stringify({ resourceId: selectedItem.id, source: l.source })
+                                      });
+                                      const d = await r.json();
+                                      console.log('[DELETE link]', r.status, d);
+                                      if (d.ok) {
+                                        addToast('success', d.resourceDeleted ? '🗑️ 已删除 (资源无链接, 已软删)' : '🗑️ 已删除');
+                                        setSelectedItem(prev => prev ? { ...prev, links: prev.links?.filter(x => x.source !== l.source) } : prev);
+                                      } else {
+                                        addToast('error', `❌ ${r.status} ${d.error || '删除失败'}`);
+                                      }
+                                    } catch (err: any) {
+                                      console.error('[DELETE link] err', err);
+                                      addToast('error', '❌ 网络错误: ' + err.message);
                                     }
                                   }} className="text-xs px-2 py-0.5 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded">🗑️ 删</button>
                                 </div>
