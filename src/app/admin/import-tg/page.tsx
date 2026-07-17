@@ -43,8 +43,8 @@ const CHANNEL_OPTIONS = [
   { value: 'tg_other', label: 'TG 其他', icon: '📦' },
 ];
 
-// Vercel Hobby 实际 body 限制 4.5MB, 留 1MB 余量 = 3.5MB 每批
-const MAX_BATCH_BYTES = 3.5 * 1024 * 1024;
+// Vercel Hobby body 限制 4.5MB, JSON 转义 + headers 余量, 实际安全上限 2MB
+const MAX_BATCH_BYTES = 2 * 1024 * 1024;
 
 export default function ImportTgPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -398,7 +398,7 @@ export default function ImportTgPage() {
               <div className="font-medium">{file.name}</div>
               <div className="text-sm text-white/40 mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</div>
               {splitPayloads.length > 0 && (
-                <div className="mt-3 text-violet-300 text-sm">✂️ 已切成 {splitPayloads.length} 批 (每批 ≤ 3.5MB)</div>
+                <div className="mt-3 text-violet-300 text-sm">✂️ 已切成 {splitPayloads.length} 批 (每批 ≤ 2MB, 适配 Vercel 4.5MB 上限)</div>
               )}
               <div className="mt-3 flex gap-2 justify-center">
                 <button
