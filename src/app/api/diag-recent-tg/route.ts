@@ -14,14 +14,15 @@ export async function GET(req: NextRequest) {
 
   // 1. 最近 1h / 24h / 7d 新增的 TG 资源 (用 INSERT sql 写 read replica lag fix)
   for (const hours of [1, 6, 24, 72]) {
-    const rows = await sql`
-      SELECT import_channel, COUNT(*)::int as cnt
-      FROM xx_resources
-      WHERE created_at > NOW() - (${\`\${hours} hours\`})::interval
-        AND status = 'active'
-        AND import_channel LIKE 'tg_%'
-      GROUP BY import_channel
-    `;
+    const rows = await sql(
+      `SELECT import_channel, COUNT(*)::int as cnt
+       FROM xx_resources
+       WHERE created_at > NOW() - ($1 || ' hours')::interval
+         AND status = 'active'
+         AND import_channel LIKE 'tg_%'
+       GROUP BY import_channel`,
+      [String(hours)]
+    );
     r[`last_${hours}h_tg`] = rows;
   }
 
