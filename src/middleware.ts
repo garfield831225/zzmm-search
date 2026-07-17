@@ -83,6 +83,7 @@ const PUBLIC_PATHS = [
   '/api/feedback',                // 2026-07-17 用户失效反馈 (Bearer 内部鉴权)
   '/api/admin/feedback',          // 2026-07-17 admin 反馈处理 (Bearer 内部鉴权)
   '/api/diag-multi-link',         // 2026-07-17 diag: 找多网盘资源示例
+  '/api/admin/seed-multi-link-demo', // 2026-07-17 diag: 给老资源加示例多网盘链接
   '/api/admin/test-unnest',       // 2026-07-17 调试 UNNEST (已删, 白名单保留无影响)
   '/api/admin/diag-admin-group',  // 2026-07-16 查 admin 用户真实 group
   '/api/admin/diag-cookies',     // 2026-07-17 查服务端实际收到什么 cookie
