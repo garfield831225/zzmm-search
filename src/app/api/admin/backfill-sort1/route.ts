@@ -86,9 +86,9 @@ export async function GET(req: NextRequest) {
 
       // 新增 = after - before
       let inserted = 0;
-      for (const id of after) {
+      after.forEach(id => {
         if (!existed.has(id)) inserted++;
-      }
+      });
 
       const remainRes = await sql`
         SELECT COUNT(*)::int as cnt
