@@ -40,9 +40,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, processed: 0, lastId: fromId, hasMore: false, done: true });
   }
 
-  // 准备批量 INSERT — 单 SQL 多值, 避免循环单条 (Neon HTTP 每次 100-300ms)
-  // 分小组: 每 100 条一组
-  const GROUP = 100;
+  // 准备批量 INSERT — 用 UNNEST 数组一次插多行 (Neon serverless v3 唯一支持的批量)
+  // 分小组: 每 500 条一组
+  const GROUP = 500;
   let inserted = 0;
   let failed = 0;
   const errors: string[] = [];
@@ -50,24 +50,42 @@ export async function GET(req: NextRequest) {
 
   for (let i = 0; i < rows.length; i += GROUP) {
     const chunk = rows.slice(i, i + GROUP);
-    const values: any[] = [];
-    const placeholders: string[] = [];
-    let p = 1;
+    const ids: number[] = [];
+    const sources: string[] = [];
+    const urls: string[] = [];
+    const passwords: string[] = [];
+    const sorts: number[] = [];
+    const statuses: string[] = [];
+    const accessLevels: string[] = [];
+
     for (const r of chunk) {
       lastId = r.id;
       const source = r.source || 'other';
       const sort = SOURCE_SORT[source] ?? 99;
       const accessLevel = (r.import_channel === 'zezemom_excel') ? 'basic' : (r.access_level || 'vip');
-      placeholders.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
-      values.push(r.id, source, r.link, r.link_code || '', sort, 'active', accessLevel);
+      ids.push(r.id);
+      sources.push(source);
+      urls.push(r.link);
+      passwords.push(r.link_code || '');
+      sorts.push(sort);
+      statuses.push('active');
+      accessLevels.push(accessLevel);
     }
+
     try {
-      const sqlText = `
+      await sql`
         INSERT INTO xx_resource_links (resource_id, source, url, password, sort, status, access_level)
-        VALUES ${placeholders.join(',')}
+        SELECT * FROM UNNEST(
+          ${ids}::int[],
+          ${sources}::text[],
+          ${urls}::text[],
+          ${passwords}::text[],
+          ${sorts}::int[],
+          ${statuses}::text[],
+          ${accessLevels}::text[]
+        )
         ON CONFLICT (resource_id, source) DO NOTHING
       `;
-      await (sql as any).query(sqlText, values);
       inserted += chunk.length;
     } catch (e: any) {
       failed += chunk.length;
