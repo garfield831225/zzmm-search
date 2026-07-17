@@ -79,6 +79,9 @@ const PUBLIC_PATHS = [
   '/api/admin/diag-migrate-tg-l3', // 2026-07-16 TG L3 一次性迁移 (l3_from 列 + xx_telegram_l3_queue 表)
   '/api/admin/diag-migrate-resource-links', // 2026-07-17 资源-链接 1对N 一次性迁移 (xx_resource_links + xx_link_feedback)
   '/api/admin/migrate-old-data',  // 2026-07-17 老数据入副表 (xx_resources → xx_resource_links)
+  '/api/admin/links',             // 2026-07-17 admin 改/删资源链接
+  '/api/feedback',                // 2026-07-17 用户失效反馈 (Bearer 内部鉴权)
+  '/api/admin/feedback',          // 2026-07-17 admin 反馈处理 (Bearer 内部鉴权)
   '/api/admin/test-unnest',       // 2026-07-17 调试 UNNEST (已删, 白名单保留无影响)
   '/api/admin/diag-admin-group',  // 2026-07-16 查 admin 用户真实 group
   '/api/admin/diag-cookies',     // 2026-07-17 查服务端实际收到什么 cookie

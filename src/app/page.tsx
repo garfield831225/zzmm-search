@@ -64,6 +64,7 @@ interface ResourceItem {
   accessTier?: 'document' | 'vip' | 'unlock' | 'free';  // 2026-06-25 资源分级
   accessLevel?: string;  // 2026-06-25 兼容旧 access_level 字段
   importChannel?: string;  // 2026-07-14 泽泽妈专属标识
+  links?: Array<{ source: string; url: string; password: string; sort: number; accessLevel?: string; status?: string }>;  // 2026-07-17 1对N 多链接
 }
 
 interface SearchResponse {
@@ -106,6 +107,8 @@ export default function HomePage() {
   const [tmdbCredits, setTmdbCredits] = useState<{ director: any[]; cast: any[]; overview: string; tagline: string; original_title: string; vote_count: number; genres: string[] } | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [user, setUser] = useState<{ id: number; username: string; group: string; expire_at: string } | null>(null);
+  const isAdmin = user?.group === 'admin';
+  const getToken = () => localStorage.getItem('zzmm_token') || localStorage.getItem('token') || localStorage.getItem('adminToken') || '';
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [downloadToasts, setDownloadToasts] = useState<DownloadToast[]>([]);
@@ -700,6 +703,34 @@ export default function HomePage() {
                   <span>{item.category}</span>
                   {item.size && <span>📦 {item.size}</span>}
                 </div>
+                {/* 2026-07-17: 1对N 多链接 - 卡片下网盘图标排 (副表读) */}
+                {item.links && item.links.length > 0 && (
+                  <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                    {item.links.slice(0, 8).map((l, idx) => (
+                      <span key={idx} className={`px-1.5 py-0.5 text-[10px] rounded font-medium ${
+                        l.source === 'magnet' || l.source === 'ed2k'
+                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                          : l.source === '115'
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                            : 'bg-white/5 text-white/60 border border-white/10'
+                      }`}>
+                        {l.source === 'magnet' || l.source === 'ed2k' ? '🧲' :
+                         l.source === '115' ? '📦' :
+                         l.source === 'baidu' ? '🅱️' :
+                         l.source === 'quark' ? '🍊' :
+                         l.source === 'aliyun' ? '☁️' :
+                         l.source === 'xunlei' ? '⚡' :
+                         l.source === '123' ? '1️⃣' :
+                         l.source === 'uc' ? '🅿️' :
+                         l.source === 'tianyi' ? '☂️' :
+                         l.source === 'yidong' ? '📱' : '🔗'} {l.source}
+                      </span>
+                    ))}
+                    {item.links.length > 8 && (
+                      <span className="text-[10px] text-white/40">+{item.links.length - 8}</span>
+                    )}
+                  </div>
+                )}
               </div>
             </motion.div>
             );
@@ -883,24 +914,114 @@ export default function HomePage() {
                     <h3 className="font-semibold text-base text-white/80">📎 资源链接</h3>
                     <div className="space-y-2">
                       <div className="text-xs text-white/40 mb-1">📌 当前版本</div>
-                      {isMagnetOrEd2k(selectedItem.link) ? (
-                        <button onClick={(e) => { e.preventDefault(); handleCopyLink(selectedItem.link, e); }}
-                          className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left">
-                          <div className="flex items-center gap-3"><span className="text-xl">🔗</span>
-                            <div><div className="font-medium">{selectedItem.source}</div><div className="text-sm text-cyan-400">磁力/ED2K链接，点击复制</div></div>
-                          </div>
-                          <span className="px-3 py-1 bg-cyan-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">📋 复制</span>
-                        </button>
-                      ) : (
-                        <button onClick={(e) => { e.preventDefault(); handleDirectOpen(selectedItem.link, e); }}
-                          className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left">
-                          <div className="flex items-center gap-3"><span className="text-xl">🔗</span>
-                            <div><div className="font-medium">{selectedItem.source}</div>
-                              <div className="text-sm text-white/50">{extractCodeFromUrl(selectedItem.link) ? `提取码：${extractCodeFromUrl(selectedItem.link)}` : '无需提取码'}</div>
+                      {/* 2026-07-17: 1对N 多链接 — 副表读, 按 sort 排 (1=115 优先) */}
+                      {selectedItem.links && selectedItem.links.length > 0 ? (
+                        selectedItem.links.map((l, idx) => {
+                          const isMagnet = l.source === 'magnet' || l.source === 'ed2k';
+                          return (
+                            <div key={idx}>
+                              {isMagnet ? (
+                                <button onClick={(e) => { e.preventDefault(); handleCopyLink(l.url, e); }}
+                                  className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left">
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-xl">🧲</span>
+                                    <div>
+                                      <div className="font-medium">{l.source === 'magnet' ? '磁力链接' : 'ED2K链接'}</div>
+                                      <div className="text-sm text-cyan-400 truncate max-w-[200px]">{(l.url || '').slice(0, 40)}...</div>
+                                    </div>
+                                  </div>
+                                  <span className="px-3 py-1 bg-cyan-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">📋 复制</span>
+                                </button>
+                              ) : (
+                                <button onClick={(e) => { e.preventDefault(); handleDirectOpen(l.url, e); }}
+                                  className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left">
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-xl">
+                                      {l.source === '115' ? '📦' :
+                                       l.source === 'baidu' ? '🅱️' :
+                                       l.source === 'quark' ? '🍊' :
+                                       l.source === 'aliyun' ? '☁️' :
+                                       l.source === 'xunlei' ? '⚡' :
+                                       l.source === '123' ? '1️⃣' :
+                                       l.source === 'uc' ? '🅿️' :
+                                       l.source === 'tianyi' ? '☂️' :
+                                       l.source === 'yidong' ? '📱' : '🔗'}
+                                    </span>
+                                    <div>
+                                      <div className="font-medium">{l.source}</div>
+                                      <div className="text-sm text-white/50">{l.password ? `提取码：${l.password}` : '无需提取码'}</div>
+                                    </div>
+                                  </div>
+                                  <span className="px-3 py-1 bg-violet-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">🔗 打开</span>
+                                </button>
+                              )}
+                              {/* 2026-07-17 admin 改/删 + 用户失效反馈按钮 (每个链接旁) */}
+                              {isAdmin && (
+                                <div className="flex gap-1 mt-1">
+                                  <button onClick={async (e) => {
+                                    e.preventDefault();
+                                    const newUrl = prompt(`改 ${l.source} 链接 URL:`, l.url);
+                                    if (!newUrl || newUrl === l.url) return;
+                                    const r = await fetch(`/api/admin/links/${idx}`, {  // 简化: 实际 link id 由详情接口返
+                                      method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
+                                      body: JSON.stringify({ resourceId: selectedItem.id, source: l.source, url: newUrl, password: l.password })
+                                    });
+                                    const d = await r.json();
+                                    if (d.ok) addToast('success', '✅ 已更新');
+                                    else addToast('error', '❌ ' + (d.error || '更新失败'));
+                                  }} className="text-xs px-2 py-0.5 bg-white/5 hover:bg-white/10 rounded text-white/60">✏️ 改</button>
+                                  <button onClick={async (e) => {
+                                    e.preventDefault();
+                                    if (!confirm(`删除 ${l.source} 链接?`)) return;
+                                    const r = await fetch(`/api/admin/links/${idx}`, {
+                                      method: 'DELETE', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
+                                      body: JSON.stringify({ resourceId: selectedItem.id, source: l.source })
+                                    });
+                                    const d = await r.json();
+                                    if (d.ok) addToast('success', '✅ 已删除');
+                                    else addToast('error', '❌ ' + (d.error || '删除失败'));
+                                  }} className="text-xs px-2 py-0.5 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded">🗑️ 删</button>
+                                </div>
+                              )}
+                              {!isAdmin && user && (
+                                <button onClick={async (e) => {
+                                  e.preventDefault();
+                                  const reason = prompt('反馈原因 (失效/限速/密码错/内容错/其他):', '失效');
+                                  if (!reason) return;
+                                  const comment = prompt('备注 (可选):') || '';
+                                  const r = await fetch('/api/feedback', {
+                                    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
+                                    body: JSON.stringify({ resourceId: selectedItem.id, source: l.source, reason, comment })
+                                  });
+                                  const d = await r.json();
+                                  if (d.ok) addToast('success', '✅ 反馈已提交');
+                                  else addToast('error', '❌ ' + (d.error || '提交失败'));
+                                }} className="text-xs mt-1 px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 rounded">⚠️ 失效反馈</button>
+                              )}
                             </div>
-                          </div>
-                          <span className="px-3 py-1 bg-violet-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">🔗 打开</span>
-                        </button>
+                          );
+                        })
+                      ) : (
+                        // fallback 老字段
+                        isMagnetOrEd2k(selectedItem.link) ? (
+                          <button onClick={(e) => { e.preventDefault(); handleCopyLink(selectedItem.link, e); }}
+                            className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left">
+                            <div className="flex items-center gap-3"><span className="text-xl">🔗</span>
+                              <div><div className="font-medium">{selectedItem.source}</div><div className="text-sm text-cyan-400">磁力/ED2K链接，点击复制</div></div>
+                            </div>
+                            <span className="px-3 py-1 bg-cyan-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">📋 复制</span>
+                          </button>
+                        ) : (
+                          <button onClick={(e) => { e.preventDefault(); handleDirectOpen(selectedItem.link, e); }}
+                            className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left">
+                            <div className="flex items-center gap-3"><span className="text-xl">🔗</span>
+                              <div><div className="font-medium">{selectedItem.source}</div>
+                                <div className="text-sm text-white/50">{extractCodeFromUrl(selectedItem.link) ? `提取码：${extractCodeFromUrl(selectedItem.link)}` : '无需提取码'}</div>
+                              </div>
+                            </div>
+                            <span className="px-3 py-1 bg-violet-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">🔗 打开</span>
+                          </button>
+                        )
                       )}
 
                       {/* 2026-06-03 单资源付费 - 解锁按钮 */}
