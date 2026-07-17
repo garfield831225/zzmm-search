@@ -77,6 +77,7 @@ const PUBLIC_PATHS = [
   '/api/admin/dryrun-activate', // 2026-07-16 临时诊断: 16k inactive 激活预览+执行
   '/api/admin/fix-109',         // 2026-07-16 临时诊断: 把 109 tg 资源改成 vip 一致性
   '/api/admin/diag-migrate-tg-l3', // 2026-07-16 TG L3 一次性迁移 (l3_from 列 + xx_telegram_l3_queue 表)
+  '/api/admin/diag-migrate-resource-links', // 2026-07-17 资源-链接 1对N 一次性迁移 (xx_resource_links + xx_link_feedback)
   '/api/admin/diag-admin-group',  // 2026-07-16 查 admin 用户真实 group
   '/api/admin/diag-cookies',     // 2026-07-17 查服务端实际收到什么 cookie
   '/api/admin/diag-library-zones',  // 2026-07-16 验证 /library 三区 SQL 过滤
