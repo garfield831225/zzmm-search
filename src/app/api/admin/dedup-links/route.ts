@@ -89,12 +89,11 @@ export async function GET(req: NextRequest) {
   }
 
   if (action === 'run') {
-    // 跑去重 - 查 1 url 重复组 + 50 并发 UPDATE deleted
-    // 每次跑 1 url (1 个 run 请求 = 1 url), 本地循环调多次
-    // Vercel 60s 限制: 1 url 通常 < 13000 条 UPDATE 50 并发 = 2-3s/批
+    // 只查 metadata, 不写库
+    // 返 1 个 url + 它的所有 id, 本地决定 KEEP 哪个, 然后 POST process_batch 处理
     const onlyReal = req.nextUrl.searchParams.get('only_real') === 'true';
     const fromUrl = req.nextUrl.searchParams.get('fromUrl') || '';
-    const batchLimit = Math.min(parseInt(req.nextUrl.searchParams.get('limit') || '10', 10), 100);
+    const batchLimit = Math.min(parseInt(req.nextUrl.searchParams.get('limit') || '5', 10), 50);
 
     try {
       const sourceFilter = onlyReal
@@ -102,7 +101,7 @@ export async function GET(req: NextRequest) {
         : "";
 
       // 1. 找一批重复 url
-      const dupBatch = await sql(
+      const dupUrls = await sql(
         `SELECT url, COUNT(*)::int as cnt
          FROM xx_resource_links
          WHERE status = 'active' AND url IS NOT NULL AND url != '' ${sourceFilter}
@@ -113,41 +112,48 @@ export async function GET(req: NextRequest) {
          LIMIT $2`
       , [fromUrl, batchLimit]) as any[];
 
-      if (dupBatch.length === 0) {
-        const afterRes = await sql`SELECT COUNT(*)::int as cnt FROM xx_resource_links WHERE status = 'active'`;
-        return NextResponse.json({ ok: true, done: true, deleted: 0, after: afterRes[0]?.cnt, mode: onlyReal ? 'only_real' : 'all' });
+      if (dupUrls.length === 0) {
+        return NextResponse.json({ ok: true, done: true, mode: onlyReal ? 'only_real' : 'all', deleted: 0 });
       }
 
-      // 2. 对每 url 找最新 KEEP id, 其他 UPDATE deleted
-      let batchDeleted = 0;
-      const lastUrl = dupBatch[dupBatch.length - 1].url;
-      for (const dup of dupBatch) {
-        const ids = await sql`SELECT id FROM xx_resource_links WHERE url = ${dup.url} AND status = 'active' ORDER BY updated_at DESC, id DESC` as any[];
-        if (ids.length > 1) {
-          const toDelete = ids.slice(1).map((r: any) => r.id);
-          // 50 并发单条 UPDATE (Neon v3 安全)
-          const CONCURRENCY = 50;
-          for (let i = 0; i < toDelete.length; i += CONCURRENCY) {
-            const chunk = toDelete.slice(i, i + CONCURRENCY);
-            await Promise.allSettled(chunk.map(id => sql`UPDATE xx_resource_links SET status = 'deleted' WHERE id = ${id}`));
-            batchDeleted += chunk.length;
-          }
-        }
+      // 2. 找每 url 的所有 id (按 updated_at DESC), 让本地决定 KEEP/DEL
+      const result: any[] = [];
+      for (const dup of dupUrls) {
+        const ids = await sql`SELECT id, updated_at FROM xx_resource_links WHERE url = ${dup.url} AND status = 'active' ORDER BY updated_at DESC, id DESC` as any[];
+        result.push({ url: dup.url, cnt: dup.cnt, links: ids });
       }
-
-      const afterRes = await sql`SELECT COUNT(*)::int as cnt FROM xx_resource_links WHERE status = 'active'`;
 
       return NextResponse.json({
         ok: true,
         done: false,
-        hasMore: true,
-        lastUrl,
-        deleted: batchDeleted,
-        urls_processed: dupBatch.length,
-        after: afterRes[0]?.cnt,
         mode: onlyReal ? 'only_real' : 'all',
-        nextUrl: `${req.nextUrl.origin}/api/admin/dedup-links?key=zzmm-batch-test&action=run&fromUrl=${encodeURIComponent(lastUrl)}&limit=${batchLimit}${onlyReal ? '&only_real=true' : ''}`,
+        batch: result,
+        nextUrl: dupUrls.length === batchLimit
+          ? `${req.nextUrl.origin}/api/admin/dedup-links?key=zzmm-batch-test&action=run&fromUrl=${encodeURIComponent(dupUrls[dupUrls.length - 1].url)}&limit=${batchLimit}${onlyReal ? '&only_real=true' : ''}`
+          : null,
       });
+    } catch (e: any) {
+      return NextResponse.json({ ok: false, error: e.message?.slice(0, 300) }, { status: 500 });
+    }
+  }
+
+  if (action === 'process_batch') {
+    // POST body: { ids: [1,2,3,...] } - 50 并发 UPDATE deleted
+    let body: any = {};
+    try { body = await req.json(); } catch {}
+    const ids: number[] = (body.ids || []).map((n: any) => Number(n)).filter((n: any) => Number.isInteger(n) && n > 0);
+    if (ids.length === 0) return NextResponse.json({ ok: false, error: '需要 ids 数组' }, { status: 400 });
+    if (ids.length > 500) return NextResponse.json({ ok: false, error: '单次最多 500' }, { status: 400 });
+
+    try {
+      const CONCURRENCY = 50;
+      let deleted = 0;
+      for (let i = 0; i < ids.length; i += CONCURRENCY) {
+        const chunk = ids.slice(i, i + CONCURRENCY);
+        const results = await Promise.allSettled(chunk.map(id => sql`UPDATE xx_resource_links SET status = 'deleted' WHERE id = ${id}`));
+        deleted += results.filter(r => r.status === 'fulfilled').length;
+      }
+      return NextResponse.json({ ok: true, deleted, requested: ids.length });
     } catch (e: any) {
       return NextResponse.json({ ok: false, error: e.message?.slice(0, 300) }, { status: 500 });
     }
