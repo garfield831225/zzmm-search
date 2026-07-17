@@ -290,6 +290,34 @@ export async function GET(request: NextRequest) {
       } catch { sportsCoverMap = new Map(); }
     }
 
+    // ─── 2026-07-17: Batch xx_resource_links (1对N 多链接) ──────────────────
+    // 双轨读: 优先副表, 老 fallback 用主链接
+    // 文档/独立付费 (1资源1链接) 跳过副表查询
+    let linksMap = new Map<number, any[]>();
+    if (allIds.length > 0) {
+      try {
+        const linkRows = await sql(`
+          SELECT resource_id, source, url, password, sort, access_level, status
+          FROM xx_resource_links
+          WHERE resource_id IN (${allIds.map(id => `${id}`).join(',')})
+            AND status = 'active'
+            AND (source IS NOT NULL)
+          ORDER BY resource_id, sort ASC, id ASC
+        `);
+        for (const lr of (linkRows || [])) {
+          if (!linksMap.has(lr.resource_id)) linksMap.set(lr.resource_id, []);
+          linksMap.get(lr.resource_id)!.push({
+            source: lr.source,
+            url: lr.url,
+            password: lr.password,
+            sort: lr.sort,
+            accessLevel: lr.access_level,
+            status: lr.status,
+          });
+        }
+      } catch { linksMap = new Map(); }
+    }
+
     // ─── 用户解锁资源（仅 film 区）────────────────────────────────────
     // userGroup 已在上面预解析（用于 import_channel 过滤）
     const userUnlockedIds = new Set<number>();
@@ -349,6 +377,8 @@ export async function GET(request: NextRequest) {
         musicCover: item.category === '音乐' ? (musicCoverMap.get(item.id) || null) : null,
         coverCache: !item.tmdb_id ? (coverCacheMap.get(item.id) || null) : null,
         sportsCover: item.category === '体育' ? (sportsCoverMap.get(item.id) || null) : null,
+        // 2026-07-17: 多链接 (1对N) — 副表优先, 老 fallback 主链接
+        links: linksMap.get(item.id) || (item.link ? [{ source: item.source, url: item.link, password: item.link_code, sort: 99, accessLevel: item.access_level, status: 'active' }] : []),
       };
     });
 
