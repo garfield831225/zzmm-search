@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
     }
 
     try {
-      await sql`
+      const result = await sql`
         INSERT INTO xx_resource_links (resource_id, source, url, password, sort, status, access_level)
         SELECT * FROM UNNEST(
           ${ids}::int[],
@@ -85,8 +85,9 @@ export async function GET(req: NextRequest) {
           ${accessLevels}::text[]
         )
         ON CONFLICT (resource_id, source) DO NOTHING
+        RETURNING id
       `;
-      inserted += chunk.length;
+      inserted += (result as any[]).length;
     } catch (e: any) {
       failed += chunk.length;
       if (errors.length < 5) errors.push(`batch ${i}-${i+chunk.length}: ${e.message?.slice(0, 200)}`);
