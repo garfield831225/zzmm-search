@@ -142,7 +142,7 @@ export async function GET(req: NextRequest) {
             await sql`
               UPDATE xx_resource_links
               SET status = 'deleted'
-              WHERE id = ANY(${sub}::int[])
+              WHERE id = ANY(${sub})
             `;
             batchDeleted += sub.length;
           }
