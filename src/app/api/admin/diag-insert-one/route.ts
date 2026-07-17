@@ -47,5 +47,11 @@ export async function GET(req: NextRequest) {
     r.total_count = c[0]?.cnt;
   } catch (e: any) { r.total_count_err = e.message; }
 
+  // 6. 查 range 305635-306200 (migrate 端点 500 条 batch 应该在这范围)
+  try {
+    const c = await sql`SELECT COUNT(*)::int as cnt, array_agg(resource_id ORDER BY resource_id) FILTER (WHERE resource_id < 306200) as ids FROM xx_resource_links WHERE resource_id >= 305635 AND resource_id < 306200`;
+    r.batch_range = c;
+  } catch (e: any) { r.batch_range_err = e.message; }
+
   return NextResponse.json(r);
 }
