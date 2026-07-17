@@ -139,10 +139,12 @@ export async function GET(req: NextRequest) {
           // 批量 UPDATE
           for (let i = 0; i < toDelete.length; i += 100) {
             const sub = toDelete.slice(i, i + 100);
+            // 用 IN 拼接 - ids 是 int, 安全
+            const inList = sub.join(',');
             await sql`
               UPDATE xx_resource_links
               SET status = 'deleted'
-              WHERE id = ANY(${sub})
+              WHERE id IN (${inList})
             `;
             batchDeleted += sub.length;
           }
