@@ -61,6 +61,26 @@ export async function GET(req: NextRequest) {
       const existed = new Set((beforeRes || []).map((r: any) => Number(r.resource_id)));
 
       // INSERT (Neon serverless v3 RETURNING 不可靠, 不依赖)
+      // 先看本批要处理什么
+      const sample = await sql`
+        SELECT id, link, source FROM xx_resources
+        WHERE status = 'active' AND link IS NOT NULL AND link != ''
+          AND id > ${fromId}
+          AND NOT EXISTS (
+            SELECT 1 FROM xx_resource_links l
+            WHERE l.resource_id = xx_resources.id AND l.sort = 1
+          )
+        ORDER BY id
+        LIMIT ${batchSize}
+      ` as any[];
+
+      if (sample.length === 0) {
+        // 跳到下一个未填位置
+        const next = await sql`SELECT MIN(id)::int as id FROM xx_resources WHERE status = 'active' AND link IS NOT NULL AND link != '' AND id > ${fromId} AND NOT EXISTS (SELECT 1 FROM xx_resource_links l WHERE l.resource_id = xx_resources.id AND l.sort = 1)`;
+        return NextResponse.json({ ok: true, batch_inserted: 0, sample_count: 0, fromId, nextFromId: next[0]?.id || 0, done: !next[0]?.id });
+      }
+
+      // 实际入
       await sql`
         INSERT INTO xx_resource_links (resource_id, source, url, password, sort, status, access_level)
         SELECT id, source, link, COALESCE(link_code, ''), 1, 'active', 'vip'
@@ -76,12 +96,14 @@ export async function GET(req: NextRequest) {
         ON CONFLICT (resource_id, sort) DO NOTHING
       `;
 
-      // after: 查这批 id 范围中已存在 sort=1 的 resource_id
-      const afterRes = await sql(
-        `SELECT resource_id FROM xx_resource_links
-         WHERE sort = 1 AND resource_id > $1 AND resource_id <= $1 + $2`,
-        [fromId, batchSize]
-      );
+      // after: 查 sample 范围内已存在 sort=1 的 resource_id (IN 拼字符串避免 Neon ANY 坏)
+      const sampleIds = sample.map((s: any) => s.id);
+      const afterRes = sampleIds.length > 0
+        ? await sql(
+            `SELECT resource_id FROM xx_resource_links
+             WHERE sort = 1 AND resource_id IN (${sampleIds.join(',')})`
+          )
+        : [];
       const after = new Set((afterRes || []).map((r: any) => Number(r.resource_id)));
 
       // 新增 = after - before
@@ -91,25 +113,35 @@ export async function GET(req: NextRequest) {
       });
 
       const remainRes = await sql`
-        SELECT COUNT(*)::int as cnt
-        FROM xx_resources r
-        WHERE r.status = 'active' AND r.link IS NOT NULL AND r.link != ''
-          AND r.id > ${fromId}
+        SELECT COALESCE(MAX(id), 0)::int as max_id
+        FROM xx_resources
+        WHERE status = 'active' AND link IS NOT NULL AND link != ''
+      `;
+      const maxId = remainRes[0]?.max_id || 0;
+
+      // 找当前 fromId 之后第一个"未填"位置
+      const nextMissing = await sql`
+        SELECT id FROM xx_resources
+        WHERE status = 'active' AND link IS NOT NULL AND link != ''
+          AND id > ${fromId}
           AND NOT EXISTS (
             SELECT 1 FROM xx_resource_links l
-            WHERE l.resource_id = r.id AND l.sort = 1
+            WHERE l.resource_id = xx_resources.id AND l.sort = 1
           )
+        ORDER BY id
+        LIMIT 1
       `;
-      const remain = remainRes[0]?.cnt || 0;
+      const nextFromId = nextMissing[0]?.id || (fromId + batchSize);
+      const done = !nextMissing[0] || (nextMissing[0]?.id > maxId);
 
       return NextResponse.json({
         ok: true,
         batch_inserted: inserted,
         batch_duration_ms: Date.now() - startTime,
         fromId,
-        nextFromId: fromId + batchSize,
-        remain,
-        done: remain === 0,
+        nextFromId,
+        maxId,
+        done,
       });
     } catch (e: any) {
       return NextResponse.json({ ok: false, error: e.message?.slice(0, 300) }, { status: 500 });
