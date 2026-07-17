@@ -43,8 +43,12 @@ const CHANNEL_OPTIONS = [
   { value: 'tg_other', label: 'TG 其他', icon: '📦' },
 ];
 
-// Vercel Hobby body 限制 4.5MB, JSON 转义 + headers 余量, 实际安全上限 2MB
-const MAX_BATCH_BYTES = 2 * 1024 * 1024;
+// Vercel Hobby body 限制 4.5MB, JSON 转义 + headers 余量, 实际安全上限 ~2MB
+// 但每条消息 1 资源 + N 链接 = N+1 INSERT, Vercel 60s 超时
+// 1 消息 200 字节平均 + 2 链接 = 400 字节. 2MB ≈ 5000 消息 ≈ 15000 INSERT × 20ms = 300s 超时
+// 1MB 保守切, 估算 800 消息 × 2 链接 = 2400 INSERT × 20ms = 48s 边界
+// 800 消息 × 2 链接 = 1600 INSERT × 50 并发 = 32s 应该 OK
+const MAX_BATCH_BYTES = 1 * 1024 * 1024;
 
 export default function ImportTgPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -398,7 +402,7 @@ export default function ImportTgPage() {
               <div className="font-medium">{file.name}</div>
               <div className="text-sm text-white/40 mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</div>
               {splitPayloads.length > 0 && (
-                <div className="mt-3 text-violet-300 text-sm">✂️ 已切成 {splitPayloads.length} 批 (每批 ≤ 2MB, 适配 Vercel 4.5MB 上限)</div>
+                <div className="mt-3 text-violet-300 text-sm">✂️ 已切成 {splitPayloads.length} 批 (每批 ≤ 1MB, 避开 60s 超时)</div>
               )}
               <div className="mt-3 flex gap-2 justify-center">
                 <button

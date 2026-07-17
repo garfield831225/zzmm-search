@@ -195,39 +195,56 @@ export async function POST(req: NextRequest) {
   const errors: string[] = [];
 
   if (candidates.length > 0) {
-    for (const c of candidates) {
-      try {
-        const r = await sql`
-          INSERT INTO xx_resources (name, link, link_code, source, category, size, tags, access_level, pay_type, import_channel, status, is_multi_link, created_at, updated_at)
-          VALUES (${c.name}, ${c.link}, ${c.link_code || ''}, ${c.source}, ${c.category}, ${c.size || ''}, ${c.tags?.join(',') || ''}, ${c.access_level}, ${c.pay_type}, ${c.import_channel}, 'active', ${c.is_multi_link || false}, NOW(), NOW())
-          ON CONFLICT (link, name) DO NOTHING
-          RETURNING id
-        ` as any[];
-        const insertedId = r && r[0]?.id;
-        if (insertedId) {
+    // 2026-07-17: 并发 INSERT (50 并发), 避免 Vercel 60s 超时
+    // 主表: 50 并发 → 拿到 resource_id
+    // 副表: 50 并发 → 用主表 resource_id 入副表
+    const CONCURRENCY = 50;
+
+    for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+      const chunk = candidates.slice(i, i + CONCURRENCY);
+      const mainResults = await Promise.all(chunk.map(async (c) => {
+        try {
+          const r = await sql`
+            INSERT INTO xx_resources (name, link, link_code, source, category, size, tags, access_level, pay_type, import_channel, status, is_multi_link, created_at, updated_at)
+            VALUES (${c.name}, ${c.link}, ${c.link_code || ''}, ${c.source}, ${c.category}, ${c.size || ''}, ${c.tags?.join(',') || ''}, ${c.access_level}, ${c.pay_type}, ${c.import_channel}, 'active', ${c.is_multi_link || false}, NOW(), NOW())
+            ON CONFLICT (link, name) DO NOTHING
+            RETURNING id
+          ` as any[];
+          return { c, ok: true, id: r?.[0]?.id, error: null };
+        } catch (e: any) {
+          return { c, ok: false, id: null, error: e };
+        }
+      }));
+
+      // 收集成功插入的资源 + 副链接
+      const subLinkPromises: any[] = [];
+      for (const m of mainResults) {
+        if (m.ok && m.id) {
           l1Inserted++;
-          // 副链接入 xx_resource_links
-          if (c.sub_links && c.sub_links.length > 0) {
-            for (const sl of c.sub_links) {
-              try {
-                const r2 = await sql`
+          if (m.c.sub_links && m.c.sub_links.length > 0) {
+            for (const sl of m.c.sub_links) {
+              subLinkPromises.push(
+                sql`
                   INSERT INTO xx_resource_links (resource_id, source, url, password, sort, status, access_level)
-                  VALUES (${insertedId}, ${sl.source}, ${sl.url}, ${sl.password}, ${sl.sort}, 'active', 'vip')
+                  VALUES (${m.id}, ${sl.source}, ${sl.url}, ${sl.password}, ${sl.sort}, 'active', 'vip')
                   ON CONFLICT (resource_id, source) DO NOTHING
-                `;
-                l1LinksInserted++;
-              } catch (e2: any) {
-                // 副链接失败不阻塞主流程
-                if (errors.length < 5) errors.push(`SubLink[${sl.source}] ${e2.message?.slice(0, 100)}`);
-              }
+                `.then(() => l1LinksInserted++).catch((e2: any) => {
+                  if (errors.length < 5) errors.push(`SubLink[${sl.source}] ${e2.message?.slice(0, 100)}`);
+                })
+              );
             }
           }
+        } else if (m.ok && !m.id) {
+          l1Skipped++;  // ON CONFLICT 触发
         } else {
-          l1Skipped++;  // ON CONFLICT 触发, 算 skipped
+          l1Failed++;
+          if (errors.length < 5) errors.push(`L1[${m.c.name.slice(0, 30)}] ${m.error?.message?.slice(0, 100)}`);
         }
-      } catch (e: any) {
-        l1Failed++;
-        if (errors.length < 5) errors.push(`L1[${c.name.slice(0, 30)}] ${e.message?.slice(0, 100)}`);
+      }
+
+      // 副表分 50 并发批次处理 (避免一次发太多)
+      for (let j = 0; j < subLinkPromises.length; j += CONCURRENCY) {
+        await Promise.all(subLinkPromises.slice(j, j + CONCURRENCY));
       }
     }
   }
