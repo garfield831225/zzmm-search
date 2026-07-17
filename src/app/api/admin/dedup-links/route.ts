@@ -163,6 +163,3 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   return GET(req);
 }
-
-  return NextResponse.json({ error: 'unknown action (use ?action=stats or run)' });
-}
