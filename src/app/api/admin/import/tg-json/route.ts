@@ -195,38 +195,68 @@ export async function POST(req: NextRequest) {
   const errors: string[] = [];
 
   if (candidates.length > 0) {
-    // 2026-07-17: 并发 INSERT (50 并发), 避免 Vercel 60s 超时
-    // 主表: 50 并发 → 拿到 resource_id
-    // 副表: 50 并发 → 用主表 resource_id 入副表
+    // 2026-07-17: 并发 INSERT (50 并发) + before/after SELECT 验证
+    // Neon serverless v3 的 RETURNING 不可靠, 不能用 r?.[0]?.id 判定
+    // 改用 (link, name) IN (...) 前后 count 差值算 inserted
     const CONCURRENCY = 50;
 
     for (let i = 0; i < candidates.length; i += CONCURRENCY) {
       const chunk = candidates.slice(i, i + CONCURRENCY);
-      const mainResults = await Promise.all(chunk.map(async (c) => {
+
+      // 1. before: 查这 50 条 (link, name) 当前是否存在
+      // 用 ANY(array) 数组参数, 不嵌套 sql template
+      const linksArr = chunk.map(c => c.link);
+      const namesArr = chunk.map(c => c.name);
+      const beforeRes = await sql`
+        SELECT link, name FROM xx_resources
+        WHERE link = ANY(${linksArr}::text[]) AND name = ANY(${namesArr}::text[])
+      ` as any[];
+      const existedSet = new Set(beforeRes.map((r: any) => `${r.link}\u0000${r.name}`));
+
+      // 2. INSERT (不依赖 RETURNING)
+      const insertResults = await Promise.all(chunk.map(async (c) => {
         try {
-          const r = await sql`
+          await sql`
             INSERT INTO xx_resources (name, link, link_code, source, category, size, tags, access_level, pay_type, import_channel, status, is_multi_link, created_at, updated_at)
             VALUES (${c.name}, ${c.link}, ${c.link_code || ''}, ${c.source}, ${c.category}, ${c.size || ''}, ${c.tags?.join(',') || ''}, ${c.access_level}, ${c.pay_type}, ${c.import_channel}, 'active', ${c.is_multi_link || false}, NOW(), NOW())
             ON CONFLICT (link, name) DO NOTHING
-            RETURNING id
-          ` as any[];
-          return { c, ok: true, id: r?.[0]?.id, error: null };
+          `;
+          return { c, ok: true };
         } catch (e: any) {
-          return { c, ok: false, id: null, error: e };
+          return { c, ok: false, e };
         }
       }));
 
-      // 收集成功插入的资源 + 副链接
+      // 3. after: 再查一次, 找新插入的
+      const afterRes = await sql`
+        SELECT id, link, name FROM xx_resources
+        WHERE link = ANY(${linksArr}::text[]) AND name = ANY(${namesArr}::text[])
+      ` as any[];
+      const idByKey = new Map<string, number>();
+      for (const r of afterRes) {
+        idByKey.set(`${r.link}\u0000${r.name}`, r.id);
+      }
+
+      // 4. 副表 INSERT
       const subLinkPromises: any[] = [];
-      for (const m of mainResults) {
-        if (m.ok && m.id) {
+      for (const ir of insertResults) {
+        if (!ir.ok) {
+          l1Failed++;
+          if (errors.length < 5) errors.push(`L1[${ir.c.name.slice(0, 30)}] ${ir.e?.message?.slice(0, 100)}`);
+          continue;
+        }
+        const key = `${ir.c.link}\u0000${ir.c.name}`;
+        const existed = existedSet.has(key);
+        const id = idByKey.get(key);
+        if (id && !existed) {
+          // 真新插入
           l1Inserted++;
-          if (m.c.sub_links && m.c.sub_links.length > 0) {
-            for (const sl of m.c.sub_links) {
+          if (ir.c.sub_links && ir.c.sub_links.length > 0) {
+            for (const sl of ir.c.sub_links) {
               subLinkPromises.push(
                 sql`
                   INSERT INTO xx_resource_links (resource_id, source, url, password, sort, status, access_level)
-                  VALUES (${m.id}, ${sl.source}, ${sl.url}, ${sl.password}, ${sl.sort}, 'active', 'vip')
+                  VALUES (${id}, ${sl.source}, ${sl.url}, ${sl.password}, ${sl.sort}, 'active', 'vip')
                   ON CONFLICT (resource_id, source) DO NOTHING
                 `.then(() => l1LinksInserted++).catch((e2: any) => {
                   if (errors.length < 5) errors.push(`SubLink[${sl.source}] ${e2.message?.slice(0, 100)}`);
@@ -234,15 +264,12 @@ export async function POST(req: NextRequest) {
               );
             }
           }
-        } else if (m.ok && !m.id) {
-          l1Skipped++;  // ON CONFLICT 触发
         } else {
-          l1Failed++;
-          if (errors.length < 5) errors.push(`L1[${m.c.name.slice(0, 30)}] ${m.error?.message?.slice(0, 100)}`);
+          l1Skipped++;  // 已存在
         }
       }
 
-      // 副表分 50 并发批次处理 (避免一次发太多)
+      // 5. 副表并发
       for (let j = 0; j < subLinkPromises.length; j += CONCURRENCY) {
         await Promise.all(subLinkPromises.slice(j, j + CONCURRENCY));
       }
