@@ -208,7 +208,7 @@ export default function ImportTgPage() {
             'Content-Type': 'application/json',
             Authorization: 'Bearer ' + token,
           },
-          body: batch.jsonStr,
+          body: JSON.stringify({ jsonContent: batch.jsonStr }),
         });
         const data = await r.json();
         const duration = Date.now() - start;
