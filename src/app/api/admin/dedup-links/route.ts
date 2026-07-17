@@ -57,10 +57,11 @@ export async function GET(req: NextRequest) {
     // 2. top 10 重复示例
     try {
       const top = await sql`
-        SELECT url, source, COUNT(*)::int as cnt
+        SELECT url, source, COUNT(*)::int as cnt,
+               array_agg(DISTINCT resource_id) as sample_resources
         FROM xx_resource_links
         WHERE status = 'active' AND url IS NOT NULL AND url != ''
-        GROUP BY url
+        GROUP BY url, source
         HAVING COUNT(*) > 1
         ORDER BY cnt DESC
         LIMIT 10
@@ -71,11 +72,12 @@ export async function GET(req: NextRequest) {
     // 2b. top 10 真资源重复
     try {
       const realTop = await sql`
-        SELECT url, source, COUNT(*)::int as cnt
+        SELECT url, source, COUNT(*)::int as cnt,
+               array_agg(DISTINCT resource_id) as sample_resources
         FROM xx_resource_links
         WHERE status = 'active' AND url IS NOT NULL AND url != ''
           AND source IN ('115', 'baidu', 'quark', 'aliyun', 'xunlei', '123', 'uc', 'tianyi', 'yidong', 'magnet', 'ed2k')
-        GROUP BY url
+        GROUP BY url, source
         HAVING COUNT(*) > 1
         ORDER BY cnt DESC
         LIMIT 10
