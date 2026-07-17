@@ -102,20 +102,20 @@ export async function GET(req: NextRequest) {
       const before = beforeRes[0]?.cnt || 0;
 
       const sourceFilter = onlyReal
-        ? sql`AND source IN ('115', 'baidu', 'quark', 'aliyun', 'xunlei', '123', 'uc', 'tianyi', 'yidong', 'magnet', 'ed2k')`
-        : sql``;
+        ? "AND source IN ('115', 'baidu', 'quark', 'aliyun', 'xunlei', '123', 'uc', 'tianyi', 'yidong', 'magnet', 'ed2k')"
+        : "";
 
       // 1. 找一批重复 url
-      const dupBatch = await sql`
-        SELECT url, COUNT(*)::int as cnt
-        FROM xx_resource_links
-        WHERE status = 'active' AND url IS NOT NULL AND url != '' ${sourceFilter}
-          AND url > ${fromUrl}
-        GROUP BY url
-        HAVING COUNT(*) > 1
-        ORDER BY url
-        LIMIT ${batchLimit}
-      ` as any[];
+      const dupBatch = await sql(
+        `SELECT url, COUNT(*)::int as cnt
+         FROM xx_resource_links
+         WHERE status = 'active' AND url IS NOT NULL AND url != '' ${sourceFilter}
+           AND url > $1
+         GROUP BY url
+         HAVING COUNT(*) > 1
+         ORDER BY url
+         LIMIT $2`
+      , [fromUrl, batchLimit]) as any[];
 
       if (dupBatch.length === 0) {
         const afterRes = await sql`SELECT COUNT(*)::int as cnt FROM xx_resource_links WHERE status = 'active'`;
