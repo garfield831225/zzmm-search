@@ -962,24 +962,34 @@ export default function HomePage() {
                                     e.preventDefault();
                                     const newUrl = prompt(`改 ${l.source} 链接 URL:`, l.url);
                                     if (!newUrl || newUrl === l.url) return;
-                                    const r = await fetch(`/api/admin/links/${idx}`, {  // 简化: 实际 link id 由详情接口返
+                                    const r = await fetch('/api/admin/links', {
                                       method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
                                       body: JSON.stringify({ resourceId: selectedItem.id, source: l.source, url: newUrl, password: l.password })
                                     });
                                     const d = await r.json();
-                                    if (d.ok) addToast('success', '✅ 已更新');
-                                    else addToast('error', '❌ ' + (d.error || '更新失败'));
+                                    if (d.ok) {
+                                      addToast('success', '✅ 已更新');
+                                      // 本地更新链接
+                                      setSelectedItem(prev => prev ? { ...prev, links: prev.links?.map(x => x.source === l.source ? { ...x, url: newUrl } : x) } : prev);
+                                    } else {
+                                      addToast('error', '❌ ' + (d.error || '更新失败'));
+                                    }
                                   }} className="text-xs px-2 py-0.5 bg-white/5 hover:bg-white/10 rounded text-white/60">✏️ 改</button>
                                   <button onClick={async (e) => {
                                     e.preventDefault();
                                     if (!confirm(`删除 ${l.source} 链接?`)) return;
-                                    const r = await fetch(`/api/admin/links/${idx}`, {
+                                    const r = await fetch('/api/admin/links', {
                                       method: 'DELETE', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
                                       body: JSON.stringify({ resourceId: selectedItem.id, source: l.source })
                                     });
                                     const d = await r.json();
-                                    if (d.ok) addToast('success', '✅ 已删除');
-                                    else addToast('error', '❌ ' + (d.error || '删除失败'));
+                                    if (d.ok) {
+                                      addToast('success', d.resourceDeleted ? '🗑️ 已删除 (资源无链接, 已软删)' : '🗑️ 已删除');
+                                      // 本地更新链接
+                                      setSelectedItem(prev => prev ? { ...prev, links: prev.links?.filter(x => x.source !== l.source) } : prev);
+                                    } else {
+                                      addToast('error', '❌ ' + (d.error || '删除失败'));
+                                    }
                                   }} className="text-xs px-2 py-0.5 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded">🗑️ 删</button>
                                 </div>
                               )}
