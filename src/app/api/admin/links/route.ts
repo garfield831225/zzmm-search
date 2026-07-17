@@ -34,24 +34,34 @@ export async function PATCH(req: NextRequest) {
   if (!resourceId || !source) return NextResponse.json({ error: '需要 resourceId + source' }, { status: 400 });
 
   try {
-    // 如果是改 source, 先删旧 (UNIQUE constraint)
+    // 1. 先试副表
+    let updated = false;
     if (newSource && newSource !== source) {
-      await sql`UPDATE xx_resource_links SET source = ${newSource} WHERE resource_id = ${resourceId} AND source = ${source}`;
+      const r = await sql`UPDATE xx_resource_links SET source = ${newSource} WHERE resource_id = ${resourceId} AND source = ${source} RETURNING id` as any[];
+      if (r?.[0]?.id) updated = true;
+    }
+    if (!updated && url !== undefined) {
+      const r = await sql`UPDATE xx_resource_links SET url = ${url} WHERE resource_id = ${resourceId} AND source = ${source} RETURNING id` as any[];
+      if (r?.[0]?.id) updated = true;
+    }
+    if (!updated && password !== undefined) {
+      const r = await sql`UPDATE xx_resource_links SET password = ${password} WHERE resource_id = ${resourceId} AND source = ${source} RETURNING id` as any[];
+      if (r?.[0]?.id) updated = true;
+    }
+
+    // 2. 兜底: 副表没有 → 改主表老字段
+    if (!updated) {
       if (url !== undefined) {
-        await sql`UPDATE xx_resource_links SET url = ${url} WHERE resource_id = ${resourceId} AND source = ${newSource}`;
+        await sql`UPDATE xx_resources SET link = ${url} WHERE id = ${resourceId} AND source = ${source}`;
       }
       if (password !== undefined) {
-        await sql`UPDATE xx_resource_links SET password = ${password} WHERE resource_id = ${resourceId} AND source = ${newSource}`;
+        await sql`UPDATE xx_resources SET link_code = ${password} WHERE id = ${resourceId} AND source = ${source}`;
       }
-    } else {
-      if (url !== undefined) {
-        await sql`UPDATE xx_resource_links SET url = ${url} WHERE resource_id = ${resourceId} AND source = ${source}`;
-      }
-      if (password !== undefined) {
-        await sql`UPDATE xx_resource_links SET password = ${password} WHERE resource_id = ${resourceId} AND source = ${source}`;
+      if (newSource) {
+        await sql`UPDATE xx_resources SET source = ${newSource} WHERE id = ${resourceId} AND source = ${source}`;
       }
     }
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, subTable: updated });
   } catch (e: any) {
     return NextResponse.json({ error: e.message?.slice(0, 200) }, { status: 500 });
   }
@@ -59,6 +69,7 @@ export async function PATCH(req: NextRequest) {
 
 // DELETE: 软删链接; 检查资源是否还有 active 链接, 没则软删资源
 // body: { resourceId, source }
+// 业务规则 (2026-07-17): 兼容老字段 - 副表找不到时清空 xx_resources.link 兜底
 export async function DELETE(req: NextRequest) {
   const auth = authAdmin(req);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
@@ -69,19 +80,33 @@ export async function DELETE(req: NextRequest) {
   if (!resourceId || !source) return NextResponse.json({ error: '需要 resourceId + source' }, { status: 400 });
 
   try {
-    // 1. 软删链接
-    await sql`UPDATE xx_resource_links SET status = 'deleted' WHERE resource_id = ${resourceId} AND source = ${source}`;
+    // 1. 软删副表链接
+    const upd = await sql`UPDATE xx_resource_links SET status = 'deleted' WHERE resource_id = ${resourceId} AND source = ${source} RETURNING id` as any[];
+    const subDeleted = upd && upd[0]?.id;
 
-    // 2. 检查资源是否还有 active 链接
-    const remain = await sql`SELECT COUNT(*)::int as cnt FROM xx_resource_links WHERE resource_id = ${resourceId} AND status = 'active'`;
-    const remainCount = remain[0]?.cnt || 0;
+    // 2. 兜底: 副表没找到, 检查主表老字段并清空
+    let mainCleared = false;
+    if (!subDeleted) {
+      const res = await sql`UPDATE xx_resources SET link = '', link_code = '', source = '' WHERE id = ${resourceId} AND source = ${source} AND link != '' RETURNING id` as any[];
+      if (res && res[0]?.id) mainCleared = true;
+    }
+
+    if (!subDeleted && !mainCleared) {
+      return NextResponse.json({ ok: false, error: '链接不存在' }, { status: 404 });
+    }
+
+    // 3. 检查资源是否还有 active 链接 (副表 + 主表兜底)
+    const subRemain = await sql`SELECT COUNT(*)::int as cnt FROM xx_resource_links WHERE resource_id = ${resourceId} AND status = 'active'`;
+    const subCount = subRemain[0]?.cnt || 0;
+    const mainRes = await sql`SELECT link, source FROM xx_resources WHERE id = ${resourceId}`;
+    const mainHasLink = mainRes[0]?.link && mainRes[0]?.link !== '';
+    const remainCount = subCount + (mainHasLink ? 1 : 0);
     let resourceDeleted = false;
     if (remainCount === 0) {
-      // 3. 软删资源
       await sql`UPDATE xx_resources SET status = 'deleted' WHERE id = ${resourceId}`;
       resourceDeleted = true;
     }
-    return NextResponse.json({ ok: true, remain: remainCount, resourceDeleted });
+    return NextResponse.json({ ok: true, subDeleted: !!subDeleted, mainCleared, remain: remainCount, resourceDeleted });
   } catch (e: any) {
     return NextResponse.json({ error: e.message?.slice(0, 200) }, { status: 500 });
   }
