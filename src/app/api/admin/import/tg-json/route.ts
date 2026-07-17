@@ -219,7 +219,7 @@ export async function POST(req: NextRequest) {
         try {
           await sql`
             INSERT INTO xx_resources (name, link, link_code, source, category, size, tags, access_level, pay_type, import_channel, status, is_multi_link, created_at, updated_at)
-            VALUES (${c.name}, ${c.link}, ${c.link_code || ''}, ${c.source}, ${c.category}, ${c.size || ''}, ${c.tags?.join(',') || ''}, ${c.access_level}, ${c.pay_type}, ${c.import_channel}, 'active', ${c.is_multi_link || false}, NOW(), NOW())
+            VALUES (${c.name}, ${c.link}, ${c.link_code || ''}, ${c.source}, ${c.category}, ${c.size || ''}, ${c.tags || []}::text[], ${c.access_level}, ${c.pay_type}, ${c.import_channel}, 'active', ${c.is_multi_link || false}, NOW(), NOW())
             ON CONFLICT (link, name) DO NOTHING
           `;
           return { c, ok: true };
@@ -320,7 +320,7 @@ export async function POST(req: NextRequest) {
         // 先 INSERT xx_resources
         const r1 = await sql`
           INSERT INTO xx_resources (name, link, link_code, source, category, tags, access_level, pay_type, import_channel, status, created_at, updated_at)
-          VALUES (${c.name}, ${c.link}, '', ${c.source}, ${c.category}, ${c.tags?.join(',') || ''}, ${c.access_level}, ${c.pay_type}, ${c.import_channel}, 'active', NOW(), NOW())
+          VALUES (${c.name}, ${c.link}, '', ${c.source}, ${c.category}, ${c.tags || []}::text[], ${c.access_level}, ${c.pay_type}, ${c.import_channel}, 'active', NOW(), NOW())
           ON CONFLICT (link, name) DO NOTHING
           RETURNING id
         ` as any[];
