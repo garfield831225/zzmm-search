@@ -59,8 +59,27 @@ export default function ImportTgPage() {
   const [l3Processing, setL3Processing] = useState(false);
   // 切好的批次 — JSON 字符串直接存, 不存 messages 数组 (省内存)
   const [splitPayloads, setSplitPayloads] = useState<{ name: string; jsonStr: string; count: number; bytes: number }[]>([]);
+  // 上传中停止信号 (用 ref 避免闭包旧值)
+  const stopUploadRef = useRef(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // 重置 (放错文件 / 改频道类型时清空)
+  const resetAll = useCallback(() => {
+    if (uploading) {
+      if (!confirm('正在上传中, 确定要放弃当前上传并重置吗? 已上传的批次不会回滚')) return;
+      stopUploadRef.current = true;
+    } else if (splitPayloads.length > 0) {
+      if (!confirm(`已切成 ${splitPayloads.length} 批, 确定清空并重选吗?`)) return;
+    }
+    setFile(null);
+    setSplitPayloads([]);
+    setBatchResults([]);
+    setProgress(0);
+    setParseProgress(0);
+    setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] 🔄 已重置`]);
+    if (fileRef.current) fileRef.current.value = '';
+  }, [uploading, splitPayloads.length]);
 
   const addLog = useCallback((msg: string) => {
     setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
@@ -167,12 +186,17 @@ export default function ImportTgPage() {
     setUploading(true);
     setProgress(0);
     setBatchResults([]);
+    stopUploadRef.current = false;
     addLog(`🚀 开始上传 ${splitPayloads.length} 个批次...`);
 
     const token = getToken();
     const allResults: BatchResult[] = [];
 
     for (let i = 0; i < splitPayloads.length; i++) {
+      if (stopUploadRef.current) {
+        addLog(`🛑 收到停止信号, 中断 (已传 ${i}/${splitPayloads.length} 批)`);
+        break;
+      }
       const batch = splitPayloads[i];
       addLog(`📤 [${i + 1}/${splitPayloads.length}] ${batch.name} (${batch.count} 条, ${(batch.bytes / 1024 / 1024).toFixed(2)}MB)`);
 
@@ -376,7 +400,23 @@ export default function ImportTgPage() {
               {splitPayloads.length > 0 && (
                 <div className="mt-3 text-violet-300 text-sm">✂️ 已切成 {splitPayloads.length} 批 (每批 ≤ 3.5MB)</div>
               )}
-              <div className="mt-2 text-white/40 text-xs">点击或拖拽替换</div>
+              <div className="mt-3 flex gap-2 justify-center">
+                <button
+                  onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}
+                  className="px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 rounded-lg"
+                >
+                  🔄 重新选文件
+                </button>
+                {splitPayloads.length > 0 && !uploading && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); resetAll(); }}
+                    className="px-3 py-1.5 text-xs bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded-lg"
+                  >
+                    ❌ 清空切批
+                  </button>
+                )}
+              </div>
+              <div className="mt-2 text-white/40 text-xs">点击空白处或拖拽可替换</div>
             </div>
           ) : (
             <div>
@@ -401,14 +441,24 @@ export default function ImportTgPage() {
         )}
 
         {splitPayloads.length > 0 && !uploading && (
-          <motion.button
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            onClick={startUpload}
-            className="w-full py-4 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl font-medium text-lg hover:opacity-90 transition mb-6"
-          >
-            ▶️ 上传 {splitPayloads.length} 个批次 ({splitPayloads.reduce((a, b) => a + b.count, 0).toLocaleString()} 条消息, {splitPayloads.length * 5}-{splitPayloads.length * 15} 秒)
-          </motion.button>
+          <div className="flex gap-2 mb-6">
+            <motion.button
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              onClick={startUpload}
+              className="flex-1 py-4 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl font-medium text-lg hover:opacity-90 transition"
+            >
+              ▶️ 上传 {splitPayloads.length} 个批次 ({splitPayloads.reduce((a, b) => a + b.count, 0).toLocaleString()} 条消息, {splitPayloads.length * 5}-{splitPayloads.length * 15} 秒)
+            </motion.button>
+            <motion.button
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              onClick={resetAll}
+              className="px-6 py-4 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-300 rounded-xl font-medium transition"
+            >
+              ❌ 清空
+            </motion.button>
+          </div>
         )}
 
         {uploading && (
@@ -419,6 +469,18 @@ export default function ImportTgPage() {
             </div>
             <div className="w-full bg-white/10 rounded-full h-2">
               <div className="bg-gradient-to-r from-violet-500 to-pink-500 h-2 rounded-full transition-all duration-300" style={{ width: `${progress}%` }} />
+            </div>
+            <div className="mt-3 flex justify-end">
+              <button
+                onClick={() => {
+                  if (!confirm(`确定停止上传? 已传完的批次不会回滚, 剩余 ${splitPayloads.length - Math.floor(progress * splitPayloads.length / 100)} 批不会传`)) return;
+                  stopUploadRef.current = true;
+                  addLog('🛑 收到停止信号, 当前批次完成后中断...');
+                }}
+                className="px-4 py-2 text-sm bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-300 rounded-lg"
+              >
+                🛑 停止上传
+              </button>
             </div>
           </div>
         )}
