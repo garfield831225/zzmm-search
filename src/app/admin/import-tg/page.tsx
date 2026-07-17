@@ -43,20 +43,22 @@ const CHANNEL_OPTIONS = [
   { value: 'tg_other', label: 'TG 其他', icon: '📦' },
 ];
 
-const SPLIT_SIZE = 5000;  // 每批消息数
-const MAX_FILE_MB = 50;
+// Vercel Hobby 实际 body 限制 4.5MB, 留 1MB 余量 = 3.5MB 每批
+const MAX_BATCH_BYTES = 3.5 * 1024 * 1024;
 
 export default function ImportTgPage() {
   const [file, setFile] = useState<File | null>(null);
   const [channelHint, setChannelHint] = useState('tg_baidu');
-  const [splitBatches, setSplitBatches] = useState<{ name: string; messages: any[] }[]>([]);
   const [parsing, setParsing] = useState(false);
+  const [parseProgress, setParseProgress] = useState(0);  // 0-100, 解析中显示
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [log, setLog] = useState<string[]>([]);
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
   const [l3Status, setL3Status] = useState<L3Status | null>(null);
   const [l3Processing, setL3Processing] = useState(false);
+  // 切好的批次 — JSON 字符串直接存, 不存 messages 数组 (省内存)
+  const [splitPayloads, setSplitPayloads] = useState<{ name: string; jsonStr: string; count: number; bytes: number }[]>([]);
 
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -68,22 +70,30 @@ export default function ImportTgPage() {
     return localStorage.getItem('zzmm_token') || localStorage.getItem('token') || localStorage.getItem('adminToken') || '';
   };
 
+  // 按字节切 messages, 每批 JSON 字符串 < MAX_BATCH_BYTES
   const handleFile = async (f: File) => {
     setFile(f);
     setLog([]);
-    setSplitBatches([]);
+    setSplitPayloads([]);
     setBatchResults([]);
     addLog(`📁 已选择: ${f.name} (${(f.size / 1024 / 1024).toFixed(2)}MB)`);
 
-    if (f.size > MAX_FILE_MB * 1024 * 1024) {
-      addLog(`❌ 文件超过 ${MAX_FILE_MB}MB, Vercel Hobby 上限`);
+    if (f.size > 300 * 1024 * 1024) {
+      addLog(`❌ 文件超过 300MB, 浏览器解析可能崩溃. 建议先本地拆分`);
       return;
     }
 
     setParsing(true);
-    addLog('📖 解析 JSON...');
+    setParseProgress(0);
+    addLog('📖 解析 JSON (大文件可能需 10-30 秒)...');
     try {
+      // 给浏览器一个呼吸时间
+      await new Promise(r => setTimeout(r, 50));
       const text = await f.text();
+      setParseProgress(50);
+      addLog('✅ 文件读取完成, 解析 JSON...');
+      await new Promise(r => setTimeout(r, 50));
+
       const data = JSON.parse(text);
       const messages = data.messages || [];
       if (!Array.isArray(messages)) {
@@ -91,49 +101,82 @@ export default function ImportTgPage() {
         setParsing(false);
         return;
       }
-      addLog(`✅ 共 ${messages.length} 条消息`);
+      setParseProgress(70);
+      addLog(`✅ 共 ${messages.length} 条消息, 切批中...`);
+      await new Promise(r => setTimeout(r, 50));
 
-      // 按 5000 条切片
-      const batches: { name: string; messages: any[] }[] = [];
-      for (let i = 0; i < messages.length; i += SPLIT_SIZE) {
-        const slice = messages.slice(i, i + SPLIT_SIZE);
-        const batchNum = Math.floor(i / SPLIT_SIZE) + 1;
+      // 按字节切 — 每批 JSON 字符串 < MAX_BATCH_BYTES
+      const baseOverhead = JSON.stringify({ messages: [], channelHint }).length + 5;  // 头部 + 尾部
+      const batches: { name: string; jsonStr: string; count: number; bytes: number }[] = [];
+      let current: any[] = [];
+      let currentBytes = baseOverhead;
+
+      for (let i = 0; i < messages.length; i++) {
+        const msgJson = JSON.stringify(messages[i]);
+        const msgBytes = msgJson.length + 1;  // +1 逗号
+
+        if (currentBytes + msgBytes > MAX_BATCH_BYTES && current.length > 0) {
+          const jsonStr = JSON.stringify({ messages: current, channelHint });
+          batches.push({
+            name: `批 ${batches.length + 1} (${batches.reduce((a, b) => a + b.count, 0) + 1}-${batches.reduce((a, b) => a + b.count, 0) + current.length})`,
+            jsonStr,
+            count: current.length,
+            bytes: jsonStr.length,
+          });
+          current = [];
+          currentBytes = baseOverhead;
+        }
+        current.push(messages[i]);
+        currentBytes += msgBytes;
+
+        if (i % 10000 === 0) {
+          setParseProgress(70 + Math.round((i / messages.length) * 25));
+          await new Promise(r => setTimeout(r, 0));  // 让 UI 刷新
+        }
+      }
+      if (current.length > 0) {
+        const jsonStr = JSON.stringify({ messages: current, channelHint });
         batches.push({
-          name: `Batch ${batchNum} (${i + 1}-${Math.min(i + SPLIT_SIZE, messages.length)})`,
-          messages: slice,
+          name: `批 ${batches.length + 1} (${batches.reduce((a, b) => a + b.count, 0) + 1}-${batches.reduce((a, b) => a + b.count, 0) + current.length})`,
+          jsonStr,
+          count: current.length,
+          bytes: jsonStr.length,
         });
       }
-      setSplitBatches(batches);
-      addLog(`✂️ 切成 ${batches.length} 批, 每批 ${SPLIT_SIZE} 条`);
+
+      setParseProgress(100);
+      const totalBytes = batches.reduce((a, b) => a + b.bytes, 0);
+      addLog(`✂️ 切成 ${batches.length} 批, 总计 ${(totalBytes / 1024 / 1024).toFixed(1)}MB, 每批 ${(batches[0]?.bytes / 1024 / 1024).toFixed(2)}MB 左右`);
+      addLog(`💡 准备上传. 点击下方按钮开始.`);
+      setSplitPayloads(batches);
     } catch (e: any) {
-      addLog('❌ JSON 解析失败: ' + e.message?.slice(0, 200));
+      addLog('❌ JSON 解析失败: ' + (e.message?.slice(0, 200) || String(e)));
     } finally {
       setParsing(false);
     }
   };
 
   const startUpload = async () => {
-    if (splitBatches.length === 0) {
-      addLog('❌ 没有可上传的批次');
+    if (splitPayloads.length === 0) {
+      addLog('❌ 没有可上传的批次 (先选文件)');
       return;
     }
 
+    if (!confirm(`开始上传 ${splitPayloads.length} 批? 每批约 ${(splitPayloads[0].bytes / 1024 / 1024).toFixed(2)}MB, 预计耗时 ${splitPayloads.length * 5} 秒`)) return;
+
     setUploading(true);
     setProgress(0);
-    addLog(`🚀 开始上传 ${splitBatches.length} 个批次...`);
+    setBatchResults([]);
+    addLog(`🚀 开始上传 ${splitPayloads.length} 个批次...`);
 
     const token = getToken();
     const allResults: BatchResult[] = [];
 
-    for (let i = 0; i < splitBatches.length; i++) {
-      const batch = splitBatches[i];
-      addLog(`📤 [${i + 1}/${splitBatches.length}] ${batch.name} (${batch.messages.length} 条)`);
+    for (let i = 0; i < splitPayloads.length; i++) {
+      const batch = splitPayloads[i];
+      addLog(`📤 [${i + 1}/${splitPayloads.length}] ${batch.name} (${batch.count} 条, ${(batch.bytes / 1024 / 1024).toFixed(2)}MB)`);
 
       try {
-        const payload = {
-          channelHint,
-          jsonContent: JSON.stringify({ messages: batch.messages }),
-        };
         const start = Date.now();
         const r = await fetch('/api/admin/import/tg-json', {
           method: 'POST',
@@ -141,7 +184,7 @@ export default function ImportTgPage() {
             'Content-Type': 'application/json',
             Authorization: 'Bearer ' + token,
           },
-          body: JSON.stringify(payload),
+          body: batch.jsonStr,
         });
         const data = await r.json();
         const duration = Date.now() - start;
@@ -150,7 +193,7 @@ export default function ImportTgPage() {
           addLog(`❌ [${i + 1}] ${data.error}`);
           allResults.push({
             batch: i + 1,
-            total_messages: batch.messages.length,
+            total_messages: batch.count,
             l1_candidates: 0, l1_inserted: 0, l1_skipped: 0, l1_failed: 0,
             l2_candidates: 0, l2_inserted: 0, l2_queue_added: 0, l2_skipped: 0, l2_failed: 0,
             by_category: {}, by_source: {}, duration_ms: duration, file_size_mb: 0,
@@ -160,7 +203,7 @@ export default function ImportTgPage() {
           const s = data.summary || {};
           const l1 = s.l1 || {};
           const l2 = s.l2 || {};
-          addLog(`✅ [${i + 1}] L1入库 ${l1.inserted}/${l1.candidates}, L2入库 ${l2.inserted}/${l2.candidates} (队列+${l2.queue_added || 0})`);
+          addLog(`✅ [${i + 1}] L1入库 ${l1.inserted}/${l1.candidates}, L2入库 ${l2.inserted}/${l2.candidates} (队列+${l2.queue_added || 0}) ${duration}ms`);
           if (data.by_category) {
             const top5 = Object.entries(data.by_category).slice(0, 5).map(([k, v]) => `${k}:${v}`).join(', ');
             addLog(`   📊 分类: ${top5}`);
@@ -192,7 +235,7 @@ export default function ImportTgPage() {
         addLog(`❌ [${i + 1}] 网络错误: ${e.message}`);
       }
 
-      setProgress(Math.round(((i + 1) / splitBatches.length) * 100));
+      setProgress(Math.round(((i + 1) / splitPayloads.length) * 100));
     }
 
     setBatchResults(allResults);
@@ -330,8 +373,8 @@ export default function ImportTgPage() {
               <div className="text-4xl mb-2">📄</div>
               <div className="font-medium">{file.name}</div>
               <div className="text-sm text-white/40 mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</div>
-              {splitBatches.length > 0 && (
-                <div className="mt-3 text-violet-300 text-sm">✂️ 已切成 {splitBatches.length} 批</div>
+              {splitPayloads.length > 0 && (
+                <div className="mt-3 text-violet-300 text-sm">✂️ 已切成 {splitPayloads.length} 批 (每批 ≤ 3.5MB)</div>
               )}
               <div className="mt-2 text-white/40 text-xs">点击或拖拽替换</div>
             </div>
@@ -339,24 +382,32 @@ export default function ImportTgPage() {
             <div>
               <div className="text-4xl mb-2">📤</div>
               <div className="text-white/60">点击选择或拖拽 result.json</div>
-              <div className="text-sm text-white/40 mt-2">最大 50MB, 超大文件用 jq 先拆</div>
+              <div className="text-sm text-white/40 mt-2">支持任意大小, 自动按 3.5MB/批 切片</div>
             </div>
           )}
         </div>
 
-        {/* 上传按钮 */}
+        {/* 解析进度 */}
         {parsing && (
-          <div className="mb-6 text-center text-white/60 text-sm">⏳ 解析中...</div>
+          <div className="mb-6">
+            <div className="flex justify-between text-sm mb-2">
+              <span>⏳ 解析中 (大文件可能需 10-30 秒)...</span>
+              <span>{parseProgress}%</span>
+            </div>
+            <div className="w-full bg-white/10 rounded-full h-2">
+              <div className="bg-gradient-to-r from-cyan-500 to-blue-500 h-2 rounded-full transition-all duration-300" style={{ width: `${parseProgress}%` }} />
+            </div>
+          </div>
         )}
 
-        {splitBatches.length > 0 && !uploading && (
+        {splitPayloads.length > 0 && !uploading && (
           <motion.button
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             onClick={startUpload}
             className="w-full py-4 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl font-medium text-lg hover:opacity-90 transition mb-6"
           >
-            ▶️ 上传 {splitBatches.length} 个批次 ({splitBatches.reduce((a, b) => a + b.messages.length, 0).toLocaleString()} 条消息)
+            ▶️ 上传 {splitPayloads.length} 个批次 ({splitPayloads.reduce((a, b) => a + b.count, 0).toLocaleString()} 条消息, {splitPayloads.length * 5}-{splitPayloads.length * 15} 秒)
           </motion.button>
         )}
 
