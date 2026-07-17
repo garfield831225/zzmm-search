@@ -50,10 +50,18 @@ export async function GET(req: NextRequest) {
     const batchSize = Math.min(parseInt(req.nextUrl.searchParams.get('limit') || '2000', 10), 5000);
 
     try {
-      // 用单 SQL INSERT...SELECT + ON CONFLICT DO NOTHING
-      // 2000 条 1 个 SQL, Neon HTTP 应该能跑
       const startTime = Date.now();
-      const upd = await sql`
+
+      // before: 查这批 id 范围中已存在 sort=1 的 resource_id
+      const beforeRes = await sql(
+        `SELECT resource_id FROM xx_resource_links
+         WHERE sort = 1 AND resource_id > $1 AND resource_id <= $1 + $2`,
+        [fromId, batchSize]
+      );
+      const existed = new Set((beforeRes || []).map((r: any) => Number(r.resource_id)));
+
+      // INSERT (Neon serverless v3 RETURNING 不可靠, 不依赖)
+      await sql`
         INSERT INTO xx_resource_links (resource_id, source, url, password, sort, status, access_level)
         SELECT id, source, link, COALESCE(link_code, ''), 1, 'active', 'vip'
         FROM xx_resources
@@ -66,14 +74,21 @@ export async function GET(req: NextRequest) {
         ORDER BY id
         LIMIT ${batchSize}
         ON CONFLICT (resource_id, sort) DO NOTHING
-      ` as any[];
-      const inserted = upd?.length || 0;
-
-      // 拿 last id
-      const lastIdRes = await sql`
-        SELECT MAX(id) as max_id FROM xx_resource_links
-        WHERE id <= (SELECT MAX(id) FROM xx_resources WHERE status = 'active' AND link IS NOT NULL AND link != '')
       `;
+
+      // after: 查这批 id 范围中已存在 sort=1 的 resource_id
+      const afterRes = await sql(
+        `SELECT resource_id FROM xx_resource_links
+         WHERE sort = 1 AND resource_id > $1 AND resource_id <= $1 + $2`,
+        [fromId, batchSize]
+      );
+      const after = new Set((afterRes || []).map((r: any) => Number(r.resource_id)));
+
+      // 新增 = after - before
+      let inserted = 0;
+      for (const id of after) {
+        if (!existed.has(id)) inserted++;
+      }
 
       const remainRes = await sql`
         SELECT COUNT(*)::int as cnt
