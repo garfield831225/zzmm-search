@@ -80,6 +80,7 @@ const PUBLIC_PATHS = [
   '/api/admin/diag-admin-group',  // 2026-07-16 查 admin 用户真实 group
   '/api/admin/diag-cookies',     // 2026-07-17 查服务端实际收到什么 cookie
   '/api/admin/diag-library-zones',  // 2026-07-16 验证 /library 三区 SQL 过滤
+  '/admin',                       // 2026-07-17 极简化: 客户端 localStorage 鉴权, middleware 不挡
   '/api/admin/import/tg-json',   // 2026-07-16 TG JSON 上传导入 (VIP/admin, 内部鉴权)
   '/api/admin/import/tg-l3-worker', // 2026-07-16 TG L3 worker (status + process, VIP/admin)
   '/api/cron',                    // 2026-07-16 Vercel cron 调用 (match-task, tg-l3-worker)
