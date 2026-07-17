@@ -40,57 +40,40 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, processed: 0, lastId: fromId, hasMore: false, done: true });
   }
 
-  // 准备批量 INSERT — 用 UNNEST 数组一次插多行 (Neon serverless v3 唯一支持的批量)
-  // 分小组: 每 500 条一组
-  const GROUP = 500;
+  // 准备批量 INSERT — 用 50 并发单条 INSERT (Neon serverless v3 UNNEST 不可靠, 单条 template tag 必支持)
+  // 2000 条 ÷ 50 = 40 批 × 100ms = 4s
+  const CONCURRENCY = 50;
   let inserted = 0;
   let failed = 0;
   const errors: string[] = [];
   let lastId = fromId;
 
-  for (let i = 0; i < rows.length; i += GROUP) {
-    const chunk = rows.slice(i, i + GROUP);
-    const ids: number[] = [];
-    const sources: string[] = [];
-    const urls: string[] = [];
-    const passwords: string[] = [];
-    const sorts: number[] = [];
-    const statuses: string[] = [];
-    const accessLevels: string[] = [];
-
-    for (const r of chunk) {
-      lastId = r.id;
+  for (let i = 0; i < rows.length; i += CONCURRENCY) {
+    const chunk = rows.slice(i, i + CONCURRENCY);
+    const promises = chunk.map(async (r) => {
       const source = r.source || 'other';
       const sort = SOURCE_SORT[source] ?? 99;
       const accessLevel = (r.import_channel === 'zezemom_excel') ? 'basic' : (r.access_level || 'vip');
-      ids.push(r.id);
-      sources.push(source);
-      urls.push(r.link);
-      passwords.push(r.link_code || '');
-      sorts.push(sort);
-      statuses.push('active');
-      accessLevels.push(accessLevel);
-    }
-
-    try {
-      const result = await sql`
-        INSERT INTO xx_resource_links (resource_id, source, url, password, sort, status, access_level)
-        SELECT * FROM UNNEST(
-          ${ids}::int[],
-          ${sources}::text[],
-          ${urls}::text[],
-          ${passwords}::text[],
-          ${sorts}::int[],
-          ${statuses}::text[],
-          ${accessLevels}::text[]
-        )
-        ON CONFLICT (resource_id, source) DO NOTHING
-        RETURNING id
-      `;
-      inserted += (result as any[]).length;
-    } catch (e: any) {
-      failed += chunk.length;
-      if (errors.length < 5) errors.push(`batch ${i}-${i+chunk.length}: ${e.message?.slice(0, 200)}`);
+      try {
+        await sql`
+          INSERT INTO xx_resource_links (resource_id, source, url, password, sort, status, access_level)
+          VALUES (${r.id}, ${source}, ${r.link}, ${r.link_code || ''}, ${sort}, 'active', ${accessLevel})
+          ON CONFLICT (resource_id, source) DO NOTHING
+        `;
+        return { ok: true, id: r.id };
+      } catch (e: any) {
+        return { ok: false, id: r.id, msg: e.message?.slice(0, 200) };
+      }
+    });
+    const results = await Promise.all(promises);
+    for (const r of results) {
+      if (r.ok) {
+        inserted++;
+        lastId = r.id;
+      } else {
+        failed++;
+        if (errors.length < 5) errors.push(`id=${r.id} ${r.msg}`);
+      }
     }
   }
 
