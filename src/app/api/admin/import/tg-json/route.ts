@@ -167,8 +167,8 @@ export async function POST(req: NextRequest) {
         pay_type: payType,
         import_channel: channel,
         message_id: messageId,
-        // 副链接 → xx_resource_links (N 条)
-        sub_links: l1Links.map(l => ({
+        // 副链接 → xx_resource_links (排除主链接, 避免 UNIQUE 冲突)
+        sub_links: l1Links.slice(1).map(l => ({
           source: l.type === 'other' ? '115' : l.type,
           url: l.url,
           password: l.password || '',
