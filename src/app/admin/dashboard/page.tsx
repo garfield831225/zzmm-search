@@ -75,15 +75,20 @@ export default function AdminDashboard() {
   const [bridgeHealth, setBridgeHealth] = useState<any>(null);
 
   useEffect(() => {
-    const cookieToken = document.cookie.split('; ').find(r => r.startsWith('zzmm_token='))?.split('=')[1];
-    if (!cookieToken) {
+    // 2026-07-17: 之前用 document.cookie 读 httpOnly cookie 永远读不到, 改用 localStorage
+    try {
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      if (u?.group !== 'admin') {
+        router.push('/login?redirect=/admin');
+        return;
+      }
+      setAuthed(true);
+      setChecking(false);
+      fetchStats();
+      fetchBridge();
+    } catch {
       router.push('/login?redirect=/admin');
-      return;
     }
-    setAuthed(true);
-    setChecking(false);
-    fetchStats();
-    fetchBridge();
   }, [router]);
 
   const fetchStats = async () => {
