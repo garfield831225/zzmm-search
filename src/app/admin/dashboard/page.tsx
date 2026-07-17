@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import {
-  BarChart3, Users, Key, FileText, Target, Upload, DollarSign,
+  BarChart3, Users, Key, FileText, Target, Upload, DollarSign, MessageSquareWarning,
   ShieldOff, Code2, Settings, ListChecks, Database, Network, Activity,
   Zap, Server, AlertCircle, Tv, ExternalLink, RefreshCw, CheckCircle2, XCircle,
 } from 'lucide-react';
@@ -28,6 +28,7 @@ const CARDS: Card[] = [
   { id: 'import-tg', title: 'TG 频道导入', desc: 'result.json → VIP 锁资源 (L1+L2+L3 队列)', icon: Network, href: '/admin/import-tg', category: '资源管理', color: 'text-cyan-700', bg: 'bg-cyan-50 hover:bg-cyan-100' },
   { id: 'match', title: 'TMDB 匹配', desc: '单条手动匹配 / 占位符识别', icon: Target, href: '/admin/match', category: '资源管理', color: 'text-blue-700', bg: 'bg-blue-50 hover:bg-blue-100' },
   { id: 'tg-organize', title: 'TG 群整理', desc: '115 群消息审核入库', icon: ListChecks, href: '/admin/tg-organize', category: '资源管理', color: 'text-cyan-700', bg: 'bg-cyan-50 hover:bg-cyan-100' },
+  { id: 'feedback', title: '失效反馈', desc: '用户链接失效反馈处理', icon: MessageSquareWarning, href: '/admin/feedback', category: '资源管理', color: 'text-amber-700', bg: 'bg-amber-50 hover:bg-amber-100' },
   { id: 'pay-config', title: '单条付费配置', desc: '按类别/资源设 unlock 价格', icon: DollarSign, href: '/admin/pay-config', category: '资源管理', color: 'text-emerald-700', bg: 'bg-emerald-50 hover:bg-emerald-100' },
   { id: 'publish', title: '手动发布资源', desc: '发布单条到主站', icon: FileText, href: '/admin/publish', category: '资源管理', color: 'text-amber-700', bg: 'bg-amber-50 hover:bg-amber-100' },
 
