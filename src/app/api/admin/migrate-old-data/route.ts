@@ -40,26 +40,38 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: true, processed: 0, lastId: fromId, hasMore: false, done: true });
   }
 
+  // 准备批量 INSERT — 单 SQL 多值, 避免循环单条 (Neon HTTP 每次 100-300ms)
+  // 分小组: 每 100 条一组
+  const GROUP = 100;
   let inserted = 0;
   let failed = 0;
   const errors: string[] = [];
   let lastId = fromId;
 
-  for (const r of rows) {
-    lastId = r.id;
-    const source = r.source || 'other';
-    const sort = SOURCE_SORT[source] ?? 99;
-    const accessLevel = (r.import_channel === 'zezemom_excel') ? 'basic' : (r.access_level || 'vip');
+  for (let i = 0; i < rows.length; i += GROUP) {
+    const chunk = rows.slice(i, i + GROUP);
+    const values: any[] = [];
+    const placeholders: string[] = [];
+    let p = 1;
+    for (const r of chunk) {
+      lastId = r.id;
+      const source = r.source || 'other';
+      const sort = SOURCE_SORT[source] ?? 99;
+      const accessLevel = (r.import_channel === 'zezemom_excel') ? 'basic' : (r.access_level || 'vip');
+      placeholders.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`);
+      values.push(r.id, source, r.link, r.link_code || '', sort, 'active', accessLevel);
+    }
     try {
-      await sql`
+      const sqlText = `
         INSERT INTO xx_resource_links (resource_id, source, url, password, sort, status, access_level)
-        VALUES (${r.id}, ${source}, ${r.link}, ${r.link_code || ''}, ${sort}, 'active', ${accessLevel})
+        VALUES ${placeholders.join(',')}
         ON CONFLICT (resource_id, source) DO NOTHING
       `;
-      inserted++;
+      await (sql as any).query(sqlText, values);
+      inserted += chunk.length;
     } catch (e: any) {
-      failed++;
-      if (errors.length < 5) errors.push(`id=${r.id} ${e.message?.slice(0, 100)}`);
+      failed += chunk.length;
+      if (errors.length < 5) errors.push(`batch ${i}-${i+chunk.length}: ${e.message?.slice(0, 200)}`);
     }
   }
 
