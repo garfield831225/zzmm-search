@@ -197,21 +197,22 @@ export async function POST(req: NextRequest) {
   if (candidates.length > 0) {
     // 2026-07-17: 并发 INSERT (50 并发) + before/after SELECT 验证
     // Neon serverless v3 的 RETURNING 不可靠, 不能用 r?.[0]?.id 判定
-    // 改用 (link, name) IN (...) 前后 count 差值算 inserted
+    // ANY() array literal 对中文/特殊字符转义坏, 改单条 SELECT 50 并发
     const CONCURRENCY = 50;
 
     for (let i = 0; i < candidates.length; i += CONCURRENCY) {
       const chunk = candidates.slice(i, i + CONCURRENCY);
 
-      // 1. before: 查这 50 条 (link, name) 当前是否存在
-      // 用 ANY(array) 数组参数, 不嵌套 sql template
-      const linksArr = chunk.map(c => c.link);
-      const namesArr = chunk.map(c => c.name);
-      const beforeRes = await sql`
-        SELECT link, name FROM xx_resources
-        WHERE link = ANY(${linksArr}::text[]) AND name = ANY(${namesArr}::text[])
-      ` as any[];
-      const existedSet = new Set(beforeRes.map((r: any) => `${r.link}\u0000${r.name}`));
+      // 1. before: 50 并发查 (link, name) 是否存在
+      const beforeResults = await Promise.all(chunk.map(async (c) => {
+        try {
+          const r = await sql`SELECT 1 as hit FROM xx_resources WHERE link = ${c.link} AND name = ${c.name} LIMIT 1` as any[];
+          return { key: `${c.link}\u0000${c.name}`, existed: !!(r && r[0]) };
+        } catch {
+          return { key: `${c.link}\u0000${c.name}`, existed: false };
+        }
+      }));
+      const existedSet = new Set(beforeResults.filter(r => r.existed).map(r => r.key));
 
       // 2. INSERT (不依赖 RETURNING)
       const insertResults = await Promise.all(chunk.map(async (c) => {
@@ -227,14 +228,18 @@ export async function POST(req: NextRequest) {
         }
       }));
 
-      // 3. after: 再查一次, 找新插入的
-      const afterRes = await sql`
-        SELECT id, link, name FROM xx_resources
-        WHERE link = ANY(${linksArr}::text[]) AND name = ANY(${namesArr}::text[])
-      ` as any[];
+      // 3. after: 50 并发查 id (新插入的)
+      const afterResults = await Promise.all(chunk.map(async (c) => {
+        try {
+          const r = await sql`SELECT id FROM xx_resources WHERE link = ${c.link} AND name = ${c.name} LIMIT 1` as any[];
+          return { key: `${c.link}\u0000${c.name}`, id: r?.[0]?.id };
+        } catch {
+          return { key: `${c.link}\u0000${c.name}`, id: null };
+        }
+      }));
       const idByKey = new Map<string, number>();
-      for (const r of afterRes) {
-        idByKey.set(`${r.link}\u0000${r.name}`, r.id);
+      for (const r of afterResults) {
+        if (r.id) idByKey.set(r.key, r.id);
       }
 
       // 4. 副表 INSERT
