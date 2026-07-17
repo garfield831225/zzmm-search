@@ -158,6 +158,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: e.message?.slice(0, 300) }, { status: 500 });
     }
   }
+}
+
+export async function POST(req: NextRequest) {
+  return GET(req);
+}
 
   return NextResponse.json({ error: 'unknown action (use ?action=stats or run)' });
 }
