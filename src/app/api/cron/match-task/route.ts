@@ -215,6 +215,7 @@ export async function GET(req: NextRequest) {
       SELECT id, name, category, sub_type
       FROM xx_resources
       WHERE tmdb_id IS NULL
+        AND (matched_tmdb_at IS NULL OR matched_tmdb_at < NOW() - INTERVAL '5 minutes')
       ORDER BY id
       LIMIT ${BATCH_PER_RUN} OFFSET ${offset}
     `.catch(() => []) as any[];
@@ -230,12 +231,14 @@ export async function GET(req: NextRequest) {
     for (const row of rows) {
       const result = await matchOneRecord(row.name, row.category, row.sub_type);
       if (result === 'SKIP' || result === 'GARBLED') {
-        await sql`UPDATE xx_resources SET tmdb_id = ${result} WHERE id = ${row.id}`.catch(() => {});
+        await sql`UPDATE xx_resources SET tmdb_id = ${result}, matched_tmdb_at = NOW() WHERE id = ${row.id}`.catch(() => {});
         batchNomatch++;
       } else if (result === 'NOMATCH') {
+        // 没匹配上不更新 tmdb_id, 但更新时间戳避免重复
+        await sql`UPDATE xx_resources SET matched_tmdb_at = NOW() WHERE id = ${row.id}`.catch(() => {});
         batchNomatch++;
       } else {
-        await sql`UPDATE xx_resources SET tmdb_id = ${result} WHERE id = ${row.id}`.catch(() => {});
+        await sql`UPDATE xx_resources SET tmdb_id = ${result}, matched_tmdb_at = NOW() WHERE id = ${row.id}`.catch(() => {});
         batchMatched++;
       }
     }
