@@ -90,7 +90,10 @@ export async function GET(req: NextRequest) {
 
   if (action === 'run') {
     // 跑去重 - 支持 only_real=true 过滤真资源链接
+    // 分批: 找重复 url 一次取一批, UPDATE 一次, 循环到 hasMore
     const onlyReal = req.nextUrl.searchParams.get('only_real') === 'true';
+    const fromUrl = req.nextUrl.searchParams.get('fromUrl') || '';
+    const batchLimit = Math.min(parseInt(req.nextUrl.searchParams.get('limit') || '1000', 10), 5000);
 
     try {
       const startTime = Date.now();
@@ -102,31 +105,64 @@ export async function GET(req: NextRequest) {
         ? sql`AND source IN ('115', 'baidu', 'quark', 'aliyun', 'xunlei', '123', 'uc', 'tianyi', 'yidong', 'magnet', 'ed2k')`
         : sql``;
 
-      const upd = await sql`
-        UPDATE xx_resource_links
-        SET status = 'deleted'
-        WHERE id IN (
-          SELECT id FROM (
-            SELECT id, ROW_NUMBER() OVER (PARTITION BY url ORDER BY updated_at DESC, id DESC) AS rn
-            FROM xx_resource_links
-            WHERE status = 'active' AND url IS NOT NULL AND url != '' ${sourceFilter}
-          ) t WHERE rn > 1
-        )
-        RETURNING id
+      // 1. 找一批重复 url
+      const dupBatch = await sql`
+        SELECT url, COUNT(*)::int as cnt
+        FROM xx_resource_links
+        WHERE status = 'active' AND url IS NOT NULL AND url != '' ${sourceFilter}
+          AND url > ${fromUrl}
+        GROUP BY url
+        HAVING COUNT(*) > 1
+        ORDER BY url
+        LIMIT ${batchLimit}
       ` as any[];
 
-      const deleted = upd?.length || 0;
+      if (dupBatch.length === 0) {
+        const afterRes = await sql`SELECT COUNT(*)::int as cnt FROM xx_resource_links WHERE status = 'active'`;
+        return NextResponse.json({ ok: true, done: true, before, after: afterRes[0]?.cnt, deleted_total: r.deleted_total || 0, mode: onlyReal ? 'only_real' : 'all' });
+      }
+
+      // 2. 对每 url 找最新 id (KEEP), 其他 UPDATE deleted
+      let batchDeleted = 0;
+      let lastUrl = fromUrl;
+      for (const dup of dupBatch) {
+        lastUrl = dup.url;
+        // 找这条 url 的所有 id, 按 updated_at DESC, id DESC 排序, 保留第一条
+        const ids = await sql`
+          SELECT id FROM xx_resource_links
+          WHERE url = ${dup.url} AND status = 'active'
+          ORDER BY updated_at DESC, id DESC
+        ` as any[];
+
+        if (ids.length > 1) {
+          const toDelete = ids.slice(1).map((r: any) => r.id);
+          // 批量 UPDATE
+          for (let i = 0; i < toDelete.length; i += 100) {
+            const sub = toDelete.slice(i, i + 100);
+            await sql`
+              UPDATE xx_resource_links
+              SET status = 'deleted'
+              WHERE id = ANY(${sub}::int[])
+            `;
+            batchDeleted += sub.length;
+          }
+        }
+      }
 
       const afterRes = await sql`SELECT COUNT(*)::int as cnt FROM xx_resource_links WHERE status = 'active'`;
       const after = afterRes[0]?.cnt || 0;
 
-      r.ok = true;
-      r.mode = onlyReal ? 'only_real' : 'all';
-      r.before = before;
-      r.after = after;
-      r.deleted = deleted;
-      r.duration_ms = Date.now() - startTime;
-      return NextResponse.json(r);
+      return NextResponse.json({
+        ok: true,
+        done: false,
+        hasMore: dupBatch.length === batchLimit,
+        lastUrl,
+        mode: onlyReal ? 'only_real' : 'all',
+        before,
+        after,
+        batch_deleted: batchDeleted,
+        nextUrl: `${req.nextUrl.origin}/api/admin/dedup-links?key=zzmm-batch-test&action=run&fromUrl=${encodeURIComponent(lastUrl)}&limit=${batchLimit}${onlyReal ? '&only_real=true' : ''}`,
+      });
     } catch (e: any) {
       return NextResponse.json({ ok: false, error: e.message?.slice(0, 300) }, { status: 500 });
     }
