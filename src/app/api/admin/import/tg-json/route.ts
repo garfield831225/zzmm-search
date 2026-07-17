@@ -103,8 +103,10 @@ export async function POST(req: NextRequest) {
   })();
 
   // 4. 遍历 messages, 提取链接 + 分类
-  const candidates: any[] = [];   // L1 直链 (待入库)
-  const l2Candidates: any[] = []; // L2 telegra.ph 链接 (入 xx_resources + xx_telegram_l3_queue)
+  // 2026-07-17 改造: 1 消息 = 1 资源 + N 链接 (主链接入 xx_resources, 副链接入 xx_resource_links)
+  // 主链接按 SOURCE_SORT 优先级选 (1=115 优先, 10=磁力最后)
+  const candidates: any[] = [];   // L1 直链资源 (待入库, 1条/消息, 包含主链接 + 副链接)
+  const l2Candidates: any[] = []; // L2 telegra.ph 链接 (入 xx_resources + xx_telegram_l3_queue, 维持原逻辑)
   const byCategory: Record<string, number> = {};
   const bySource: Record<string, number> = {};
   let skippedNoLink = 0;
@@ -120,71 +122,106 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
-    const category = detectCategoryByTitle(title, '其他');
+    // 分离 L1 (直链) + L2 (telegra.ph)
+    const l1Links = links.filter(l => l.type !== 'telegra_ph');
+    const l2Links = links.filter(l => l.type === 'telegra_ph');
+
+    // 业务规则: 所有 TG 导入 = VIP + pay_type=vip (basic 用户会被锁, VIP 直接开)
+    const accessLevel = 'vip';
+    const payType = 'vip';
     const tags = extractTagsFromTgMessage(msg);
     const size = extractSizeFromTgMessage(msg);
     const messageId = msg.id ? Number(msg.id) : null;
 
-    for (const link of links) {
-      const source = link.type;
-      // 业务规则: 所有 TG 导入 = VIP + pay_type=vip (basic 用户会被锁, VIP 直接开)
-      const accessLevel = 'vip';
-      const payType = 'vip';
+    // L1: 一条资源 + N 链接
+    if (l1Links.length > 0) {
+      const primary = l1Links[0];  // 已按 sort 排序, 第一个 = 最高优先级
+      const category = detectCategoryByTitle(title, '其他', primary.type);
+      const primarySource = primary.type === 'other' ? '115' : primary.type;  // 兜底
 
-      if (source === 'telegra_ph') {
-        // L2: telegra.ph 中间页 → 入 xx_resources + L3 队列
-        l2Candidates.push({
-          name: title.slice(0, 200),
-          link: link.url,
-          source: 'telegra_ph',
-          category,
-          tags,
-          access_level: accessLevel,
-          pay_type: payType,
-          import_channel: channel,
-          message_id: messageId,
-        });
-      } else {
-        // L1: 直链
-        candidates.push({
-          name: title.slice(0, 200),
-          link: link.url,
-          link_code: link.password || '',
-          source: source === 'other' ? '115' : source,  // 兜底
-          category,
-          size: size || '',
-          tags,
-          access_level: accessLevel,
-          pay_type: payType,
-          import_channel: channel,
-          message_id: messageId,
-        });
-      }
+      candidates.push({
+        name: title.slice(0, 200),
+        // 主链接 → xx_resources (兼容老字段)
+        link: primary.url,
+        link_code: primary.password || '',
+        source: primarySource,
+        category,
+        size: size || '',
+        tags,
+        access_level: accessLevel,
+        pay_type: payType,
+        import_channel: channel,
+        message_id: messageId,
+        // 副链接 → xx_resource_links (N 条)
+        sub_links: l1Links.map(l => ({
+          source: l.type === 'other' ? '115' : l.type,
+          url: l.url,
+          password: l.password || '',
+          sort: l.sort,
+        })),
+        is_multi_link: l1Links.length > 1,
+      });
 
+      // 统计: 1 消息算 1 条入库, 但 bySource 累加所有 link
       byCategory[category] = (byCategory[category] || 0) + 1;
-      bySource[source] = (bySource[source] || 0) + 1;
+      for (const l of l1Links) {
+        bySource[l.type] = (bySource[l.type] || 0) + 1;
+      }
+    }
+
+    // L2: telegra.ph 中间页 → 入 xx_resources (独立记录) + L3 队列
+    for (const l2 of l2Links) {
+      l2Candidates.push({
+        name: title.slice(0, 200),
+        link: l2.url,
+        source: 'telegra_ph',
+        category: detectCategoryByTitle(title, '其他', 'telegra_ph'),
+        tags,
+        access_level: accessLevel,
+        pay_type: payType,
+        import_channel: channel,
+        message_id: messageId,
+      });
+      byCategory['telegra_ph'] = (byCategory['telegra_ph'] || 0) + 1;
+      bySource['telegra_ph'] = (bySource['telegra_ph'] || 0) + 1;
     }
   }
 
-  // 5. 去重 L1: 检查数据库里已存在的 (link, name)
+  // 5. 去重 L1: 资源入 xx_resources (1条/消息), 副链接入 xx_resource_links (N条)
   let l1Inserted = 0;
   let l1Skipped = 0;
   let l1Failed = 0;
+  let l1LinksInserted = 0;
   const errors: string[] = [];
 
   if (candidates.length > 0) {
-    // 依赖 ON CONFLICT (link, name) DO NOTHING 去重
-    // RETURNING 不可靠 (Neon serverless 已知问题), 走 before/after SELECT 验证
     for (const c of candidates) {
       try {
         const r = await sql`
-          INSERT INTO xx_resources (name, link, link_code, source, category, size, tags, access_level, pay_type, import_channel, status, created_at, updated_at)
-          VALUES (${c.name}, ${c.link}, ${c.link_code || ''}, ${c.source}, ${c.category}, ${c.size || ''}, ${c.tags?.join(',') || ''}, ${c.access_level}, ${c.pay_type}, ${c.import_channel}, 'active', NOW(), NOW())
+          INSERT INTO xx_resources (name, link, link_code, source, category, size, tags, access_level, pay_type, import_channel, status, is_multi_link, created_at, updated_at)
+          VALUES (${c.name}, ${c.link}, ${c.link_code || ''}, ${c.source}, ${c.category}, ${c.size || ''}, ${c.tags?.join(',') || ''}, ${c.access_level}, ${c.pay_type}, ${c.import_channel}, 'active', ${c.is_multi_link || false}, NOW(), NOW())
           ON CONFLICT (link, name) DO NOTHING
           RETURNING id
         ` as any[];
-        if (r && r[0]?.id) {
+        const insertedId = r && r[0]?.id;
+        if (insertedId) {
           l1Inserted++;
+          // 副链接入 xx_resource_links
+          if (c.sub_links && c.sub_links.length > 0) {
+            for (const sl of c.sub_links) {
+              try {
+                const r2 = await sql`
+                  INSERT INTO xx_resource_links (resource_id, source, url, password, sort, status, access_level)
+                  VALUES (${insertedId}, ${sl.source}, ${sl.url}, ${sl.password}, ${sl.sort}, 'active', 'vip')
+                  ON CONFLICT (resource_id, source) DO NOTHING
+                `;
+                l1LinksInserted++;
+              } catch (e2: any) {
+                // 副链接失败不阻塞主流程
+                if (errors.length < 5) errors.push(`SubLink[${sl.source}] ${e2.message?.slice(0, 100)}`);
+              }
+            }
+          }
         } else {
           l1Skipped++;  // ON CONFLICT 触发, 算 skipped
         }
@@ -269,7 +306,7 @@ export async function POST(req: NextRequest) {
     summary: {
       total_messages: messages.length,
       skipped_no_link: skippedNoLink,
-      l1: { candidates: candidates.length, inserted: l1Inserted, skipped: l1Skipped, failed: l1Failed },
+      l1: { candidates: candidates.length, inserted: l1Inserted, skipped: l1Skipped, failed: l1Failed, links_inserted: l1LinksInserted },
       l2: { candidates: l2Candidates.length, inserted: l2Inserted, queue_added: l2QueueAdded, skipped: l2Skipped, failed: l2Failed },
     },
     by_category: byCategory,

@@ -1,11 +1,45 @@
 // 2026-07-16: 导入分类公共工具
 // 用途: 标准 Excel / 快速导入 / TG JSON 导入 / tg-organize 共用
 // 不动泽泽妈妈 21-sheet 导入 (那个用 ZZMM_SHEET_MAP)
+// 2026-07-17: 1对N 改造, 加 9 个新 source + magnet 兜底 category + 优先级排序
 
-export type ResourceSource = '115' | 'baidu' | 'quark' | 'aliyun' | 'magnet' | 'ed2k' | 'telegra_ph' | 'other';
+export type ResourceSource = '115' | 'baidu' | 'quark' | 'aliyun' | 'xunlei' | '123' | 'uc' | 'tianyi' | 'yidong' | 'magnet' | 'ed2k' | 'telegra_ph' | 'other';
 export type ResourceAccessLevel = 'basic' | 'vip' | 'code';
 export type ResourcePayType = 'free' | 'code';
 export type ImportChannel = 'zezemom_excel' | 'tg_baidu' | 'tg_quark' | 'tg_music' | 'other';
+
+// ─── 全局写死 sort 优先级 (G5-a) ────────────────────────────────────────
+// 打开组 (1-9) + 复制组 (10) — 所有资源统一按这个排
+export const SOURCE_SORT: Record<string, number> = {
+  '115': 1,
+  'baidu': 2,
+  'quark': 3,
+  'aliyun': 4,
+  'xunlei': 5,
+  '123': 6,
+  'uc': 7,
+  'tianyi': 8,
+  'yidong': 9,
+  'magnet': 10,
+  'ed2k': 10,  // 跟 magnet 同组, 复制按钮
+  'telegra_ph': 99,  // 兜底, 不该入库
+  'other': 99,
+};
+
+// 网盘类型 → 中文 label
+export const SOURCE_LABELS: Record<string, { label: string; icon: string; action: 'open' | 'copy' }> = {
+  '115': { label: '115 网盘', icon: '📦', action: 'open' },
+  'baidu': { label: '百度网盘', icon: '🅱️', action: 'open' },
+  'quark': { label: '夸克网盘', icon: '🍊', action: 'open' },
+  'aliyun': { label: '阿里云盘', icon: '☁️', action: 'open' },
+  'xunlei': { label: '迅雷', icon: '⚡', action: 'open' },
+  '123': { label: '123 网盘', icon: '1️⃣', action: 'open' },
+  'uc': { label: 'UC 网盘', icon: '🅿️', action: 'open' },
+  'tianyi': { label: '天翼云盘', icon: '☂️', action: 'open' },
+  'yidong': { label: '移动云盘', icon: '📱', action: 'open' },
+  'magnet': { label: '磁力', icon: '🧲', action: 'copy' },
+  'ed2k': { label: '磁力', icon: '🧲', action: 'copy' },
+};
 
 // ─── 关键词规则 (priority 高→低, 第一个命中用) ─────────────────────
 interface KeywordRule {
@@ -55,7 +89,17 @@ export function detectSource(link: string): ResourceSource {
   if (l.includes('baidu.com') || l.includes('yun.baidu') || l.includes('pan.baidu')) return 'baidu';
   // 阿里
   if (l.includes('aliyun.com') || l.includes('aliyundrive') || l.includes('alipan')) return 'aliyun';
-  // 磁力
+  // 迅雷网盘
+  if (l.includes('xunlei.com') || l.includes('pan.xunlei')) return 'xunlei';
+  // 123 网盘
+  if (l.includes('123pan.com') || l.includes('123685')) return '123';
+  // UC 网盘
+  if (l.includes('drive.uc.cn') || l.includes('uc.cn')) return 'uc';
+  // 天翼云盘
+  if (l.includes('cloud.189.cn') || l.includes('189.cn')) return 'tianyi';
+  // 移动云盘
+  if (l.includes('yun.139.com') || l.includes('mcloud.139.com') || l.includes('139.com')) return 'yidong';
+  // 磁力 (magnet: 或 thunder:// 转 magnet 后)
   if (l.startsWith('magnet:') || l.includes('magnet')) return 'magnet';
   // ed2k
   if (l.startsWith('ed2k://') || l.includes('ed2k')) return 'ed2k';
@@ -64,9 +108,39 @@ export function detectSource(link: string): ResourceSource {
   return 'other';
 }
 
-// ─── 2. detectCategoryByTitle(title, fallback?) ────────────────────
-export function detectCategoryByTitle(title: string, fallback: string = '其他'): string {
-  if (!title) return fallback;
+// ─── 1b. thunder:// 转 magnet URI ────────────────────────────────────────
+// thunder://QUFmdHA6Ly9... 这种编码格式
+// 解码 base64 后通常是 magnet:?xt=urn:btih:...
+export function thunderToMagnet(thunderUrl: string): string | null {
+  if (!thunderUrl || !thunderUrl.toLowerCase().startsWith('thunder://')) return null;
+  try {
+    const encoded = thunderUrl.slice('thunder://'.length);
+    // 去掉前缀 "AA" 和后缀 "ZZ" (迅雷格式)
+    let b64 = encoded;
+    if (b64.startsWith('AA') && b64.endsWith('ZZ')) {
+      b64 = b64.slice(2, -2);
+    }
+    const decoded = Buffer.from(b64, 'base64').toString('utf8');
+    if (decoded.startsWith('magnet:')) return decoded;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── 2. detectCategoryByTitle(title, fallback?, primarySource?) ───────
+// 业务规则 (2026-07-17):
+//   - 先按 title 关键词判定
+//   - 兜底时如果主链接是 magnet/ed2k, 返回 "磁力" category
+export function detectCategoryByTitle(
+  title: string,
+  fallback: string = '其他',
+  primarySource?: ResourceSource
+): string {
+  if (!title) {
+    if (primarySource === 'magnet' || primarySource === 'ed2k') return '磁力';
+    return fallback;
+  }
   const upper = title.toUpperCase();
   const sortedRules = [...KEYWORD_CATEGORY_RULES].sort((a, b) => b.priority - a.priority);
   for (const rule of sortedRules) {
@@ -77,12 +151,17 @@ export function detectCategoryByTitle(title: string, fallback: string = '其他'
       }
     }
   }
+  // 兜底: 关键词没命中时, 主链接是磁力 → 归"磁力"分类
+  if (primarySource === 'magnet' || primarySource === 'ed2k') return '磁力';
   return fallback;
 }
 
 // ─── 3. detectImportChannel(link, hint?) ────────────────────────────
 // 根据 link + 可选 hint 推断 import_channel
 // hint 例子: 'tg_baidu' / 'tg_quark' / 'tg_music' / 'tg_music_quark'
+// 业务规则 (2026-07-17):
+//   - hint 优先 (用于来源追溯)
+//   - 没 hint 时按主链接 source 反推
 export function detectImportChannel(link: string, hint?: string): ImportChannel {
   if (hint) {
     const h = hint.toLowerCase();
@@ -91,11 +170,12 @@ export function detectImportChannel(link: string, hint?: string): ImportChannel 
     if (h.includes('music')) return 'tg_music';
     if (h.includes('zezemom') || h.includes('zzmm')) return 'zezemom_excel';
   }
-  // 默认按 source 推断
+  // 没 hint 时按主链接 source 反推
   const src = detectSource(link);
   if (src === 'baidu') return 'tg_baidu';
   if (src === 'quark') return 'tg_quark';
-  if (src === '115') return 'zezemom_excel';  // 115 默认按 zezhe 走
+  if (src === '115') return 'zezemom_excel';
+  // 磁力/迅雷/123 等 → 算 tg 其他
   return 'other';
 }
 
@@ -121,55 +201,91 @@ export function normalizeLumenCost(value: any): number {
 // ─── 6. extractLinksFromTgMessage(msg) ──────────────────────────────
 // 从 TG message 中提取链接 (link + text_link entities 的 href)
 // 返回 [{ url, password?, type }]
+// 业务规则 (2026-07-17):
+//   - thunder:// 链接自动转 magnet URI
+//   - 返回结果已按 SOURCE_SORT 优先级排序 (1=115 优先, 10=磁力最后)
 export interface TgLink {
   url: string;
   password?: string;
   type: ResourceSource;
+  sort: number;
 }
 
 export function extractLinksFromTgMessage(msg: any): TgLink[] {
-  const links: TgLink[] = [];
-  if (!msg) return links;
+  const rawLinks: TgLink[] = [];
+  if (!msg) return rawLinks;
+
+  const pushLink = (url: string, pwd?: string) => {
+    let realUrl = url;
+    let type = detectSource(url);
+    // thunder:// → 转 magnet
+    if (url.toLowerCase().startsWith('thunder://')) {
+      const magnetUri = thunderToMagnet(url);
+      if (magnetUri) {
+        realUrl = magnetUri;
+        type = 'magnet';
+      } else {
+        // 解码失败, 当作迅雷 source 留 (TG 里也可能是无效编码)
+        type = 'xunlei';
+      }
+    }
+    if (!realUrl) return;
+    rawLinks.push({
+      url: realUrl,
+      password: pwd,
+      type,
+      sort: SOURCE_SORT[type] ?? 99,
+    });
+  };
 
   // 1. 优先从 text_entities 拿 (这是 TG Desktop export 的精准数据)
   const entities = msg.text_entities || [];
   for (const e of entities) {
     if (e.type === 'link' || e.type === 'text_link') {
       const url = e.href || e.text;
-      if (url && url.startsWith('http')) {
-        // 从 url 提取提取码 (网盘 链接后 ?pwd=xxx 或 #xxx)
-        const pwd = extractPasswordFromUrl(url);
-        links.push({ url, password: pwd, type: detectSource(url) });
-      } else if (url && (url.startsWith('magnet:') || url.startsWith('ed2k://'))) {
-        links.push({ url, type: detectSource(url) });
+      if (!url) continue;
+      if (url.startsWith('http') || url.startsWith('magnet:') || url.startsWith('ed2k://') || url.toLowerCase().startsWith('thunder://')) {
+        const pwd = url.startsWith('http') ? extractPasswordFromUrl(url) : undefined;
+        pushLink(url, pwd);
       }
     }
   }
 
   // 2. Fallback: 从 text 字符串中 regex 找链接 (如果 entities 缺失)
-  if (links.length === 0 && Array.isArray(msg.text)) {
+  if (rawLinks.length === 0 && Array.isArray(msg.text)) {
     const text = msg.text.filter((t: any) => typeof t === 'string').join('');
+    // http/https
     const urlRegex = /https?:\/\/[^\s\u4e00-\u9fa5]+/g;
     const matches = text.match(urlRegex);
-    if (matches) {
-      for (const url of matches) {
-        const pwd = extractPasswordFromUrl(url);
-        links.push({ url, password: pwd, type: detectSource(url) });
-      }
-    }
-    // magnet / ed2k
+    if (matches) for (const url of matches) pushLink(url, extractPasswordFromUrl(url));
+    // magnet
     const magnetRegex = /magnet:\?xt=urn:btih:[a-zA-Z0-9]+/g;
     const magnets = text.match(magnetRegex);
-    if (magnets) for (const m of magnets) links.push({ url: m, type: 'magnet' });
+    if (magnets) for (const m of magnets) pushLink(m);
+    // thunder
+    const thunderRegex = /thunder:\/\/[a-zA-Z0-9=\/+=]+/gi;
+    const thunders = text.match(thunderRegex);
+    if (thunders) for (const t of thunders) pushLink(t);
   }
 
-  // 3. Dedup (by url)
+  // 3. Dedup (by url) + 按 sort 排序 (1=115 优先)
   const seen = new Set<string>();
-  return links.filter(l => {
+  const dedup = rawLinks.filter(l => {
     if (seen.has(l.url)) return false;
     seen.add(l.url);
     return true;
   });
+  dedup.sort((a, b) => a.sort - b.sort);
+  return dedup;
+}
+
+// ─── 6b. pickPrimaryLink(links) ──────────────────────────────────────
+// 从提取出的链接中选主链接 (sort 最小的, 即 115 优先)
+// 业务规则 (2026-07-17): 资源入库用主链接 url + source, 其他链接入副表
+export function pickPrimaryLink(links: TgLink[]): TgLink | null {
+  if (!links || links.length === 0) return null;
+  // 已排序, 取第一个
+  return links[0];
 }
 
 // ─── 7. extractPasswordFromUrl(url) ─────────────────────────────────
