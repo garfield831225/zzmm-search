@@ -41,5 +41,11 @@ export async function GET(req: NextRequest) {
     r.after = c;
   } catch (e: any) { r.after_err = e.message; }
 
+  // 5. 总数 (用 INSERT 端点同 sql, 避免 read replica lag)
+  try {
+    const c = await sql`SELECT COUNT(*)::int as cnt FROM xx_resource_links`;
+    r.total_count = c[0]?.cnt;
+  } catch (e: any) { r.total_count_err = e.message; }
+
   return NextResponse.json(r);
 }
