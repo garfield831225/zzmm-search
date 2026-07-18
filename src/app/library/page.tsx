@@ -26,7 +26,8 @@ const SECTIONS = [
 type SectionKey = typeof SECTIONS[number]['key'];
 
 const SOURCES_BY_SECTION: Record<SectionKey, string[]> = {
-  zezhe: ['全部', '115网盘', '百度网盘', '夸克网盘', '阿里云盘', '磁力链接', 'ed2k链接'],
+  // 2026-07-18: 泽泽妈妈区全是 115 链接, 用 sheet 分类 (顶部按钮组), 网盘分类无意义
+  zezhe: [],
   vip: ['全部', '115网盘', '百度网盘', '夸克网盘', '磁力链接', 'ed2k链接'],
   code: ['全部', '115网盘', '百度网盘', '夸克网盘', '阿里云盘', '磁力链接', 'ed2k链接'],
 };
@@ -60,6 +61,8 @@ export default function LibraryPage() {
   const [userId, setUserId] = useState<string>('');
   const [section, setSection] = useState<SectionKey>('zezhe');
   const [source, setSource] = useState<string>('全部');
+  const [sheet, setSheet] = useState<string>('全部');
+  const [sheets, setSheets] = useState<{name: string; count: number}[]>([]);
   const [query, setQuery] = useState('');
   const [items, setItems] = useState<Resource[]>([]);
   const [total, setTotal] = useState(0);
@@ -134,7 +137,12 @@ export default function LibraryPage() {
         sort: 'import_time_asc',
       });
       if (query) params.set('q', query);
-      if (source !== '全部') params.set('source', source);
+      if (section === 'zezhe') {
+        // 2026-07-18: 泽泽妈妈区用 sheet 分类替代网盘筛选
+        if (sheet !== '全部') params.set('sheet', sheet);
+      } else {
+        if (source !== '全部') params.set('source', source);
+      }
       const res = await fetch(`/api/search?${params}`, {
         headers: { Authorization: 'Bearer ' + getToken() },
       });
@@ -164,14 +172,24 @@ export default function LibraryPage() {
     finally { setLoading(false); }
   }, [section, source, query, pageSize, userId, getToken, addToast]);
 
-  useEffect(() => { setItems([]); setPage(1); fetchItems(1); }, [section, source]);
+  useEffect(() => { setItems([]); setPage(1); fetchItems(1); }, [section, source, sheet]);
 
   const handleSearch = (e: React.FormEvent) => { e.preventDefault(); fetchItems(1); };
 
   const switchSection = (s: SectionKey) => {
     setSection(s);
     setSource('全部');
+    setSheet('全部');
   };
+
+  // 2026-07-18: 加载 sheet 列表 (泽泽妈妈115文档用)
+  useEffect(() => {
+    if (section === 'zezhe') {
+      fetch('/api/library/sheets').then(r => r.json()).then(d => {
+        if (d.sheets) setSheets(d.sheets);
+      }).catch(() => {});
+    }
+  }, [section]);
 
   // 解锁 code 资源
   const handleUnlock = async (item: Resource) => {
@@ -281,14 +299,30 @@ export default function LibraryPage() {
             </button>
           </form>
 
-          {/* Source filter */}
+          {/* Source / Sheet filter */}
           <div className="flex gap-1.5 overflow-x-auto pb-1">
-            {currentSources.map(src => (
-              <button key={src} onClick={() => setSource(src)}
-                className={`px-2.5 py-0.5 rounded text-xs whitespace-nowrap transition ${source === src ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500 hover:text-gray-700'}`}>
-                {src}
-              </button>
-            ))}
+            {section === 'zezhe' ? (
+              // 2026-07-18: 泽泽妈妈区按导入 sheet 分类 (全是 115 链接, 网盘分类无意义)
+              <>
+                <button onClick={() => setSheet('全部')}
+                  className={`px-2.5 py-0.5 rounded text-xs whitespace-nowrap transition ${sheet === '全部' ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500 hover:text-gray-700'}`}>
+                  全部
+                </button>
+                {sheets.map(sh => (
+                  <button key={sh.name} onClick={() => setSheet(sh.name)}
+                    className={`px-2.5 py-0.5 rounded text-xs whitespace-nowrap transition ${sheet === sh.name ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500 hover:text-gray-700'}`}>
+                    {sh.name} <span className="opacity-60">{sh.count}</span>
+                  </button>
+                ))}
+              </>
+            ) : (
+              currentSources.map(src => (
+                <button key={src} onClick={() => setSource(src)}
+                  className={`px-2.5 py-0.5 rounded text-xs whitespace-nowrap transition ${source === src ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500 hover:text-gray-700'}`}>
+                  {src}
+                </button>
+              ))
+            )}
           </div>
         </div>
       </header>
