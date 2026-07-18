@@ -367,15 +367,20 @@ export async function POST(req: NextRequest) {
   }
 
   // 2026-07-18: 导入后立刻触发一次匹配 (fire-and-forget), 让新导入的资源能更快有封面
-  // Vercel 60s 限制 + 用户上传频繁, 只触发 1 次让 cron match-task 跑 50 条
-  if (l1Inserted > 0 && process.env.CRON_SECRET) {
+  // 2026-07-18 修: 必须先 INSERT 一条 pending task 到 xx_match_tasks, match-task 端点才会跑
+  if (l1Inserted > 0) {
     try {
+      // 1. INSERT pending task (覆盖现有 running task 也行, 反正只有最新任务在跑)
+      const existing = await sql`SELECT id FROM xx_match_tasks WHERE status IN ('pending', 'running') LIMIT 1` as any[];
+      if (!existing[0]) {
+        await sql`
+          INSERT INTO xx_match_tasks (status, total, matched, nomatch, offset, batch_size, created_at, updated_at)
+          VALUES ('pending', ${l1Inserted}, 0, 0, 0, 200, NOW(), NOW())
+        `;
+      }
+      // 2. Fire-and-forget 触发 match-task 端点
       const cronUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'https://zzmm-search.cc.cd'}/api/cron/match-task`;
-      fetch(cronUrl, {
-        method: 'POST',
-        headers: { 'X-Cron-Secret': process.env.CRON_SECRET },
-        signal: AbortSignal.timeout(5000),
-      }).catch(() => {});
+      fetch(cronUrl, { signal: AbortSignal.timeout(5000) }).catch(() => {});
     } catch {}
   }
 
