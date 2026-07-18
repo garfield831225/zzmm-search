@@ -200,37 +200,19 @@ async function matchOneRecord(name: string, category: string, sub_type: string |
 export async function GET(req: NextRequest) {
   try {
     const sql = getSql();
-    let tasks = await sql`SELECT * FROM xx_match_tasks WHERE status IN ('pending', 'running') ORDER BY id LIMIT 1`.catch(() => []) as any[];
-    // 2026-07-18: 没 task 时自动创建一条 (避免 read replica lag 让用户 trigger 不生效)
-    if (tasks.length === 0) {
-      const remaining = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE status = 'active' AND tmdb_id IS NULL`.catch(() => [{ cnt: 0 }]) as any[];
-      if (remaining[0]?.cnt > 0) {
-        await sql`INSERT INTO xx_match_tasks (status, total, matched, nomatch, "offset", batch_size, created_at, updated_at) VALUES ('pending', ${remaining[0].cnt}, 0, 0, 0, 200, NOW(), NOW())`;
-        tasks = await sql`SELECT * FROM xx_match_tasks WHERE status IN ('pending', 'running') ORDER BY id LIMIT 1`.catch(() => []) as any[];
-      }
-    }
-    if (tasks.length === 0) return NextResponse.json({ done: true, msg: 'no active task' });
-
-    const task = tasks[0];
-    const taskId = task.id;
-    const offset = Number(task.offset || 0);
-
-    if (task.status === 'pending') {
-      await sql`UPDATE xx_match_tasks SET status = 'running', updated_at = NOW() WHERE id = ${taskId}`.catch(() => {});
-    }
-
+    // 2026-07-18: 完全绕开 xx_match_tasks 表 (Neon read replica lag 让 task 不可见)
+    // 直接查未匹配资源, 5min 窗口去重, 跑 200/批
     const rows = await sql`
       SELECT id, name, category, sub_type
       FROM xx_resources
       WHERE tmdb_id IS NULL
         AND (matched_tmdb_at IS NULL OR matched_tmdb_at < NOW() - INTERVAL '5 minutes')
       ORDER BY id
-      LIMIT ${BATCH_PER_RUN} OFFSET ${offset}
+      LIMIT ${BATCH_PER_RUN}
     `.catch(() => []) as any[];
 
     if (rows.length === 0) {
-      await sql`UPDATE xx_match_tasks SET status = 'done', updated_at = NOW() WHERE id = ${taskId}`.catch(() => {});
-      return NextResponse.json({ done: true, taskId });
+      return NextResponse.json({ done: true, msg: 'no unmatched resources' });
     }
 
     let batchMatched = 0;
@@ -251,27 +233,12 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const newOffset = offset + rows.length;
-    const newMatched = Number(task.matched || 0) + batchMatched;
-    const newNomatch = Number(task.nomatch || 0) + batchNomatch;
-    const newStatus = newOffset >= task.total ? 'done' : 'running';
-
-    await sql`
-      UPDATE xx_match_tasks
-      SET matched = ${newMatched}, nomatch = ${newNomatch}, "offset" = ${newOffset},
-          status = ${newStatus}, updated_at = NOW()
-      WHERE id = ${taskId}
-    `.catch(() => {});
-
+    // 2026-07-18: 简化, 不依赖 xx_match_tasks 表 (绕过 read replica lag)
     return NextResponse.json({
-      taskId,
       processed: rows.length,
       matched: batchMatched,
       nomatch: batchNomatch,
-      offset: newOffset,
-      total: task.total,
-      pct: task.total > 0 ? Math.round(newOffset / task.total * 100) : 100,
-      status: newStatus,
+      done: false,
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
