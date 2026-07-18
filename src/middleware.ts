@@ -95,6 +95,7 @@ const PUBLIC_PATHS = [
   '/api/admin/cleanup-dmhy-nav',  // 2026-07-18 清理 dmhy 导航站脏数据 (业务规则: 导航站直接删)
   '/api/admin/reclassify-magnet', // 2026-07-18 重分类 "磁力" 分类 (关键词库升级后老数据未自动重分类)
   '/api/catalog',                // 2026-07-18 /titles 独立目录页 API (无登录, 纯目录)
+  '/api/library/sheets',         // 2026-07-18 /library 泽泽妈妈区 sheet 列表 (公开浏览, 后端按权限过滤)
   '/api/admin/trigger-match',    // 2026-07-18 admin 强制触发 match-task (绕过 read replica lag)
   '/titles',                     // 2026-07-18 独立目录页 (无登录, 纯目录浏览, 无导航入口)
   '/api/admin/seed-multi-link-demo', // 2026-07-17 diag: 给老资源加示例多网盘链接
