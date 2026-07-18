@@ -26,6 +26,12 @@ export async function GET(request: NextRequest) {
   });
   const data = await r.json();
 
+  // 用真实 server token 调 debug2 看实际 count SQL
+  const r2 = await fetch('https://zzmm-search.cc.cd/api/search?zone=library_vip&source=magnet&debug2=1', {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const debug2 = await r2.json();
+
   // 直查 vip magnet 总数 (用相同 whereClause 模拟 search API)
   // search API 用的: `sql\`SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause}\``
   const fullWhere = `r.status = 'active' AND 1=1 AND r.source = 'magnet' AND 1=1 AND 1=1 AND 1=1 AND (r.access_level IN ('basic', 'vip', 'code')) AND 1=1 AND 1=1 AND ((r.import_channel IS NULL OR r.import_channel != 'zezemom_excel') AND (r.pay_type IS NULL OR r.pay_type != 'code'))`;
@@ -55,5 +61,6 @@ export async function GET(request: NextRequest) {
     samples: samples,
     error: data.error,
     debug: debugData,
+    debug2,
   });
 }
