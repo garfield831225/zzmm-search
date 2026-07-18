@@ -95,6 +95,17 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ ok: false, error: '链接不存在' }, { status: 404 });
     }
 
+    // 2b. 2026-07-18 修: 副表 sort=1 跟主表 link 一样的话, 删副表时同步清主表 link
+    //   (因为 search 端点优先用副表 link, 但主表 link 是兜底, 不清的话 UI 还显示主表 link)
+    //   业务规则: 用户删某个 source 时, 如果主表 source 跟被删的 source 一样 → 清主表 link
+    if (subDeleted && !mainCleared) {
+      const mainRes = await sql`SELECT link, source FROM xx_resources WHERE id = ${resourceId}`;
+      if (mainRes[0]?.source === source && mainRes[0]?.link) {
+        await sql`UPDATE xx_resources SET link = '', link_code = '' WHERE id = ${resourceId}`;
+        mainCleared = true;
+      }
+    }
+
     // 3. 检查资源是否还有 active 链接 (副表 + 主表兜底)
     const subRemain = await sql`SELECT COUNT(*)::int as cnt FROM xx_resource_links WHERE resource_id = ${resourceId} AND status = 'active'`;
     const subCount = subRemain[0]?.cnt || 0;
