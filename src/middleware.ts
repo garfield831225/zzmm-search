@@ -93,6 +93,7 @@ const PUBLIC_PATHS = [
   '/api/diag-schema',             // 2026-07-18 diag: 查 schema
   '/api/admin/dedup-links',       // 2026-07-18 链接去重 (按 url 保留最新)
   '/api/admin/cleanup-dmhy-nav',  // 2026-07-18 清理 dmhy 导航站脏数据 (业务规则: 导航站直接删)
+  '/api/admin/reclassify-magnet', // 2026-07-18 重分类 "磁力" 分类 (关键词库升级后老数据未自动重分类)
   '/api/admin/seed-multi-link-demo', // 2026-07-17 diag: 给老资源加示例多网盘链接
   '/api/admin/test-unnest',       // 2026-07-17 调试 UNNEST (已删, 白名单保留无影响)
   '/api/admin/diag-admin-group',  // 2026-07-16 查 admin 用户真实 group

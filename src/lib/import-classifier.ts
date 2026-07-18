@@ -55,6 +55,16 @@ const KEYWORD_CATEGORY_RULES: KeywordRule[] = [
   { patterns: ['精品课', '课程', '讲座', '培训', '网课', '教学', '教程课'], category: '精品课', priority: 90 },
   // 文档 / 教辅 / 教材 / PDF
   { patterns: ['文档', '教程', '讲义', '课件', '教材', '学习资料', 'PDF', '教辅'], category: '文档', priority: 80 },
+  // 动漫 (2026-07-18 加: 动漫花园新番推送全归动漫)
+  // 字幕组白名单 + 动漫/新番/Raws/Baha/B-Global/TVアニメ 等
+  { patterns: [
+    '动漫', '动画', '新番', 'Raws', 'RAW', 'Baha', 'B-Global', 'TVアニメ',
+    '桜都', 'SweetSub', '喵萌', '酷漫', '星空', '千夏', 'MingY', 'MagicStar',
+    '幻月', '爱恋&漫猫', '猫恋', 'NC-Raws', 'Lilith-Raws', 'Skymoon-Raws',
+    'ANi', '天月', '猎户', 'JMAX', 'PorterRAWS', 'jibaketa', '肥猫压制',
+    '爪爪', '铃风', '氢焰', '北宇治', '风都', '星河', '萌新乐园', '小猪动漫',
+    '漫猫', '异世界', '后宫', '魔法少女', 'リリカル', 'Lycoris', 'Luminous',
+  ], category: '动漫', priority: 75 },
   // 音乐
   { patterns: ['FLAC', 'Hi-Res', 'HiRes', '专辑', 'SACD', 'DSD', 'HiFi', '演唱会', 'mp3下载', 'APE', 'WAV', '无损'], category: '音乐', priority: 70 },
   // 体育
