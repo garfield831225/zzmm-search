@@ -200,7 +200,15 @@ async function matchOneRecord(name: string, category: string, sub_type: string |
 export async function GET(req: NextRequest) {
   try {
     const sql = getSql();
-    const tasks = await sql`SELECT * FROM xx_match_tasks WHERE status IN ('pending', 'running') ORDER BY id LIMIT 1`.catch(() => []) as any[];
+    let tasks = await sql`SELECT * FROM xx_match_tasks WHERE status IN ('pending', 'running') ORDER BY id LIMIT 1`.catch(() => []) as any[];
+    // 2026-07-18: 没 task 时自动创建一条 (避免 read replica lag 让用户 trigger 不生效)
+    if (tasks.length === 0) {
+      const remaining = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE status = 'active' AND tmdb_id IS NULL`.catch(() => [{ cnt: 0 }]) as any[];
+      if (remaining[0]?.cnt > 0) {
+        await sql`INSERT INTO xx_match_tasks (status, total, matched, nomatch, "offset", batch_size, created_at, updated_at) VALUES ('pending', ${remaining[0].cnt}, 0, 0, 0, 200, NOW(), NOW())`;
+        tasks = await sql`SELECT * FROM xx_match_tasks WHERE status IN ('pending', 'running') ORDER BY id LIMIT 1`.catch(() => []) as any[];
+      }
+    }
     if (tasks.length === 0) return NextResponse.json({ done: true, msg: 'no active task' });
 
     const task = tasks[0];
