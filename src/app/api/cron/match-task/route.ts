@@ -218,19 +218,24 @@ export async function GET(req: NextRequest) {
     let batchMatched = 0;
     let batchNomatch = 0;
 
-    for (const row of rows) {
-      const result = await matchOneRecord(row.name, row.category, row.sub_type);
-      if (result === 'SKIP' || result === 'GARBLED') {
-        await sql`UPDATE xx_resources SET tmdb_id = ${result}, matched_tmdb_at = NOW() WHERE id = ${row.id}`.catch(() => {});
-        batchNomatch++;
-      } else if (result === 'NOMATCH') {
-        // 没匹配上不更新 tmdb_id, 但更新时间戳避免重复
-        await sql`UPDATE xx_resources SET matched_tmdb_at = NOW() WHERE id = ${row.id}`.catch(() => {});
-        batchNomatch++;
-      } else {
-        await sql`UPDATE xx_resources SET tmdb_id = ${result}, matched_tmdb_at = NOW() WHERE id = ${row.id}`.catch(() => {});
-        batchMatched++;
-      }
+    // 2026-07-18: 20 并发匹配 (Vercel 60s 内能跑完 200 条)
+    const CONCURRENCY = 20;
+    for (let i = 0; i < rows.length; i += CONCURRENCY) {
+      const slice = rows.slice(i, i + CONCURRENCY);
+      await Promise.all(slice.map(async (row) => {
+        const result = await matchOneRecord(row.name, row.category, row.sub_type);
+        if (result === 'SKIP' || result === 'GARBLED') {
+          await sql`UPDATE xx_resources SET tmdb_id = ${result}, matched_tmdb_at = NOW() WHERE id = ${row.id}`.catch(() => {});
+          batchNomatch++;
+        } else if (result === 'NOMATCH') {
+          // 没匹配上不更新 tmdb_id, 但更新时间戳避免重复
+          await sql`UPDATE xx_resources SET matched_tmdb_at = NOW() WHERE id = ${row.id}`.catch(() => {});
+          batchNomatch++;
+        } else {
+          await sql`UPDATE xx_resources SET tmdb_id = ${result}, matched_tmdb_at = NOW() WHERE id = ${row.id}`.catch(() => {});
+          batchMatched++;
+        }
+      }));
     }
 
     // 2026-07-18: 简化, 不依赖 xx_match_tasks 表 (绕过 read replica lag)
