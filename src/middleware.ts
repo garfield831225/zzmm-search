@@ -97,6 +97,7 @@ const PUBLIC_PATHS = [
   '/api/catalog',                // 2026-07-18 /titles 独立目录页 API (无登录, 纯目录)
   '/api/library/sheets',         // 2026-07-18 /library 泽泽妈妈区 sheet 列表 (公开浏览, 后端按权限过滤)
   '/api/admin/diag-magnet-vip',  // 2026-07-18 临时诊断: VIP magnet 为什么只 2 条
+  '/api/admin/diag-route-source', // 2026-07-18 临时诊断: 查 search API 部署源码
   '/api/admin/trigger-match',    // 2026-07-18 admin 强制触发 match-task (绕过 read replica lag)
   '/titles',                     // 2026-07-18 独立目录页 (无登录, 纯目录浏览, 无导航入口)
   '/api/admin/seed-multi-link-demo', // 2026-07-17 diag: 给老资源加示例多网盘链接

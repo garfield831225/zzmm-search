@@ -229,7 +229,17 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * pageSize;
 
     // ─── Count ────────────────────────────────────────────────────────────────
-    const countRows = await sql(`SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause}`) as any[];
+    const countSQL = `SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause}`;
+    // DEBUG 2026-07-18: 返 countSQL + countRows 给前端
+    if (searchParams.get('debug2') === '1') {
+      try {
+        const r = await sql(countSQL) as any[];
+        return NextResponse.json({ countSQL, countRows: r, total: parseInt(r?.[0]?.cnt || '0') });
+      } catch (e: any) {
+        return NextResponse.json({ countSQL, error: e.message }, { status: 500 });
+      }
+    }
+    const countRows = await sql(countSQL) as any[];
     const total = parseInt(countRows?.[0]?.cnt || '0');
     // DEBUG 2026-07-18
     console.log('[search-debug] countRows:', JSON.stringify(countRows), 'total:', total);
