@@ -87,6 +87,7 @@ const PUBLIC_PATHS = [
   '/api/diag-import-result',      // 2026-07-18 diag: TG 导入 + 匹配统计
   '/api/diag-recent-tg',          // 2026-07-18 diag: 最近 N 小时 TG 新增
   '/api/diag-migrate-unique',     // 2026-07-18 diag: 改 UNIQUE 约束
+  '/api/diag-by-source-cat',       // 2026-07-18 diag: 按 source/category 分布
   '/api/admin/backfill-sort1',    // 2026-07-18 一次性 - 回填 sort=1 副表
   '/api/diag-test-tg-import',     // 2026-07-18 diag: 模拟 admin 测 tg-json 端点
   '/api/diag-schema',             // 2026-07-18 diag: 查 schema
