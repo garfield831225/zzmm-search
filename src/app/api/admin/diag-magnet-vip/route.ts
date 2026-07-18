@@ -15,7 +15,13 @@ export async function GET(request: NextRequest) {
   const token = jwt.sign({ id: 1, group: 'admin', username: 'admin' }, process.env.JWT_SECRET || 'cLWhs2015', { expiresIn: '1h' });
 
   // 模拟 VIP 区 + magnet
-  const r = await fetch('https://zzmm-search.cc.cd/api/search?zone=library_vip&source=magnet&page=1&pageSize=3&sort=import_time_asc&debug=1', {
+  const r1 = await fetch('https://zzmm-search.cc.cd/api/search?zone=library_vip&source=magnet&page=1&pageSize=3&sort=import_time_asc&debug=1', {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const debugData = await r1.json();
+
+  // 真实查询不带 debug
+  const r = await fetch('https://zzmm-search.cc.cd/api/search?zone=library_vip&source=magnet&page=1&pageSize=3&sort=import_time_asc', {
     headers: { Authorization: `Bearer ${token}` }
   });
   const data = await r.json();
@@ -30,5 +36,6 @@ export async function GET(request: NextRequest) {
     first_item: data.items?.[0] ? { id: data.items[0].id, name: data.items[0].name?.slice(0, 30), source: data.items[0].source, cat: data.items[0].category, access: data.items[0].accessLevel, ch: data.items[0].importChannel } : null,
     db_vip_magnet_count: cnt[0].c,
     error: data.error,
+    debug: debugData,
   });
 }
