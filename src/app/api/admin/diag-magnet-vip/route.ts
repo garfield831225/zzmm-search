@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   const token = jwt.sign({ id: 1, group: 'admin', username: 'admin' }, process.env.JWT_SECRET || 'cLWhs2015', { expiresIn: '1h' });
 
   // 模拟 VIP 区 + magnet
-  const r = await fetch('https://zzmm-search.cc.cd/api/search?zone=library_vip&source=magnet&page=1&pageSize=3&sort=import_time_asc', {
+  const r = await fetch('https://zzmm-search.cc.cd/api/search?zone=library_vip&source=magnet&page=1&pageSize=3&sort=import_time_asc&debug=1', {
     headers: { Authorization: `Bearer ${token}` }
   });
   const data = await r.json();
