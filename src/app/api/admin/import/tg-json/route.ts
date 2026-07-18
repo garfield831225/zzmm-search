@@ -152,7 +152,9 @@ export async function POST(req: NextRequest) {
     if (l1Links.length > 0) {
       const primary = l1Links[0];  // 已按 sort 排序, 第一个 = 最高优先级
       const category = detectCategoryByTitle(title, '其他', primary.type);
-      const primarySource = primary.type === 'other' ? '115' : primary.type;  // 兜底
+      // 2026-07-18 业务规则: 不要 other 兜底, 不是网盘直接不入库
+      // 之前 source === 'other' ? '115' : source 把 dmhy/导航站全当 115 入库, 全 404
+      const primarySource = primary.type;
 
       candidates.push({
         name: title.slice(0, 200),
@@ -169,7 +171,7 @@ export async function POST(req: NextRequest) {
         message_id: messageId,
         // 副链接 → xx_resource_links (排除主链接, 避免 UNIQUE 冲突)
         sub_links: l1Links.slice(1).map(l => ({
-          source: l.type === 'other' ? '115' : l.type,
+          source: l.type,
           url: l.url,
           password: l.password || '',
           sort: l.sort,

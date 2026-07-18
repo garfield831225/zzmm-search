@@ -216,6 +216,7 @@ export function extractLinksFromTgMessage(msg: any): TgLink[] {
   if (!msg) return rawLinks;
 
   const pushLink = (url: string, pwd?: string) => {
+    if (!url) return;
     let realUrl = url;
     let type = detectSource(url);
     // thunder:// → 转 magnet
@@ -238,15 +239,34 @@ export function extractLinksFromTgMessage(msg: any): TgLink[] {
     });
   };
 
-  // 1. 优先从 text_entities 拿 (这是 TG Desktop export 的精准数据)
-  const entities = msg.text_entities || [];
-  for (const e of entities) {
-    if (e.type === 'link' || e.type === 'text_link') {
-      const url = e.href || e.text;
-      if (!url) continue;
-      if (url.startsWith('http') || url.startsWith('magnet:') || url.startsWith('ed2k://') || url.toLowerCase().startsWith('thunder://')) {
-        const pwd = url.startsWith('http') ? extractPasswordFromUrl(url) : undefined;
-        pushLink(url, pwd);
+  // 1. 优先从 text array 里的 entity 拿 (TG Desktop export 2026-07-18 改用 array 格式)
+  //    - text_link / link: 存 URL (dmhy 页面, 网盘链接)
+  //    - code: 存磁力 (magnet:?xt=urn:btih:...) — 2026-07-18 才发现
+  //    - plain: 普通文本, 跳过
+  //    这是 tg-desktop 7.x 的新格式, 之前代码漏了 code 类型
+  if (Array.isArray(msg.text)) {
+    for (const t of msg.text) {
+      if (typeof t === 'object' && t !== null && (t.type === 'text_link' || t.type === 'link' || t.type === 'code')) {
+        const url = t.text || t.href || '';
+        if (url.startsWith('http') || url.startsWith('magnet:') || url.startsWith('ed2k://') || url.toLowerCase().startsWith('thunder://')) {
+          const pwd = url.startsWith('http') ? extractPasswordFromUrl(url) : undefined;
+          pushLink(url, pwd);
+        }
+      }
+    }
+  }
+
+  // 2. Fallback: 从 text_entities 拿 (老格式, 跟 text 平行)
+  if (rawLinks.length === 0) {
+    const entities = msg.text_entities || [];
+    for (const e of entities) {
+      if (e.type === 'link' || e.type === 'text_link') {
+        const url = e.href || e.text;
+        if (!url) continue;
+        if (url.startsWith('http') || url.startsWith('magnet:') || url.startsWith('ed2k://') || url.toLowerCase().startsWith('thunder://')) {
+          const pwd = url.startsWith('http') ? extractPasswordFromUrl(url) : undefined;
+          pushLink(url, pwd);
+        }
       }
     }
   }
