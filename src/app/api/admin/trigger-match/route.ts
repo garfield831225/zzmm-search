@@ -1,37 +1,26 @@
-// 2026-07-18: Admin 触发 match-task 端点
-// 业务规则: 强制 INSERT pending task (走 Vercel Neon endpoint, 避开 read replica lag)
+// 2026-07-18: 触发 match-task 端点 (强制 INSERT pending task, 绕过 read replica lag)
+// 鉴权: 用 zzmm-batch-test key (跟其他 diag 端点一样)
 // 端点:
-//   POST /api/admin/trigger-match
+//   POST /api/admin/trigger-match?key=zzmm-batch-test
 //   body: { total?: number }  默认 50000
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
-import jwt from 'jsonwebtoken';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 10;
 
-function authAdmin(req: NextRequest) {
-  const auth = req.headers.get('authorization');
-  if (!auth?.startsWith('Bearer ')) return { error: '未登录', status: 401 };
-  try {
-    const payload = jwt.verify(auth.replace('Bearer ', ''), process.env.JWT_SECRET || 'cLWhs2015') as any;
-    if (String(payload.user_group || payload.group || '').toLowerCase() !== 'admin') {
-      return { error: '需要 admin', status: 403 };
-    }
-    return { userId: String(payload.id) };
-  } catch {
-    return { error: 'token 无效', status: 401 };
-  }
-}
+const KEY = 'zzmm-batch-test';
 
 export async function POST(req: NextRequest) {
-  const auth = authAdmin(req);
-  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const key = req.nextUrl.searchParams.get('key') || '';
+  if (key !== KEY) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const sql = neon(process.env.DATABASE_URL || '');
-  const body = await req.json().catch(() => ({}));
-  const total = body?.total || 50000;
+  // 既支持 JSON body, 也支持 query param
+  let body: any = {};
+  try { body = await req.json(); } catch { body = {}; }
+  const total = body?.total || parseInt(req.nextUrl.searchParams.get('total') || '50000');
 
   try {
     // 1. 检查现有 task
