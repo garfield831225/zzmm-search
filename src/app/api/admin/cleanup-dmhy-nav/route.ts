@@ -132,12 +132,11 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ action, limit, fromId, deleted: 0, note: 'no more' });
       }
 
-      // 2. 并发硬删: 先副表, 再主表 (FK CASCADE 会自动处理, 但显式更稳)
+      // 2. 并发硬删: 只删主表, FK CASCADE 自动删副表 (节省一半调用)
       const CHUNK = 50;
       for (let i = 0; i < ids.length; i += CHUNK) {
         const slice = ids.slice(i, i + CHUNK);
         await Promise.all(slice.map(async (id) => {
-          try { await sql`DELETE FROM xx_resource_links WHERE resource_id = ${id}`; } catch {}
           try { await sql`DELETE FROM xx_resources WHERE id = ${id}`; } catch {}
         }));
       }
