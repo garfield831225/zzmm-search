@@ -193,6 +193,11 @@ export async function GET(request: NextRequest) {
 
     const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${regionFilter} AND ${yearFilter} AND ${nameFilter} AND ${accessLevelFilter} AND ${importChannelFilter} AND ${sheetFilter} AND ${libraryZoneFilter}`;
 
+    // DEBUG 2026-07-18: 直接返 SQL 给前端 (临时诊断, ?debug=1)
+    if (searchParams.get('debug') === '1') {
+      return NextResponse.json({ debug: true, zone, userGroup, accessLevelFilter, sourceFilter, libraryZoneFilter, whereClause });
+    }
+
     // DEBUG 2026-07-18
     console.log('[search-debug]', JSON.stringify({ zone, source, catFilter, sourceFilter, accessLevelFilter, libraryZoneFilter, userGroup, sheet, q }));
 
