@@ -193,6 +193,9 @@ export async function GET(request: NextRequest) {
 
     const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${regionFilter} AND ${yearFilter} AND ${nameFilter} AND ${accessLevelFilter} AND ${importChannelFilter} AND ${sheetFilter} AND ${libraryZoneFilter}`;
 
+    // DEBUG 2026-07-18
+    console.log('[search-debug]', JSON.stringify({ zone, source, catFilter, sourceFilter, accessLevelFilter, libraryZoneFilter, userGroup, sheet, q }));
+
     // 排序逻辑：
     //   1) has_tmdb DESC（有 TMDB 排前面）
     //   2) "已播完"优先（release_date < 今天）— 未来日期沉到底
@@ -223,6 +226,8 @@ export async function GET(request: NextRequest) {
     // ─── Count ────────────────────────────────────────────────────────────────
     const countRows = await sql(`SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause}`) as any[];
     const total = parseInt(countRows?.[0]?.cnt || '0');
+    // DEBUG 2026-07-18
+    console.log('[search-debug] countRows:', JSON.stringify(countRows), 'total:', total);
 
     // ─── Fetch page ─────────────────────────────────────────────────────────
     const dbRows = await sql(`
