@@ -92,6 +92,7 @@ const PUBLIC_PATHS = [
   '/api/diag-test-tg-import',     // 2026-07-18 diag: 模拟 admin 测 tg-json 端点
   '/api/diag-schema',             // 2026-07-18 diag: 查 schema
   '/api/admin/dedup-links',       // 2026-07-18 链接去重 (按 url 保留最新)
+  '/api/admin/cleanup-dmhy-nav',  // 2026-07-18 清理 dmhy 导航站脏数据 (业务规则: 导航站直接删)
   '/api/admin/seed-multi-link-demo', // 2026-07-17 diag: 给老资源加示例多网盘链接
   '/api/admin/test-unnest',       // 2026-07-17 调试 UNNEST (已删, 白名单保留无影响)
   '/api/admin/diag-admin-group',  // 2026-07-16 查 admin 用户真实 group
