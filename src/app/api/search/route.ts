@@ -229,23 +229,13 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * pageSize;
 
     // ─── Count ────────────────────────────────────────────────────────────────
-    const countSQL = `SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause}`;
-    // DEBUG 2026-07-18: 返 countSQL + countRows 给前端
-    if (searchParams.get('debug2') === '1') {
-      try {
-        const r = await sql(countSQL) as any[];
-        return NextResponse.json({ countSQL, countRows: r, total: parseInt(r?.[0]?.cnt || '0') });
-      } catch (e: any) {
-        return NextResponse.json({ countSQL, error: e.message }, { status: 500 });
-      }
-    }
-    const countRows = await sql(countSQL) as any[];
+    const countRows = await (sql as any).query(`SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause}`) as any[];
     const total = parseInt(countRows?.[0]?.cnt || '0');
     // DEBUG 2026-07-18
     console.log('[search-debug] countRows:', JSON.stringify(countRows), 'total:', total);
 
     // ─── Fetch page ─────────────────────────────────────────────────────────
-    const dbRows = await sql(`
+    const dbRows = await (sql as any).query(`
       SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
              r.doc_sheet, r.sub_type, r.lumen_cost,
              r.pay_type, r.code_price, r.lumen_cost, r.access_level, r.access_tier, r.import_channel,
@@ -273,7 +263,7 @@ export async function GET(request: NextRequest) {
     let tmdbMap = new Map<string, any>();
     const missingTmdbIds: string[] = [];
     if (allTmdbIds.length > 0) {
-      const ids = await sql(`SELECT * FROM xx_tmdb_cache WHERE tmdb_id IN (${allTmdbIds.map(id => `'${esc(id)}'`).join(',')})`);
+      const ids = await (sql as any).query(`SELECT * FROM xx_tmdb_cache WHERE tmdb_id IN (${allTmdbIds.map(id => `'${esc(id)}'`).join(',')})`);
       tmdbMap = new Map((ids || []).map((info: any) => [info?.tmdb_id, info]));
       // 找没 cache 的 tmdb_id，后台异步 fetch 写 cache（不阻塞主返回）
       allTmdbIds.forEach(id => { if (!tmdbMap.has(id)) missingTmdbIds.push(id); });
@@ -297,15 +287,15 @@ export async function GET(request: NextRequest) {
     if (allIds.length > 0) {
       const idsStr = allIds.map(id => `${id}`).join(',');
       try {
-        const musicRows = await sql(`SELECT resource_id, artist, album, cover_url FROM xx_music_cache WHERE resource_id IN (${idsStr})`);
+        const musicRows = await (sql as any).query(`SELECT resource_id, artist, album, cover_url FROM xx_music_cache WHERE resource_id IN (${idsStr})`);
         musicCoverMap = new Map((musicRows || []).map((r: any) => [r?.resource_id, r]));
       } catch { musicCoverMap = new Map(); }
       try {
-        const coverRows = await sql(`SELECT resource_id, cover_url, source, extra_data FROM xx_cover_cache WHERE resource_id IN (${idsStr})`);
+        const coverRows = await (sql as any).query(`SELECT resource_id, cover_url, source, extra_data FROM xx_cover_cache WHERE resource_id IN (${idsStr})`);
         coverCacheMap = new Map((coverRows || []).map((r: any) => [r?.resource_id, r]));
       } catch { coverCacheMap = new Map(); }
       try {
-        const sportsRows = await sql(`SELECT resource_id, team_name, team_alternate, stadium, league, badge_url, banner_url, description FROM xx_sports_cache WHERE resource_id IN (${idsStr})`);
+        const sportsRows = await (sql as any).query(`SELECT resource_id, team_name, team_alternate, stadium, league, badge_url, banner_url, description FROM xx_sports_cache WHERE resource_id IN (${idsStr})`);
         sportsCoverMap = new Map((sportsRows || []).map((r: any) => [r?.resource_id, r]));
       } catch { sportsCoverMap = new Map(); }
     }
@@ -316,7 +306,7 @@ export async function GET(request: NextRequest) {
     let linksMap = new Map<number, any[]>();
     if (allIds.length > 0) {
       try {
-        const linkRows = await sql(`
+        const linkRows = await (sql as any).query(`
           SELECT resource_id, source, url, password, sort, access_level, status
           FROM xx_resource_links
           WHERE resource_id IN (${allIds.map(id => `${id}`).join(',')})
