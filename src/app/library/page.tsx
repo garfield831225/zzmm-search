@@ -317,10 +317,19 @@ export default function LibraryPage() {
             return (
               <div key={item.id}
                 className={`grid grid-cols-[60px_70px_1fr_90px_80px_70px_70px_70px_140px] gap-2 px-3 py-2 border-b border-gray-100 hover:bg-violet-50/30 transition text-sm items-center ${isVipLock ? 'bg-amber-50/30' : ''} ${isCodeLock ? 'bg-cyan-50/30' : ''}`}>
-                {/* 分类 */}
+                {/* 分类 — 2026-07-18: 泽泽妈妈115文档用 doc_sheet (21-sheet 库的 sheet 名), 其他用 category */}
                 <div>
-                  <div className="text-base">{getCategoryIcon(item.category)}</div>
-                  <div className="text-[10px] text-gray-400 truncate">{item.category}</div>
+                  {(() => {
+                    const showCategory = section === 'zezhe' && item.docSheet
+                      ? item.docSheet
+                      : item.category;
+                    return (
+                      <>
+                        <div className="text-base">{getCategoryIcon(showCategory)}</div>
+                        <div className="text-[10px] text-gray-400 truncate" title={showCategory}>{showCategory}</div>
+                      </>
+                    );
+                  })()}
                 </div>
                 {/* 标签 (大区角标) */}
                 <div>
