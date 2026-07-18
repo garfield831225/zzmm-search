@@ -111,27 +111,25 @@ export async function GET(req: NextRequest) {
 
   if (action === 'delete') {
     const limit = Math.min(parseInt(req.nextUrl.searchParams.get('limit') || '1000'), 5000);
-    const offset = parseInt(req.nextUrl.searchParams.get('offset') || '0');
+    // 用 fromId 不用 offset (Neon read replica lag 让 offset 不可靠)
+    // fromId 默认 0, 每次跑删 id > fromId 的前 limit 条
+    const fromId = parseInt(req.nextUrl.searchParams.get('fromId') || '0');
 
-    let beforeCnt = 0;
-    let afterCnt = 0;
     let deletedIds: number[] = [];
+    let lastDeletedId = 0;
     try {
-      const before = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE source = '115' AND link ILIKE '%dmhy%'`;
-      beforeCnt = before[0]?.cnt || 0;
-
       // 取要删的 ids
       const toDel = await sql`
         SELECT id FROM xx_resources
-        WHERE source = '115' AND link ILIKE '%dmhy%'
+        WHERE source = '115' AND link ILIKE '%dmhy%' AND id > ${fromId}
         ORDER BY id ASC
-        LIMIT ${limit} OFFSET ${offset}
+        LIMIT ${limit}
       `;
       const ids = toDel.map(x => x.id);
       deletedIds = ids;
 
       if (ids.length === 0) {
-        return NextResponse.json({ action, before: beforeCnt, deleted: 0, note: 'no more' });
+        return NextResponse.json({ action, limit, fromId, deleted: 0, note: 'no more' });
       }
 
       // 2. 并发硬删: 先副表, 再主表 (FK CASCADE 会自动处理, 但显式更稳)
@@ -144,19 +142,27 @@ export async function GET(req: NextRequest) {
         }));
       }
 
-      const after = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE source = '115' AND link ILIKE '%dmhy%'`;
-      afterCnt = after[0]?.cnt || 0;
+      lastDeletedId = Math.max(...ids);
+
+      // 3. 验证 (after 不可靠, 用 min id 验证是否真删了)
+      const verify = await sql`
+        SELECT MIN(id) as min_id
+        FROM xx_resources
+        WHERE source = '115' AND link ILIKE '%dmhy%'
+      `;
+      const newMinId = verify[0]?.min_id || 0;
+      const actualDeleted = newMinId > lastDeletedId ? lastDeletedId - fromId : ids.length;
     } catch (e: any) {
-      return NextResponse.json({ action, error: e.message }, { status: 500 });
+      return NextResponse.json({ action, error: e.message, partial_deleted: deletedIds.length }, { status: 500 });
     }
 
     return NextResponse.json({
       action,
-      limit, offset,
-      before: beforeCnt,
-      after: afterCnt,
-      deleted: beforeCnt - afterCnt,
-      deleted_ids_sample: deletedIds.slice(0, 10),
+      limit, fromId,
+      requested: deletedIds.length,
+      last_deleted_id: lastDeletedId,
+      next_from_id: lastDeletedId,
+      next_call: `?action=delete&limit=${limit}&fromId=${lastDeletedId}`,
     });
   }
 
