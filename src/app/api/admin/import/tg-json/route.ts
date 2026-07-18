@@ -366,6 +366,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // 2026-07-18: 导入后立刻触发一次匹配 (fire-and-forget), 让新导入的资源能更快有封面
+  // Vercel 60s 限制 + 用户上传频繁, 只触发 1 次让 cron match-task 跑 50 条
+  if (l1Inserted > 0 && process.env.CRON_SECRET) {
+    try {
+      const cronUrl = `${process.env.NEXT_PUBLIC_BASE_URL || 'https://zzmm-search.cc.cd'}/api/cron/match-task`;
+      fetch(cronUrl, {
+        method: 'POST',
+        headers: { 'X-Cron-Secret': process.env.CRON_SECRET },
+        signal: AbortSignal.timeout(5000),
+      }).catch(() => {});
+    } catch {}
+  }
+
   return NextResponse.json({
     success: true,
     channel: importChannelHint,
