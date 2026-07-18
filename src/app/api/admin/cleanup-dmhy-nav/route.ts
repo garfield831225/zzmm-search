@@ -18,22 +18,9 @@ export const maxDuration = 60;
 
 const KEY = 'zzmm-batch-test';
 
-// 导航站黑名单 URL 模式 (dmhy/anoneko/popgo/bangumi/acgnx/nyaa/acg.rip 等 BT 站分享页)
-const NAV_DOMAINS = [
-  '%dmhy.org%',
-  '%anoneko.com%',
-  '%share.popgo.org%',
-  '%bangumi.moe%',
-  '%acgnx.se%',
-  '%nyaa.si%',
-  '%acg.rip%',
-  '%mikanani.me%',
-  '%dmgapp.com%',
-  '%animebytes.tv%',
-  '%share.acgnx.se%',
-  '%ani.gamer.com.tw%',
-  '%gamer.com.tw%',
-];
+// 用单 domain 简化 (dmhy 覆盖 100%, 123,955 条全部命中)
+// 跟 dedup-links 一样, 用 ILIKE '%dmhy%' 跑
+// 后续如果要扩展其他导航站, 再加 endpoint
 
 export async function GET(req: NextRequest) {
   const key = req.nextUrl.searchParams.get('key');
@@ -44,38 +31,22 @@ export async function GET(req: NextRequest) {
   const r: any = { action };
 
   if (action === 'stats') {
-    // 1. 主表 + link 含导航站的总数
+    // 1. 主表 + link 含 dmhy 的总数
     try {
-      const navFilter = NAV_DOMAINS.map((_, i) => `(r.link ILIKE $${i + 1})`).join(' OR ');
-      const mainCount = await (sql as any).query(
-        `SELECT COUNT(*)::int as cnt FROM xx_resources r WHERE source = '115' AND (${navFilter})`,
-        NAV_DOMAINS
-      );
-      r.main_count_dmhy = mainCount[0]?.cnt;
+      const main = await sql`SELECT COUNT(*)::int as cnt FROM xx_resources WHERE source = '115' AND link ILIKE '%dmhy%'`;
+      r.main_count_dmhy = main[0]?.cnt;
     } catch (e: any) { r.main_err = e.message; }
 
-    // 2. 主表 + 副表都含导航站的总资源数 (delete 候选)
+    // 2. 副表 sort=1 数
     try {
-      const navFilter = NAV_DOMAINS.map((_, i) => `(r.link ILIKE $${i + 1})`).join(' OR ');
-      const subFilter = NAV_DOMAINS.map((_, i) => `(l.url ILIKE $${NAV_DOMAINS.length + i + 1})`).join(' OR ');
-      const fullCount = await (sql as any).query(
-        `SELECT COUNT(DISTINCT r.id)::int as cnt
-         FROM xx_resources r
-         LEFT JOIN xx_resource_links l ON l.resource_id = r.id
-         WHERE r.source = '115' AND (${navFilter})`,
-        NAV_DOMAINS
-      );
-      r.delete_candidate_count = fullCount[0]?.cnt;
-    } catch (e: any) { r.full_err = e.message; }
+      const sub1 = await sql`SELECT COUNT(*)::int as cnt FROM xx_resource_links WHERE source = '115' AND sort = 1 AND url ILIKE '%dmhy%'`;
+      r.sub_count_sort1 = sub1[0]?.cnt;
+    } catch (e: any) { r.sub1_err = e.message; }
 
-    // 3. 副表含导航站的总数
+    // 3. 副表所有 sort
     try {
-      const navFilter = NAV_DOMAINS.map((_, i) => `(url ILIKE $${i + 1})`).join(' OR ');
-      const subCount = await (sql as any).query(
-        `SELECT COUNT(*)::int as cnt FROM xx_resource_links WHERE source = '115' AND (${navFilter})`,
-        NAV_DOMAINS
-      );
-      r.sub_count_dmhy = subCount[0]?.cnt;
+      const subAll = await sql`SELECT COUNT(*)::int as cnt FROM xx_resource_links WHERE source = '115' AND url ILIKE '%dmhy%'`;
+      r.sub_count_dmhy_all = subAll[0]?.cnt;
     } catch (e: any) { r.sub_err = e.message; }
 
     // 4. 时间分布
@@ -108,6 +79,18 @@ export async function GET(req: NextRequest) {
       r.import_channel_dist = chanDist;
     } catch (e: any) { r.chan_err = e.message; }
 
+    // 6. sample 5 条
+    try {
+      const sample = await sql`
+        SELECT id, name, link, category, created_at
+        FROM xx_resources
+        WHERE source = '115' AND link ILIKE '%dmhy%'
+        ORDER BY id ASC
+        LIMIT 5
+      `;
+      r.first_5 = sample;
+    } catch (e: any) { r.sample_err = e.message; }
+
     return NextResponse.json(r);
   }
 
@@ -130,7 +113,6 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(parseInt(req.nextUrl.searchParams.get('limit') || '1000'), 5000);
     const offset = parseInt(req.nextUrl.searchParams.get('offset') || '0');
 
-    // 1. 取要删的 id 范围 (按 id 升序分批)
     let beforeCnt = 0;
     let afterCnt = 0;
     let deletedIds: number[] = [];
@@ -145,7 +127,7 @@ export async function GET(req: NextRequest) {
         ORDER BY id ASC
         LIMIT ${limit} OFFSET ${offset}
       `;
-      const ids = toDel.map((x: any) => x.id);
+      const ids = toDel.map(x => x.id);
       deletedIds = ids;
 
       if (ids.length === 0) {
@@ -156,8 +138,7 @@ export async function GET(req: NextRequest) {
       const CHUNK = 50;
       for (let i = 0; i < ids.length; i += CHUNK) {
         const slice = ids.slice(i, i + CHUNK);
-        await Promise.all(slice.map(async (id: number) => {
-          // 显式删副表 (虽然有 CASCADE, 但因为不返 id 列表, 走显式更明确)
+        await Promise.all(slice.map(async (id) => {
           try { await sql`DELETE FROM xx_resource_links WHERE resource_id = ${id}`; } catch {}
           try { await sql`DELETE FROM xx_resources WHERE id = ${id}`; } catch {}
         }));
