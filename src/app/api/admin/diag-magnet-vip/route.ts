@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
   // 直查 vip magnet 总数 (用相同 whereClause 模拟 search API)
   // search API 用的: `sql\`SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause}\``
   const fullWhere = `r.status = 'active' AND 1=1 AND r.source = 'magnet' AND 1=1 AND 1=1 AND 1=1 AND (r.access_level IN ('basic', 'vip', 'code')) AND 1=1 AND 1=1 AND ((r.import_channel IS NULL OR r.import_channel != 'zezemom_excel') AND (r.pay_type IS NULL OR r.pay_type != 'code'))`;
-  // 1. 模拟 search API: LEFT JOIN
+  // 1. 模拟 search API count: LEFT JOIN
   const cnt = await sql(`SELECT COUNT(*) as c FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${fullWhere}`);
   // 2. 不用 JOIN
   const cnt3 = await sql(`SELECT COUNT(*) as c FROM xx_resources r WHERE r.status = 'active' AND r.source = 'magnet' AND (r.access_level IN ('basic', 'vip', 'code'))`);
@@ -39,6 +39,8 @@ export async function GET(request: NextRequest) {
   const cnt4 = await sql(`SELECT COUNT(*) as c FROM xx_resources WHERE status='active' AND source='magnet'`);
   // 5. 完整表 status 分布
   const statusDist = await sql`SELECT status, COUNT(*) as c FROM xx_resources GROUP BY status`;
+  // 6. 实际用 search API 的 fetch SQL (但用 template tag 包装) - 完全模拟 search API count
+  const countFromApi = await sql`SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE r.status = 'active' AND 1=1 AND r.source = 'magnet' AND 1=1 AND 1=1 AND 1=1 AND (r.access_level IN ('basic', 'vip', 'code')) AND 1=1 AND 1=1 AND ((r.import_channel IS NULL OR r.import_channel != 'zezemom_excel') AND (r.pay_type IS NULL OR r.pay_type != 'code'))`;
 
   return NextResponse.json({
     admin_token_used: token.slice(0, 40) + '...',
@@ -47,6 +49,7 @@ export async function GET(request: NextRequest) {
     first_item: data.items?.[0] ? { id: data.items[0].id, name: data.items[0].name?.slice(0, 30), source: data.items[0].source, cat: data.items[0].category, access: data.items[0].accessLevel, ch: data.items[0].importChannel } : null,
     db_vip_magnet_with_join: cnt[0].c,
     db_vip_magnet_no_join: cnt3[0].c,
+    db_vip_magnet_templatetag: countFromApi[0].cnt,
     db_total_active_magnet: cnt4[0].c,
     status_dist: statusDist,
     samples: samples,
