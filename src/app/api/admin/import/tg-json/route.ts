@@ -374,7 +374,7 @@ export async function POST(req: NextRequest) {
       const existing = await sql`SELECT id FROM xx_match_tasks WHERE status IN ('pending', 'running') LIMIT 1` as any[];
       if (!existing[0]) {
         await sql`
-          INSERT INTO xx_match_tasks (status, total, matched, nomatch, offset, batch_size, created_at, updated_at)
+          INSERT INTO xx_match_tasks (status, total, matched, nomatch, "offset", batch_size, created_at, updated_at)
           VALUES ('pending', ${l1Inserted}, 0, 0, 0, 200, NOW(), NOW())
         `;
       }
