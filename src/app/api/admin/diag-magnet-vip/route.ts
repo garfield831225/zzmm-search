@@ -26,8 +26,13 @@ export async function GET(request: NextRequest) {
   });
   const data = await r.json();
 
-  // 直查 vip magnet 总数
-  const cnt = await sql`SELECT COUNT(*) as c FROM xx_resources WHERE status='active' AND source='magnet' AND (import_channel IS NULL OR import_channel != 'zezemom_excel') AND pay_type != 'code'`;
+  // 直查 vip magnet 总数 (用相同 whereClause)
+  const fullWhere = `r.status = 'active' AND 1=1 AND r.source = 'magnet' AND 1=1 AND 1=1 AND 1=1 AND (r.access_level IN ('basic', 'vip', 'code')) AND 1=1 AND 1=1 AND ((r.import_channel IS NULL OR r.import_channel != 'zezemom_excel') AND (r.pay_type IS NULL OR r.pay_type != 'code'))`;
+  const cnt = await sql.query(`SELECT COUNT(*) as c FROM xx_resources r WHERE ${fullWhere}`);
+  // 不带 accessLevelFilter
+  const cnt2 = await sql.query(`SELECT COUNT(*) as c FROM xx_resources r WHERE r.status = 'active' AND r.source = 'magnet'`);
+  // 不带 libraryZoneFilter
+  const cnt3 = await sql.query(`SELECT COUNT(*) as c FROM xx_resources r WHERE r.status = 'active' AND r.source = 'magnet' AND (r.access_level IN ('basic', 'vip', 'code'))`);
 
   return NextResponse.json({
     admin_token_used: token.slice(0, 40) + '...',
@@ -35,6 +40,8 @@ export async function GET(request: NextRequest) {
     search_items: data.items?.length || 0,
     first_item: data.items?.[0] ? { id: data.items[0].id, name: data.items[0].name?.slice(0, 30), source: data.items[0].source, cat: data.items[0].category, access: data.items[0].accessLevel, ch: data.items[0].importChannel } : null,
     db_vip_magnet_count: cnt[0].c,
+    db_vip_magnet_count_no_lib: cnt3[0].c,
+    db_vip_magnet_count_no_filter: cnt2[0].c,
     error: data.error,
     debug: debugData,
   });
