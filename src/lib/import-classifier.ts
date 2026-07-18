@@ -139,16 +139,16 @@ export function thunderToMagnet(thunderUrl: string): string | null {
 }
 
 // ─── 2. detectCategoryByTitle(title, fallback?, primarySource?) ───────
-// 业务规则 (2026-07-17):
+// 业务规则 (2026-07-18 修正):
 //   - 先按 title 关键词判定
-//   - 兜底时如果主链接是 magnet/ed2k, 返回 "磁力" category
+//   - 兜底: 关键词没命中时, 主链接是 magnet/ed2k → 归"动漫" (因为动漫花园新番推送频道 99% 是动漫/日漫, 之前归"磁力"导致大量动漫资源被错误分类)
 export function detectCategoryByTitle(
   title: string,
   fallback: string = '其他',
   primarySource?: ResourceSource
 ): string {
   if (!title) {
-    if (primarySource === 'magnet' || primarySource === 'ed2k') return '磁力';
+    if (primarySource === 'magnet' || primarySource === 'ed2k') return '动漫';
     return fallback;
   }
   const upper = title.toUpperCase();
@@ -161,8 +161,8 @@ export function detectCategoryByTitle(
       }
     }
   }
-  // 兜底: 关键词没命中时, 主链接是磁力 → 归"磁力"分类
-  if (primarySource === 'magnet' || primarySource === 'ed2k') return '磁力';
+  // 兜底: 关键词没命中时, 主链接是磁力 → 归"动漫" (2026-07-18 改)
+  if (primarySource === 'magnet' || primarySource === 'ed2k') return '动漫';
   return fallback;
 }
 
