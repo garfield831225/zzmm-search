@@ -86,12 +86,7 @@ export async function GET(request: NextRequest) {
     const zone = searchParams.get('zone') || 'film';
     // 2026-06-26: /library 公开资源库 - 登录后可见 (basic/user 都行)
     // zone=library 时不走强 access_level 过滤, 让 user 组也能浏览
-    // 2026-07-16: /library 拆 3 区 (library_zezhe / library_vip / library_code)
     const isLibraryZone = zone === 'library';
-    const isLibraryZezhe = zone === 'library_zezhe';
-    const isLibraryVip = zone === 'library_vip';
-    const isLibraryCode = zone === 'library_code';
-    const isAnyLibraryZone = isLibraryZone || isLibraryZezhe || isLibraryVip || isLibraryCode;
 
     // ─── WHERE clauses (inline strings — no param placeholders) ─────────────
     const catFilter = category === '全部' && zone === 'film'
@@ -152,8 +147,8 @@ export async function GET(request: NextRequest) {
     // admin/vip → 全部; basic → document(泽泽妈文档)+单资源付费; user → 空
     // 2026-06-26: 没 free 类别了, 未登录/user 组一律返空 → 必须激活 basic
     // 2026-06-26: /library 公开资源库 - basic+ 才能看, user 组和未登录 → 0 条
-    if (isAnyLibraryZone) {
-      // 2026-07-16: 3 大区都按权限开放 (basic/vip/admin 都能浏览, 锁/付费在前端)
+    if (isLibraryZone) {
+      // /library 公开页: 必须 basic/vip/admin 才能看 (用户要求)
       if (['admin', 'vip', 'basic', 'member'].includes(userGroup)) {
         accessLevelFilter = "(r.access_level IN ('basic', 'vip', 'code'))";
       } else {
@@ -163,9 +158,8 @@ export async function GET(request: NextRequest) {
     } else if (['admin', 'vip'].includes(userGroup)) {
       accessLevelFilter = "(r.access_level IN ('basic', 'vip', 'code'))";
     } else if (['basic', 'member'].includes(userGroup)) {
-      // 2026-07-15 修正: basic 用户也看全部资源 (VIP 锁 = 前端展示, 不卡后端)
-      // 旧的 "(r.access_level IN ('basic', 'code'))" 会让 basic 看不到 vip 资源, 违反业务规则
-      accessLevelFilter = "1=1";
+      // basic 用户 (泽泽妈文档激活码激活后的等级) → 能看泽泽妈文档 + 单资源付费
+      accessLevelFilter = "(r.access_level IN ('basic', 'code'))";
     } else {
       // 未登录 / 普通 free / user 组 → 0 条结果, 必须先去激活
       accessLevelFilter = "(1=0)";
@@ -179,27 +173,7 @@ export async function GET(request: NextRequest) {
     // 2026-06-26: 21 sheet 文档库模式 - 按 sheet (doc_sheet 字段) 过滤
     const sheetFilter = sheet ? `(r.doc_sheet = '${esc(sheet)}')` : '1=1';
 
-    // 2026-07-16: 3 大区硬过滤 (3 选 1)
-    let libraryZoneFilter = '1=1';
-    if (isLibraryZezhe) {
-      libraryZoneFilter = "(r.import_channel = 'zezemom_excel')";
-    } else if (isLibraryVip) {
-      // VIP 区: 非 zezemom_excel 且 非 code (单资源付费)
-      libraryZoneFilter = "((r.import_channel IS NULL OR r.import_channel != 'zezemom_excel') AND (r.pay_type IS NULL OR r.pay_type != 'code'))";
-    } else if (isLibraryCode) {
-      // 独立付费区: pay_type = 'code'
-      libraryZoneFilter = "(r.pay_type = 'code')";
-    }
-
-    const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${regionFilter} AND ${yearFilter} AND ${nameFilter} AND ${accessLevelFilter} AND ${importChannelFilter} AND ${sheetFilter} AND ${libraryZoneFilter}`;
-
-    // DEBUG 2026-07-18: 直接返 SQL 给前端 (临时诊断, ?debug=1)
-    if (searchParams.get('debug') === '1') {
-      return NextResponse.json({ debug: true, zone, userGroup, accessLevelFilter, sourceFilter, libraryZoneFilter, whereClause });
-    }
-
-    // DEBUG 2026-07-18
-    console.log('[search-debug]', JSON.stringify({ zone, source, catFilter, sourceFilter, accessLevelFilter, libraryZoneFilter, userGroup, sheet, q }));
+    const whereClause = `r.status = 'active' AND ${catFilter} AND ${sourceFilter} AND ${regionFilter} AND ${yearFilter} AND ${nameFilter} AND ${accessLevelFilter} AND ${importChannelFilter} AND ${sheetFilter}`;
 
     // 排序逻辑：
     //   1) has_tmdb DESC（有 TMDB 排前面）
@@ -213,39 +187,27 @@ export async function GET(request: NextRequest) {
     END)`;
     const orderClause = sort === 'added_time'
       ? `has_tmdb DESC, ${dateWeight}, r.created_at DESC`
-      : sort === 'import_time_asc'
-        // 2026-07-16 /library 文档库: 按导入时间从先到后 (oldest first), 用户要求
-        ? `r.created_at ASC, r.id ASC`
-        : sort === 'hot'
-          // 2026-06-26: 热度 = view_count + TMDB 投票数/100 + 最近天数加分, 整数计算避免类型不匹配
-          ? `has_tmdb DESC, (COALESCE(r.view_count, 0) + COALESCE(NULLIF(c.vote_count, '')::int, 0) / 100) DESC, ${dateWeight}`
-          : sort === 'rating'
-            // 评分 = TMDB vote_average (高到低), 有数据优先
-            ? `has_tmdb DESC, c.vote_average DESC NULLS LAST, COALESCE(NULLIF(c.vote_count, '')::int, 0) DESC, ${dateWeight}`
-            : sort === 'cover_first'
-              // 2026-07-15 非影视区: 有封面的排前面 (xx_cover_cache 不存在, 用 music/sports)
-              ? `has_cover DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`
-              : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`;
+      : sort === 'hot'
+        // 2026-06-26: 热度 = view_count + TMDB 投票数/100 + 最近天数加分, 整数计算避免类型不匹配
+        ? `has_tmdb DESC, (COALESCE(r.view_count, 0) + COALESCE(NULLIF(c.vote_count, '')::int, 0) / 100) DESC, ${dateWeight}`
+        : sort === 'rating'
+          // 评分 = TMDB vote_average (高到低), 有数据优先
+          ? `has_tmdb DESC, c.vote_average DESC NULLS LAST, COALESCE(NULLIF(c.vote_count, '')::int, 0) DESC, ${dateWeight}`
+          : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`;
     const offset = (page - 1) * pageSize;
 
     // ─── Count ────────────────────────────────────────────────────────────────
-    const countRows = await (sql as any).query(`SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause}`) as any[];
+    const countRows = await sql(`SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id WHERE ${whereClause}`) as any[];
     const total = parseInt(countRows?.[0]?.cnt || '0');
-    // DEBUG 2026-07-18
-    console.log('[search-debug] countRows:', JSON.stringify(countRows), 'total:', total);
 
     // ─── Fetch page ─────────────────────────────────────────────────────────
-    const dbRows = await (sql as any).query(`
+    const dbRows = await sql(`
       SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
              r.doc_sheet, r.sub_type, r.lumen_cost,
-             r.pay_type, r.code_price, r.lumen_cost, r.access_level, r.access_tier, r.import_channel,
+             r.pay_type, r.code_price, r.lumen_cost, r.access_level, r.access_tier,
              COALESCE(c.release_date, r.created_at::text) as sort_date,
              ${dateWeight} as date_weight,
-             CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb,
-             -- 2026-07-15 非影视区 cover_first 排序: xx_cover_cache 不存在, 只用 music/sports cache
-             CASE WHEN EXISTS (SELECT 1 FROM xx_music_cache m WHERE m.resource_id = r.id)
-                   OR EXISTS (SELECT 1 FROM xx_sports_cache s WHERE s.resource_id = r.id)
-                  THEN 1 ELSE 0 END as has_cover
+             CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb
       FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
       WHERE ${whereClause}
       ORDER BY ${orderClause}
@@ -263,7 +225,7 @@ export async function GET(request: NextRequest) {
     let tmdbMap = new Map<string, any>();
     const missingTmdbIds: string[] = [];
     if (allTmdbIds.length > 0) {
-      const ids = await (sql as any).query(`SELECT * FROM xx_tmdb_cache WHERE tmdb_id IN (${allTmdbIds.map(id => `'${esc(id)}'`).join(',')})`);
+      const ids = await sql(`SELECT * FROM xx_tmdb_cache WHERE tmdb_id IN (${allTmdbIds.map(id => `'${esc(id)}'`).join(',')})`);
       tmdbMap = new Map((ids || []).map((info: any) => [info?.tmdb_id, info]));
       // 找没 cache 的 tmdb_id，后台异步 fetch 写 cache（不阻塞主返回）
       allTmdbIds.forEach(id => { if (!tmdbMap.has(id)) missingTmdbIds.push(id); });
@@ -287,45 +249,17 @@ export async function GET(request: NextRequest) {
     if (allIds.length > 0) {
       const idsStr = allIds.map(id => `${id}`).join(',');
       try {
-        const musicRows = await (sql as any).query(`SELECT resource_id, artist, album, cover_url FROM xx_music_cache WHERE resource_id IN (${idsStr})`);
+        const musicRows = await sql(`SELECT resource_id, artist, album, cover_url FROM xx_music_cache WHERE resource_id IN (${idsStr})`);
         musicCoverMap = new Map((musicRows || []).map((r: any) => [r?.resource_id, r]));
       } catch { musicCoverMap = new Map(); }
       try {
-        const coverRows = await (sql as any).query(`SELECT resource_id, cover_url, source, extra_data FROM xx_cover_cache WHERE resource_id IN (${idsStr})`);
+        const coverRows = await sql(`SELECT resource_id, cover_url, source, extra_data FROM xx_cover_cache WHERE resource_id IN (${idsStr})`);
         coverCacheMap = new Map((coverRows || []).map((r: any) => [r?.resource_id, r]));
       } catch { coverCacheMap = new Map(); }
       try {
-        const sportsRows = await (sql as any).query(`SELECT resource_id, team_name, team_alternate, stadium, league, badge_url, banner_url, description FROM xx_sports_cache WHERE resource_id IN (${idsStr})`);
+        const sportsRows = await sql(`SELECT resource_id, team_name, team_alternate, stadium, league, badge_url, banner_url, description FROM xx_sports_cache WHERE resource_id IN (${idsStr})`);
         sportsCoverMap = new Map((sportsRows || []).map((r: any) => [r?.resource_id, r]));
       } catch { sportsCoverMap = new Map(); }
-    }
-
-    // ─── 2026-07-17: Batch xx_resource_links (1对N 多链接) ──────────────────
-    // 双轨读: 优先副表, 老 fallback 用主链接
-    // 文档/独立付费 (1资源1链接) 跳过副表查询
-    let linksMap = new Map<number, any[]>();
-    if (allIds.length > 0) {
-      try {
-        const linkRows = await (sql as any).query(`
-          SELECT resource_id, source, url, password, sort, access_level, status
-          FROM xx_resource_links
-          WHERE resource_id IN (${allIds.map(id => `${id}`).join(',')})
-            AND status = 'active'
-            AND (source IS NOT NULL)
-          ORDER BY resource_id, sort ASC, id ASC
-        `);
-        for (const lr of (linkRows || [])) {
-          if (!linksMap.has(lr.resource_id)) linksMap.set(lr.resource_id, []);
-          linksMap.get(lr.resource_id)!.push({
-            source: lr.source,
-            url: lr.url,
-            password: lr.password,
-            sort: lr.sort,
-            accessLevel: lr.access_level,
-            status: lr.status,
-          });
-        }
-      } catch { linksMap = new Map(); }
     }
 
     // ─── 用户解锁资源（仅 film 区）────────────────────────────────────
@@ -378,8 +312,6 @@ export async function GET(request: NextRequest) {
         payType: item.pay_type || 'free',
         accessLevel: item.access_level || 'basic',
         accessTier: item.access_tier || 'document',
-        importChannel: item.import_channel || '',
-
         codePrice: item.code_price ? Number(item.code_price) : 0,
         lumenCost: item.lumen_cost ?? 1,
         unlocked: userUnlockedIds.has(item.id),
@@ -387,8 +319,6 @@ export async function GET(request: NextRequest) {
         musicCover: item.category === '音乐' ? (musicCoverMap.get(item.id) || null) : null,
         coverCache: !item.tmdb_id ? (coverCacheMap.get(item.id) || null) : null,
         sportsCover: item.category === '体育' ? (sportsCoverMap.get(item.id) || null) : null,
-        // 2026-07-17: 多链接 (1对N) — 副表优先, 老 fallback 主链接
-        links: linksMap.get(item.id) || (item.link ? [{ source: item.source, url: item.link, password: item.link_code, sort: 99, accessLevel: item.access_level, status: 'active' }] : []),
       };
     });
 
