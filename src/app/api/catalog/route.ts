@@ -29,6 +29,7 @@ export async function GET(request: NextRequest) {
   const q = (searchParams.get('q') || '').trim();
   const category = searchParams.get('category') || '全部';
   const section = searchParams.get('section') || '';  // zezhe/vip/code (跟 /library 对齐)
+  const sort = (searchParams.get('sort') || 'asc').toLowerCase();  // asc=按添加时间正序(默认) / desc=倒序
   const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
   const pageSize = Math.min(150, Math.max(1, parseInt(searchParams.get('pageSize') || '50')));
 
@@ -64,6 +65,8 @@ export async function GET(request: NextRequest) {
 
     // 5. 列表 — 跟 /library 一样返所有字段 (但去掉 link/url/linkCode 实际值)
     const offset = (page - 1) * pageSize;
+    // 2026-07-20: 按文档内添加时间排序 (asc=正序/从老到新, desc=倒序)
+    const orderDir = sort === 'desc' ? 'DESC' : 'ASC';
     const dbRows = await sql(`
       SELECT r.id, r.name, r.category, r.tags, r.tmdb_id,
              r.doc_sheet, r.sub_type, r.size, r.type, r.created_at, r.access_level, r.import_channel, r.source,
@@ -72,7 +75,7 @@ export async function GET(request: NextRequest) {
       FROM xx_resources r
       LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
       WHERE r.status = 'active' AND ${sectionFilter} AND ${catFilter} AND ${nameFilter}
-      ORDER BY r.id DESC
+      ORDER BY r.created_at ${orderDir}, r.id ${orderDir}
       LIMIT ${pageSize} OFFSET ${offset}
     `) as any[];
 
