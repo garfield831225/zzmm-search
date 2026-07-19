@@ -9,10 +9,17 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function authAdmin(req: NextRequest) {
+  // 双轨鉴权: 优先 Authorization Bearer, 退到 cookie (zzmm_token / token)
+  let token: string | null = null;
   const auth = req.headers.get('authorization');
-  if (!auth?.startsWith('Bearer ')) return { error: '未登录', status: 401 };
+  if (auth?.startsWith('Bearer ') && auth.length > 7) {
+    token = auth.slice(7);
+  } else {
+    token = req.cookies.get('zzmm_token')?.value || req.cookies.get('token')?.value || null;
+  }
+  if (!token) return { error: '未登录', status: 401 };
   try {
-    const payload = jwt.verify(auth.replace('Bearer ', ''), process.env.JWT_SECRET || 'cLWhs2015') as any;
+    const payload = jwt.verify(token, process.env.JWT_SECRET || 'cLWhs2015') as any;
     if (String(payload.user_group || payload.group || '').toLowerCase() !== 'admin') {
       return { error: '需要 admin', status: 403 };
     }
