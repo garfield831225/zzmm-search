@@ -960,40 +960,64 @@ export default function HomePage() {
                                 <div className="flex gap-1 mt-1">
                                   <button onClick={async (e) => {
                                     e.preventDefault();
-                                    const newUrl = prompt(`改 ${l.source} 链接 URL:`, l.url);
+                                    const newUrl = prompt(`改 ${l.source} 链接 URL:\n(资源 ID: ${selectedItem.id})`, l.url);
                                     if (!newUrl || newUrl === l.url) return;
+                                    const token = getToken();
+                                    if (!token) {
+                                      addToast('error', '❌ 未登录或 token 失效, 请重新登录');
+                                      return;
+                                    }
+                                    console.log('[PATCH link] sending', { resourceId: selectedItem.id, source: l.source, url: newUrl?.slice(0, 50) });
                                     const r = await fetch('/api/admin/links', {
-                                      method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
+                                      method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
                                       body: JSON.stringify({ resourceId: selectedItem.id, source: l.source, url: newUrl, password: l.password })
                                     });
                                     const d = await r.json();
+                                    console.log('[PATCH link] response', r.status, d);
                                     if (d.ok) {
                                       addToast('success', '✅ 已更新');
                                       // 本地更新链接
                                       setSelectedItem(prev => prev ? { ...prev, links: prev.links?.map(x => x.source === l.source ? { ...x, url: newUrl } : x) } : prev);
+                                      // 2026-07-20: 改完触发首页重新拉数据, 跟 library/titles 同步
+                                      setTimeout(() => fetchItems(1), 500);
+                                    } else if (r.status === 401) {
+                                      addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
+                                    } else if (r.status === 403) {
+                                      addToast('error', `❌ 403 需要 admin 权限`);
+                                    } else if (r.status === 404) {
+                                      addToast('error', `❌ 404 ${d.error} — 这条链接可能已经被删`);
                                     } else {
-                                      addToast('error', '❌ ' + (d.error || '更新失败'));
+                                      addToast('error', `❌ ${r.status} ${d.error || '更新失败'}`);
                                     }
                                   }} className="text-xs px-2 py-0.5 bg-white/5 hover:bg-white/10 rounded text-white/60">✏️ 改</button>
                                   <button onClick={async (e) => {
                                     e.preventDefault();
-                                    if (!confirm(`删除 ${l.source} 链接?`)) return;
+                                    if (!confirm(`删除 ${l.source} 链接?\n资源 ID: ${selectedItem.id}\n来源: ${l.source}\nURL: ${l.url?.slice(0, 50)}...`)) return;
                                     const token = getToken();
                                     if (!token) {
                                       addToast('error', '❌ 未登录或 token 失效, 请重新登录');
                                       return;
                                     }
                                     try {
+                                      console.log('[DELETE link] sending', { resourceId: selectedItem.id, source: l.source, url: l.url?.slice(0, 50) });
                                       const r = await fetch('/api/admin/links', {
                                         method: 'DELETE',
                                         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
                                         body: JSON.stringify({ resourceId: selectedItem.id, source: l.source })
                                       });
                                       const d = await r.json();
-                                      console.log('[DELETE link]', r.status, d);
+                                      console.log('[DELETE link] response', r.status, d);
                                       if (d.ok) {
                                         addToast('success', d.resourceDeleted ? '🗑️ 已删除 (资源无链接, 已软删)' : '🗑️ 已删除');
                                         setSelectedItem(prev => prev ? { ...prev, links: prev.links?.filter(x => x.source !== l.source) } : prev);
+                                        // 2026-07-20: 删完触发首页重新拉数据, 跟 library/titles 同步
+                                        setTimeout(() => fetchItems(1), 500);
+                                      } else if (r.status === 401) {
+                                        addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
+                                      } else if (r.status === 403) {
+                                        addToast('error', `❌ 403 需要 admin 权限`);
+                                      } else if (r.status === 404) {
+                                        addToast('error', `❌ 404 ${d.error} — 这条链接可能已经被别人删了, 刷新页面`);
                                       } else {
                                         addToast('error', `❌ ${r.status} ${d.error || '删除失败'}`);
                                       }
