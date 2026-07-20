@@ -257,7 +257,9 @@ export function extractLinksFromTgMessage(msg: any): TgLink[] {
   if (Array.isArray(msg.text)) {
     for (const t of msg.text) {
       if (typeof t === 'object' && t !== null && (t.type === 'text_link' || t.type === 'link' || t.type === 'code')) {
-        const url = t.text || t.href || '';
+        // 2026-07-21: 修复! TG Desktop text_link 的 'text' 字段是显示文字(如"点击查看"),
+        // 'href' 才是真正 URL. 之前 t.text || t.href 顺序错, 全部用错字段 → 0 link 提取
+        const url = t.href || t.text || '';
         if (url.startsWith('http') || url.startsWith('magnet:') || url.startsWith('ed2k://') || url.toLowerCase().startsWith('thunder://')) {
           const pwd = url.startsWith('http') ? extractPasswordFromUrl(url) : undefined;
           pushLink(url, pwd);
