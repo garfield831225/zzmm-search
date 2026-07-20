@@ -816,7 +816,46 @@ export default function HomePage() {
                   {/* Title + Close */}
                   <div className="flex items-start justify-between mb-5">
                     <h2 className="text-xl font-bold leading-tight pr-4">{selectedItem.name}</h2>
-                    <button onClick={() => setSelectedItem(null)} className="p-1.5 hover:bg-white/10 rounded-lg transition shrink-0 text-white/40 hover:text-white">✕</button>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {isAdmin && (
+                        <button
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (!confirm(`🗑️ 删整个资源 (含所有链接)?\n\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}\n来源: ${selectedItem.source}\n链接: ${selectedItem.links?.length || 0} 条\n\n此操作软删, 不影响其他同名资源`)) return;
+                            const token = getToken();
+                            if (!token) {
+                              addToast('error', '❌ 未登录或 token 失效');
+                              return;
+                            }
+                            console.log('[DELETE resource] sending', { resourceId: selectedItem.id });
+                            const r = await fetch(`/api/admin/resources/${selectedItem.id}`, {
+                              method: 'DELETE',
+                              headers: { Authorization: 'Bearer ' + token },
+                            });
+                            const d = await r.json();
+                            console.log('[DELETE resource] response', r.status, d);
+                            if (d.ok) {
+                              addToast('success', `🗑️ 资源已删除 (软删 ${d.subLinks} 条链接)`);
+                              setSelectedItem(null);
+                              setTimeout(() => fetchItems(1), 500);
+                            } else if (r.status === 401) {
+                              addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
+                            } else if (r.status === 403) {
+                              addToast('error', `❌ 403 需要 admin 权限`);
+                            } else if (r.status === 404) {
+                              addToast('error', `❌ 404 资源不存在`);
+                            } else {
+                              addToast('error', `❌ ${r.status} ${d.error || '删除失败'}`);
+                            }
+                          }}
+                          className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded text-xs font-medium"
+                          title="删整个资源 (含所有链接)">
+                          🗑️ 删资源
+                        </button>
+                      )}
+                      <button onClick={() => setSelectedItem(null)} className="p-1.5 hover:bg-white/10 rounded-lg transition text-white/40 hover:text-white">✕</button>
+                    </div>
                   </div>
                   {/* ── TMDB Info Section ── */}
                   {selectedItem.tmdb && (
