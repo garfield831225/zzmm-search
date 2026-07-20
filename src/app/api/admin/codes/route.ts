@@ -51,8 +51,9 @@ export async function POST(req: NextRequest) {
       : null;
     for (let i = 0; i < count; i++) codes.push(genCodeFull(channel));
     for (const code of codes) {
-      await sql`INSERT INTO xx_codes (code, plan_id, channel, note, created_by, expires_at, is_used)
-                VALUES (${code}, ${plan.plan_id}, ${channel}, ${note}, ${auth.userId}, ${expiresAt}, false)`;
+      // 2026-07-20: 真表名是 xx_activation_codes (不是 xx_codes), 字段对齐
+      await sql`INSERT INTO xx_activation_codes (code, code_type, plan_id, channel, note, created_by, expires_at, is_used, user_group)
+                VALUES (${code}, 'vip', ${plan.plan_id}, ${channel}, ${note}, ${auth.userId}, ${expiresAt}, false, 'vip')`;
     }
     return NextResponse.json({ codes, plan: plan.label, count, channel });
   } catch (e: any) {
@@ -69,8 +70,8 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100', 10)));
   const sql = neon(process.env.DATABASE_URL || '');
   try {
-    const rows = await sql`SELECT id, code, plan_id, channel, note, created_at, used_at, used_by, expires_at, is_used
-      FROM xx_codes ORDER BY id DESC LIMIT ${limit}`;
+    const rows = await sql`SELECT id, code, code_type, plan_id, duration, channel, note, created_at, used_at, used_by, expires_at, is_used
+      FROM xx_activation_codes ORDER BY id DESC LIMIT ${limit}`;
     return NextResponse.json({ items: rows });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
@@ -90,9 +91,9 @@ export async function PATCH(req: NextRequest) {
   const sql = neon(process.env.DATABASE_URL || '');
   try {
     if (isUsed) {
-      await sql`UPDATE xx_codes SET is_used = true, used_at = NOW() WHERE id = ${id}`;
+      await sql`UPDATE xx_activation_codes SET is_used = true, used_at = NOW() WHERE id = ${id}`;
     } else {
-      await sql`UPDATE xx_codes SET is_used = false, used_at = NULL, used_by = NULL WHERE id = ${id}`;
+      await sql`UPDATE xx_activation_codes SET is_used = false, used_at = NULL, used_by = NULL WHERE id = ${id}`;
     }
     return NextResponse.json({ success: true });
   } catch (e: any) {
