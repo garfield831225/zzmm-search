@@ -70,6 +70,12 @@ async function fetchAndCacheTmdb(tmdbId: string): Promise<any | null> {
 export async function GET(request: NextRequest) {
   try {
     const sql = neon(process.env.DATABASE_URL || '');
+
+    // 2026-07-20: 强制主 endpoint 同步 — pooler 自动路由到 read replica 有时 lag
+    //   写一个 noop 触发主 endpoint 立即同步 (xx_resources.id=1 几乎总存在)
+    //   async fire-and-forget, 不影响响应延迟
+    sql`UPDATE xx_resources SET updated_at = NOW() WHERE id = (SELECT MIN(id) FROM xx_resources WHERE id > 0)`.catch(() => {});
+
     const { searchParams } = new URL(request.url);
     const q = searchParams.get('q') || '';
     const category = searchParams.get('category') || '全部';
