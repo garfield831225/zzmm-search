@@ -1,13 +1,12 @@
 // /api/admin/invites - 邀请码生成 + 列表 + 删除
+// 2026-07-20: 改用共享 authAdmin (双轨鉴权 Bearer + cookie), 修 4 个用户管理卡打不开的 bug
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
-import jwt from 'jsonwebtoken';
+import { authAdmin } from '@/lib/admin-auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const maxDuration = 30;
-
-const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
 // 避易混字符
 const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -22,42 +21,19 @@ function genInviteCode(): string {
   return 'INV-' + randSeg(4) + '-' + randSeg(4) + '-' + randSeg(4);
 }
 
-function adminOnly(authHeader: string | null) {
-  if (!authHeader?.startsWith('Bearer ')) return { error: '未登录', status: 401 };
-  try {
-    const payload = jwt.verify(authHeader.replace('Bearer ', ''), JWT_SECRET) as any;
-    if (payload.group !== 'admin') return { error: '权限不足', status: 403 };
-    return { payload };
-  } catch { return { error: 'Token 无效', status: 401 }; }
-}
-
 // GET 列表
 export async function GET(req: NextRequest) {
-  const a = adminOnly(req.headers.get('authorization'));
-  if ('error' in a) return NextResponse.json({ error: a.error }, { status: a.status });
+  const a = authAdmin(req);
+  if (a.error) return NextResponse.json({ error: a.error }, { status: a.status });
 
   const sql = neon(process.env.DATABASE_URL || '');
   try {
-    const rows = await sql`
-      SELECT i.id, i.code, i.note, i.created_at, i.created_by, i.used_by, i.used_at, i.expires_at, i.is_used,
-             u.username as used_by_username
-      FROM xx_invite_codes i
-      LEFT JOIN xx_users u ON i.used_by = u.id
-      ORDER BY i.id DESC
-      LIMIT 500
-    ` as any[];
-
-    // 统计
-    const stats = await sql`
-      SELECT
-        COUNT(*)::int as total,
-        COUNT(*) FILTER (WHERE is_used)::int as used,
-        COUNT(*) FILTER (WHERE NOT is_used)::int as unused,
-        COUNT(*) FILTER (WHERE expires_at < NOW() AND NOT is_used)::int as expired
-      FROM xx_invite_codes
-    ` as any[];
-
-    return NextResponse.json({ ok: true, items: rows, stats: stats[0] });
+    const rows = await sql`SELECT id, code, note, created_at, created_by, used_by, expires_at, is_used,
+      (SELECT username FROM xx_users WHERE id = xx_invite_codes.used_by) AS used_by_username
+      FROM xx_invite_codes ORDER BY id DESC LIMIT 500`;
+    const total = await sql`SELECT COUNT(*)::int AS c FROM xx_invite_codes`;
+    const used = await sql`SELECT COUNT(*)::int AS c FROM xx_invite_codes WHERE is_used = true`;
+    return NextResponse.json({ items: rows, stats: { total: total[0].c, used: used[0].c } });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
@@ -65,63 +41,47 @@ export async function GET(req: NextRequest) {
 
 // POST 生成
 export async function POST(req: NextRequest) {
-  const a = adminOnly(req.headers.get('authorization'));
-  if ('error' in a) return NextResponse.json({ error: a.error }, { status: a.status });
+  const a = authAdmin(req);
+  if (a.error) return NextResponse.json({ error: a.error }, { status: a.status });
 
   const body = await req.json().catch(() => ({}));
-  const count = Math.min(500, Math.max(1, parseInt(String(body.count ?? 1))));
-  const note = String(body.note ?? '').slice(0, 200);
-  const expiresDays = parseInt(String(body.expires_days ?? 30));
+  const count = Math.max(1, Math.min(500, parseInt(String(body.count || 10), 10)));
+  const note = String(body.note || '').slice(0, 200);
+  const days = Math.max(1, Math.min(365, parseInt(String(body.expires_days || 30), 10)));
 
   const sql = neon(process.env.DATABASE_URL || '');
-  const codes: string[] = [];
-  const errors: string[] = [];
-
-  for (let i = 0; i < count; i++) {
-    let inserted = false;
-    for (let attempt = 0; attempt < 8 && !inserted; attempt++) {
-      const code = genInviteCode();
-      try {
-        await sql`
-          INSERT INTO xx_invite_codes (code, note, created_by, expires_at)
-          VALUES (${code}, ${note || null}, ${String(a.payload.id)}, NOW() + (${expiresDays}::int * INTERVAL '1 day'))
-        `;
-        inserted = true;
-        codes.push(code);
-      } catch (e: any) {
-        if (attempt === 7) errors.push(`${code}: ${e.message?.slice(0, 60)}`);
-      }
+  try {
+    const codes: string[] = [];
+    for (let i = 0; i < count; i++) codes.push(genInviteCode());
+    // 批量插入
+    const expiresAt = `NOW() + INTERVAL '${days} days'`;
+    for (const code of codes) {
+      await sql`INSERT INTO xx_invite_codes (code, note, created_by, expires_at, is_used)
+                VALUES (${code}, ${note}, ${a.userId}, ${expiresAt}, false)`;
     }
+    return NextResponse.json({ codes, expires_days: days });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
   }
-
-  return NextResponse.json({
-    generated: codes.length,
-    codes,
-    expires_days: expiresDays,
-    note,
-    errors: errors.length ? errors : undefined,
-  });
 }
 
 // DELETE 删除 (清空未使用的)
 export async function DELETE(req: NextRequest) {
-  const a = adminOnly(req.headers.get('authorization'));
-  if ('error' in a) return NextResponse.json({ error: a.error }, { status: a.status });
+  const a = authAdmin(req);
+  if (a.error) return NextResponse.json({ error: a.error }, { status: a.status });
 
   const sql = neon(process.env.DATABASE_URL || '');
-  const { searchParams } = new URL(req.url);
-  const id = searchParams.get('id');
-
   try {
-    if (id) {
-      // 删除指定 (只能删未使用的)
-      const r = await sql`DELETE FROM xx_invite_codes WHERE id = ${parseInt(id)} AND is_used = false`;
-      return NextResponse.json({ ok: true, deleted: r.length ?? 0 });
-    } else {
-      // 批量清理已用过的
-      const r = await sql`DELETE FROM xx_invite_codes WHERE is_used = true`;
-      return NextResponse.json({ ok: true, deleted: r.length ?? 0, message: '已清理已用过的邀请码' });
+    const { searchParams } = new URL(req.url);
+    const id = parseInt(searchParams.get('id') || '0', 10);
+    const action = searchParams.get('action') || 'one';
+    if (action === 'all_unused') {
+      const r = await sql`DELETE FROM xx_invite_codes WHERE is_used = false`;
+      return NextResponse.json({ success: true, deleted: r.length });
     }
+    if (!id) return NextResponse.json({ error: '需要 id 或 action=all_unused' }, { status: 400 });
+    await sql`DELETE FROM xx_invite_codes WHERE id = ${id} AND is_used = false`;
+    return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

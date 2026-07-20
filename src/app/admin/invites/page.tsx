@@ -32,7 +32,8 @@ export default function InvitesPage() {
   const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
   useEffect(() => {
-    const t = typeof window !== 'undefined' ? (localStorage.getItem('zzmm_token') || '') : '';
+    // 2026-07-20: 统一 token 读取 (token / adminToken / zzmm_token), login + register 两条路径都覆盖
+    const t = typeof window !== 'undefined' ? (localStorage.getItem('token') || localStorage.getItem('adminToken') || localStorage.getItem('zzmm_token') || '') : '';
     if (t) { setToken(t); setAuthed(true); }
   }, []);
 
@@ -44,7 +45,7 @@ export default function InvitesPage() {
     if (!token) return;
     setLoading(true);
     try {
-      const r = await fetch('/api/admin/invites', { headers: { Authorization: 'Bearer ' + token } });
+      const r = await fetch('/api/admin/invites', { credentials: 'include', headers: {  Authorization: 'Bearer ' + token  } });
       const d = await r.json();
       if (d.error) showToast('error', d.error);
       else {
@@ -64,7 +65,8 @@ export default function InvitesPage() {
     try {
       const r = await fetch('/api/admin/invites', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        credentials: 'include',
+        headers: {  'Content-Type': 'application/json', Authorization: 'Bearer ' + token  },
         body: JSON.stringify({ count: genCount, note: genNote, expires_days: genDays }),
       });
       const d = await r.json();

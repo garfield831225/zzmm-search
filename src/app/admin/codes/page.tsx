@@ -81,7 +81,8 @@ export default function CodesPage() {
 
   // token 鉴权
   useEffect(() => {
-    const t = typeof window !== 'undefined' ? (localStorage.getItem('zzmm_token') || '') : '';
+    // 2026-07-20: 统一 token 读取 (token / adminToken / zzmm_token), login + register 两条路径都覆盖
+    const t = typeof window !== 'undefined' ? (localStorage.getItem('token') || localStorage.getItem('adminToken') || localStorage.getItem('zzmm_token') || '') : '';
     if (t) { setToken(t); setAuthed(true); }
   }, []);
 
@@ -96,7 +97,7 @@ export default function CodesPage() {
       if (fCodeType) params.set('code_type', fCodeType);
       if (fStatus) params.set('status', fStatus);
       if (fBatch) params.set('batch_id', fBatch);
-      const r = await fetch('/api/admin/codes?' + params, { headers: { Authorization: 'Bearer ' + token } });
+      const r = await fetch('/api/admin/codes?' + params, { credentials: 'include', headers: {  Authorization: 'Bearer ' + token  } });
       let d = await r.json();
       if (d.error) showToast('❌ ' + d.error);
       else {
@@ -125,7 +126,8 @@ export default function CodesPage() {
       if (genPlan === 'lumen') body.lumen_amount = genLumenAmount;
       const r = await fetch('/api/admin/codes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        credentials: 'include',
+        headers: {  'Content-Type': 'application/json', Authorization: 'Bearer ' + token  },
         body: JSON.stringify(body),
       });
       const d = await r.json();
@@ -146,7 +148,7 @@ export default function CodesPage() {
     if (!resourceSearch.trim()) { setResourceResults([]); return; }
     const t = setTimeout(async () => {
       try {
-        const r = await fetch(`/api/search?q=${encodeURIComponent(resourceSearch)}&pageSize=10`, { headers: { Authorization: 'Bearer ' + token } });
+        const r = await fetch(`/api/search?q=${encodeURIComponent(resourceSearch)}&pageSize=10`, { credentials: 'include', headers: {  Authorization: 'Bearer ' + token  } });
         const d = await r.json();
         setResourceResults((d.items || []).slice(0, 10));
       } catch {}
@@ -161,9 +163,10 @@ export default function CodesPage() {
   const markSent = async (ids: number[], sent: boolean, note?: string) => {
     if (!ids.length) return;
     const r = await fetch('/api/admin/codes', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-      body: JSON.stringify({ ids, sent_to_customer: sent, sent_note: note || null }),
+        method: 'PATCH',
+        credentials: 'include',
+        headers: {  'Content-Type': 'application/json', Authorization: 'Bearer ' + token  },
+        body: JSON.stringify({ ids, sent_to_customer: sent, sent_note: note || null }),
     });
     const d = await r.json();
     if (d.error) showToast('❌ ' + d.error);

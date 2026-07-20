@@ -24,7 +24,8 @@ export default function BlacklistPage() {
   const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
   useEffect(() => {
-    const t = typeof window !== 'undefined' ? (localStorage.getItem('zzmm_token') || '') : '';
+    // 2026-07-20: 统一 token 读取 (token / adminToken / zzmm_token), login + register 两条路径都覆盖
+    const t = typeof window !== 'undefined' ? (localStorage.getItem('token') || localStorage.getItem('adminToken') || localStorage.getItem('zzmm_token') || '') : '';
     if (t) { setToken(t); setAuthed(true); }
   }, []);
 
@@ -37,7 +38,7 @@ export default function BlacklistPage() {
     if (!token) return;
     setLoading(true);
     try {
-      const r = await fetch('/api/admin/blacklist', { headers: { Authorization: 'Bearer ' + token } });
+      const r = await fetch('/api/admin/blacklist', { credentials: 'include', headers: {  Authorization: 'Bearer ' + token  } });
       const d = await r.json();
       if (d.error) showToast('error', d.error);
       else setItems(d.list || []);
@@ -53,7 +54,8 @@ export default function BlacklistPage() {
     try {
       const r = await fetch('/api/admin/blacklist', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        credentials: 'include',
+        headers: {  'Content-Type': 'application/json', Authorization: 'Bearer ' + token  },
         body: JSON.stringify({ access_code: newCode.trim(), reason: newReason.trim() || '黑名单' }),
       });
       const d = await r.json();
@@ -73,7 +75,8 @@ export default function BlacklistPage() {
     try {
       const r = await fetch('/api/admin/blacklist', {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        credentials: 'include',
+        headers: {  'Content-Type': 'application/json', Authorization: 'Bearer ' + token  },
         body: JSON.stringify({ id }),
       });
       const d = await r.json();

@@ -81,6 +81,8 @@ export default function LoginPage() {
 
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
+      // 2026-07-20: 同步 zzmm_token, 让 admin 子页面 (老代码) 也能读
+      localStorage.setItem('zzmm_token', data.token);
       // 同步设置 adminToken，让管理后台能自动读取
       localStorage.setItem('adminToken', data.token);
       router.push('/');
