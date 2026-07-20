@@ -51,8 +51,8 @@ export async function POST(req: NextRequest) {
       : null;
     for (let i = 0; i < count; i++) codes.push(genCodeFull(channel));
     for (const code of codes) {
-      // 2026-07-20: 真表名是 xx_activation_codes (不是 xx_codes), 字段对齐
-      await sql`INSERT INTO xx_activation_codes (code, code_type, plan_id, channel, note, created_by, expires_at, is_used, user_group)
+      // 2026-07-20: 真表名 xx_activation_codes, 真列名 sent_note (不是 note)
+      await sql`INSERT INTO xx_activation_codes (code, code_type, plan_id, channel, sent_note, created_by, expires_at, is_used, user_group)
                 VALUES (${code}, 'vip', ${plan.plan_id}, ${channel}, ${note}, ${auth.userId}, ${expiresAt}, false, 'vip')`;
     }
     return NextResponse.json({ codes, plan: plan.label, count, channel });
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100', 10)));
   const sql = neon(process.env.DATABASE_URL || '');
   try {
-    const rows = await sql`SELECT id, code, code_type, plan_id, duration, channel, note, created_at, used_at, used_by, expires_at, is_used
+    const rows = await sql`SELECT id, code, code_type, plan_id, duration, channel, sent_note, created_at, used_at, used_by, expires_at, is_used
       FROM xx_activation_codes ORDER BY id DESC LIMIT ${limit}`;
     return NextResponse.json({ items: rows });
   } catch (e: any) {
