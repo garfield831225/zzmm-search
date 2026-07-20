@@ -39,6 +39,18 @@ export async function GET(request: NextRequest) {
   const pageSize = Math.min(150, Math.max(1, parseInt(searchParams.get('pageSize') || '50')));
 
   try {
+    // 2026-07-21: 强制主 endpoint 同步 — 修 Vercel warm 函数命中 read replica 看不到新数据的 bug
+    // 原理: Neon HTTP control plane 走 read-your-writes, 写主 endpoint 后 control plane 强制 routing 到最新 replica
+    // 用一个临时小表存 sync 标记, 然后立即清掉
+    try {
+      await sql`CREATE TABLE IF NOT EXISTS xx_catalog_sync_marker (
+        id SERIAL PRIMARY KEY,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )`;
+      await sql`INSERT INTO xx_catalog_sync_marker DEFAULT VALUES`;
+      await sql`DELETE FROM xx_catalog_sync_marker WHERE id = (SELECT MAX(id) FROM xx_catalog_sync_marker)`;
+    } catch (e) { /* 表已存在或 sync 失败, 不阻塞主查询 */ }
+
     // 1. Section 过滤 (跟 /library 业务规则一致: 3 大区 + 全部)
     let sectionFilter = '1=1';
     let sectionChannel = '';

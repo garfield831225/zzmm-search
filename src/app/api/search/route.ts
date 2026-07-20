@@ -75,6 +75,17 @@ export async function GET(request: NextRequest) {
     //   实际行为: 加 no-store response header 让 CDN 强制重新查, 避免 5+ 分钟 lag
     const sql = neon(process.env.DATABASE_URL || '');
 
+    // 2026-07-21: 强制主 endpoint 同步 - 用 Neon read-your-writes 特性, 修 Vercel 函数 warm 命中 read replica 看不到新数据
+    // 原理: INSERT 一定走主 endpoint, 然后 control plane 会 routing 同一 session 的后续 SELECT 到能 read-your-writes 的 replica (主或最新)
+    try {
+      await sql`CREATE TABLE IF NOT EXISTS xx_search_sync_marker (
+        id SERIAL PRIMARY KEY,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )`;
+      await sql`INSERT INTO xx_search_sync_marker DEFAULT VALUES`;
+      await sql`DELETE FROM xx_search_sync_marker WHERE id = (SELECT MAX(id) FROM xx_search_sync_marker)`;
+    } catch (e) { /* 同步失败不阻塞主查询 */ }
+
     const { searchParams } = new URL(request.url);
     const q = searchParams.get('q') || '';
     const category = searchParams.get('category') || '全部';
