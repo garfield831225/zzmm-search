@@ -192,6 +192,12 @@ export async function GET(request: NextRequest) {
       items,
       categories,  // 当 section=zezhe → sheets; section=vip/code → sources; '' → []
       zone,
+    }, {
+      headers: {
+        // 2026-07-21: 强制 Vercel 每次重查, 修 read replica lag 导致 user 看不到 683 条新导入的 bug
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Pragma': 'no-cache',
+      },
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message?.slice(0, 200) }, { status: 500 });
