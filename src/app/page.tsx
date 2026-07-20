@@ -52,6 +52,7 @@ interface ResourceItem {
   type: string;
   tags: string[];
   tmdbId: string;
+  tmdbIdRaw?: string;  // 2026-07-20: tmdb 原始值 (含 NOMATCH/空)
   viewCount: number;
   tmdb: TmdbInfo | null;
   isCurrent?: boolean;
@@ -74,6 +75,8 @@ interface SearchResponse {
   items: ResourceItem[];
   categories: string[];
   sources: string[];
+  groups?: { tmdbId: string; name: string; count: number }[];  // 2026-07-20: 同 TMDB 分组
+  dedupBy?: 'tmdb_id' | 'id';  // 2026-07-20: 实际生效的去重模式
 }
 
 function StarRating({ score }: { score: number }) {
@@ -96,6 +99,9 @@ export default function HomePage() {
   const [year, setYear] = useState('全部');
   const [sort, setSort] = useState('release_date');
   const [pageSize, setPageSize] = useState(30);
+  // 2026-07-20: dedupBy 控制是否按 tmdb_id 去重 ('tmdb_id' 默认去重 | 'id' 不去重看全部)
+  const [dedupBy, setDedupBy] = useState<'tmdb_id' | 'id'>('tmdb_id');
+  const [groups, setGroups] = useState<{ tmdbId: string; name: string; count: number }[]>([]);
   const [items, setItems] = useState<ResourceItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -216,15 +222,15 @@ export default function HomePage() {
   }, []);
 
   // 用 ref 记录最新 state，在 effect 调用 fetchItems 之前同步最新值
-  const latestRef = useRef({ query, category, source, region, year, sort, pageSize });
-  latestRef.current = { query, category, source, region, year, sort, pageSize };
+  const latestRef = useRef({ query, category, source, region, year, sort, pageSize, dedupBy });
+  latestRef.current = { query, category, source, region, year, sort, pageSize, dedupBy };
 
   // 空 deps —— 永远同一函数引用，永远用 latestRef 读最新 state
   const fetchItems = useCallback(async (p?: number) => {
     const targetPage = p !== undefined ? p : 1;
     setPage(targetPage);
     setLoading(true);
-    const { query: q, category: cat, source: src, region: reg, year: yr, sort: s, pageSize: ps } = latestRef.current;
+    const { query: q, category: cat, source: src, region: reg, year: yr, sort: s, pageSize: ps, dedupBy: db } = latestRef.current;
     try {
       const params = new URLSearchParams({ page: targetPage.toString(), pageSize: ps.toString() });
       if (q) params.set('q', q);
@@ -233,6 +239,8 @@ export default function HomePage() {
       if (reg !== '全部') params.set('region', reg);
       if (yr !== '全部') params.set('year', yr);
       params.set('sort', s);
+      // 2026-07-20: dedupBy 决定是否按 tmdb_id 去重
+      params.set('dedupBy', db);
       // 2026-06-26: 传 Bearer token 让 search API 识别 admin/basic/vip user_group, 否则永远 0 条
       const token = localStorage.getItem('token') || '';
       const res = await fetch(`/api/search?${params}`, {
@@ -241,18 +249,20 @@ export default function HomePage() {
       const data: SearchResponse = await res.json();
       setItems(data.items ?? []);
       setTotal(data.total ?? 0);
+      // 2026-07-20: 记录分组 (按 tmdb_id), 用于"显示重复"按钮
+      setGroups(data.groups ?? []);
     } catch (err) { console.error('Fetch error:', err); }
     finally { setLoading(false); }
   }, []);
 
   // 先同步 ref 再调用，永远读最新 state
   useEffect(() => {
-    latestRef.current = { query, category, source, region, year, sort, pageSize };
+    latestRef.current = { query, category, source, region, year, sort, pageSize, dedupBy };
     fetchItems(1);
-  }, [category, source, region, year, sort, pageSize]); // eslint-line -- stable deps
+  }, [category, source, region, year, sort, pageSize, dedupBy]); // eslint-line -- stable deps
 
 
-  useEffect(() => { fetchItems(1); }, [category, source, region, year, sort, pageSize]);
+  useEffect(() => { fetchItems(1); }, [category, source, region, year, sort, pageSize, dedupBy]);
 
   // 2026-07-17: 真正退出 - 清 httpOnly cookie + localStorage + 跳 /
   const handleLogout = async () => {
@@ -413,7 +423,7 @@ export default function HomePage() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-white">泽泽妈妈资源库</h1>
-                <p className="text-xs text-white/40">共 {total.toLocaleString()} 条资源</p>
+                <p className="text-xs text-white/40">共 {total.toLocaleString()} 条资源 · 当前显示 {items.length} 条</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -479,6 +489,48 @@ export default function HomePage() {
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none">🔍</span>
             <button onClick={() => fetchItems(1)} className="px-5 py-3 bg-violet-600 hover:bg-violet-500 rounded-xl text-white font-medium transition shrink-0">搜索</button>
           </div>
+
+          {/* 2026-07-20: 显示重复切换 + 按 TMDB 分组按钮 (搜出多条同名时显示) */}
+          {groups.length > 1 && (
+            <div className="mt-3 flex items-center gap-2 flex-wrap text-sm">
+              <span className="text-white/40">📚</span>
+              <button
+                onClick={() => setDedupBy(dedupBy === 'tmdb_id' ? 'id' : 'tmdb_id')}
+                className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
+                  dedupBy === 'id'
+                    ? 'bg-amber-500/30 text-amber-200 ring-1 ring-amber-500/50'
+                    : 'bg-white/5 text-white/60 hover:bg-white/10'
+                }`}
+                title="切换是否按 TMDB 去重, 显示同名/同 TMDB 全部资源">
+                {dedupBy === 'id' ? '📋 显示全部 (含重复)' : '🔀 合并去重'}
+              </button>
+              <span className="text-white/30 text-xs">·</span>
+              <span className="text-white/40 text-xs">同 TMDB 分组:</span>
+              {groups.slice(0, 8).map((g, i) => {
+                // 提取标题 (去掉 " (2026) 4K..." 之类的后缀, 留主标题)
+                const cleanName = g.name?.split(/\s*[\(【\[]/)[0]?.trim() || g.name || '(无标题)';
+                const isCurrentPage = items.length > 0 && items[0]?.tmdbIdRaw === g.tmdbId && dedupBy === 'tmdb_id';
+                return (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      // 切到 'id' 模式 + 搜这个名字
+                      setDedupBy('id');
+                      setQuery(cleanName);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-xs transition ${
+                      isCurrentPage
+                        ? 'bg-violet-600 text-white'
+                        : 'bg-white/5 text-white/70 hover:bg-white/10'
+                    }`}
+                    title={`TMDB: ${g.tmdbId || '无'}`}>
+                    {cleanName.slice(0, 20)} <span className="opacity-60">({g.count})</span>
+                  </button>
+                );
+              })}
+              {groups.length > 8 && <span className="text-white/30 text-xs">+{groups.length - 8} 更多</span>}
+            </div>
+          )}
 
           {/* 2026-06-10: 新用户引导卡 - 仅未登录显示 */}
           {mounted && !user && (

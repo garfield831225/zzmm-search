@@ -361,8 +361,27 @@ export async function GET(request: NextRequest) {
     });
 
     // 2026-07-10: 应用层 dedup by tmdb_id
-    const dedupByTmdb = searchParams.get('dedupBy') === 'tmdb_id' || zone === 'film';
-    if (dedupByTmdb) {
+    // 2026-07-20: 加 dedupBy 参数支持, 保留原始 items 用于 groups
+    const dedupByParam = searchParams.get('dedupBy') || 'tmdb_id';
+    // 计算 groups (按 tmdb_id 分组, 含 name 用于前端展示)
+    const groupsMap = new Map<string, { tmdbId: string; name: string; count: number }>();
+    for (const it of items) {
+      const tid = it.tmdbIdRaw || 'null';
+      if (!groupsMap.has(tid)) {
+        groupsMap.set(tid, {
+          tmdbId: it.tmdbIdRaw || '',
+          name: it.name || '',
+          count: 0,
+        });
+      }
+      groupsMap.get(tid)!.count++;
+    }
+    const groups = Array.from(groupsMap.values()).sort((a, b) => b.count - a.count);
+
+    // 应用 dedup
+    const isFilmZone = zone === 'film';
+    const shouldDedup = (dedupByParam === 'tmdb_id' && isFilmZone) || dedupByParam === 'tmdb_id';
+    if (shouldDedup) {
       const seen = new Set<string>();
       const deduped: any[] = [];
       for (const it of items) {
@@ -384,6 +403,8 @@ export async function GET(request: NextRequest) {
       page,
       pageSize,
       items,
+      groups,  // 2026-07-20: 按 tmdb_id 分组 (含 name + count), 前端做"显示重复"按钮
+      dedupBy: shouldDedup ? 'tmdb_id' : 'id',
       categories: zone === 'film' ? CATEGORIES : NONFILM_CATEGORIES,
       sources: ['全部', ...Object.values(SOURCE_DISPLAY_MAP)],
     });
