@@ -2,8 +2,12 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
+import { neon, neonConfig } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
+
+// 2026-07-21: 修 read replica lag 终极方案 - 关掉 Neon HTTP fetch connection cache
+// 默认 true 会让 Vercel warm 函数命中老 read replica, 关掉后每次 fetch 重新走 control plane routing
+neonConfig.fetchConnectionCache = false;
 
 const SOURCE_KEY_MAP: Record<string, string> = {
   '115网盘': '115', '百度网盘': 'baidu', '阿里云盘': 'aliyun',

@@ -8,7 +8,12 @@
 //       vip / code → 按 source (网盘类型) 分类
 //   - 排序: 按 created_at asc=文档原始顺序 (默认) / desc=倒序
 import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
+import { neon, neonConfig } from '@neondatabase/serverless';
+
+// 2026-07-21: 修 read replica lag 终极方案 - 关掉 Neon HTTP fetch connection cache
+// 默认 true 会让 Vercel warm 函数命中老 read replica, 关掉后每次 fetch 重新走 control plane routing
+// 性能影响: 每次 catalog 调用增加 ~50ms, 但能保证看到最新数据 (用户痛点: 看不到 683 条新导入)
+neonConfig.fetchConnectionCache = false;
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
