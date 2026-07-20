@@ -91,10 +91,12 @@ export async function DELETE(req: NextRequest) {
     const upd = await sql`UPDATE xx_resource_links SET status = 'deleted' WHERE resource_id = ${resourceId} AND source = ${source} RETURNING id` as any[];
     const subDeleted = upd && upd[0]?.id;
 
-    // 2. 兜底: 副表没找到, 检查主表老字段并清空
+    // 2. 兜底: 副表没找到, 检查主表老字段
+    // 2026-07-20: 不再清空 link 字段 (避免触发 xx_resources_link_name_unique 撞 link='')
+    //   改成在 source 字段加 ' [deleted]' 后缀标记, status 保持 active
     let mainCleared = false;
     if (!subDeleted) {
-      const res = await sql`UPDATE xx_resources SET link = '', link_code = '', source = '' WHERE id = ${resourceId} AND source = ${source} AND link != '' RETURNING id` as any[];
+      const res = await sql`UPDATE xx_resources SET source = ${source + ' [deleted]'}, link_code = '' WHERE id = ${resourceId} AND source = ${source} AND link != '' RETURNING id` as any[];
       if (res && res[0]?.id) mainCleared = true;
     }
 
@@ -102,13 +104,12 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ ok: false, error: '链接不存在' }, { status: 404 });
     }
 
-    // 2b. 2026-07-18 修: 副表 sort=1 跟主表 link 一样的话, 删副表时同步清主表 link
-    //   (因为 search 端点优先用副表 link, 但主表 link 是兜底, 不清的话 UI 还显示主表 link)
-    //   业务规则: 用户删某个 source 时, 如果主表 source 跟被删的 source 一样 → 清主表 link
+    // 2b. 2026-07-20 修: 副表 sort=1 跟主表 link 一样的话, 删副表时同步标记主表 source
+    //   (改用 source 加 [deleted] 后缀, 不清 link 避免 unique violation)
     if (subDeleted && !mainCleared) {
       const mainRes = await sql`SELECT link, source FROM xx_resources WHERE id = ${resourceId}`;
       if (mainRes[0]?.source === source && mainRes[0]?.link) {
-        await sql`UPDATE xx_resources SET link = '', link_code = '' WHERE id = ${resourceId}`;
+        await sql`UPDATE xx_resources SET source = ${source + ' [deleted]'}, link_code = '' WHERE id = ${resourceId}`;
         mainCleared = true;
       }
     }

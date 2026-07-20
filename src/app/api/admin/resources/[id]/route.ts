@@ -76,10 +76,8 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     const subUpd = await sql`UPDATE xx_resource_links SET status = 'deleted' WHERE resource_id = ${resourceId} AND status = 'active' RETURNING id, source` as any[];
     const subLinks = subUpd?.length || 0;
 
-    // 3. 清主表 link/link_code/source 兜底
-    await sql`UPDATE xx_resources SET link = '', link_code = '', source = '' WHERE id = ${resourceId}`;
-
-    // 4. 软删资源
+    // 3. 软删资源 (不再清空 link — 避免触发 xx_resources_link_name_unique 撞 link='')
+    //   只改 status='deleted', 留 link/link_code/source 供恢复
     const mainUpd = await sql`UPDATE xx_resources SET status = 'deleted' WHERE id = ${resourceId} RETURNING id`;
     if (!mainUpd[0]) return NextResponse.json({ error: '资源软删失败' }, { status: 500 });
 
