@@ -242,8 +242,12 @@ export default function HomePage() {
       // 2026-07-20: dedupBy 决定是否按 tmdb_id 去重
       params.set('dedupBy', db);
       // 2026-06-26: 传 Bearer token 让 search API 识别 admin/basic/vip user_group, 否则永远 0 条
+      // 2026-07-20: cache: 'no-store' + ts= 强制绕开浏览器 + Vercel Edge + Next.js fetch cache
+      // (修了万米危机"还在"的 bug, 真实 DB 已是 0 但浏览器 cache 还在)
       const token = localStorage.getItem('token') || '';
+      params.set('_t', Date.now().toString());
       const res = await fetch(`/api/search?${params}`, {
+        cache: 'no-store',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       const data: SearchResponse = await res.json();
