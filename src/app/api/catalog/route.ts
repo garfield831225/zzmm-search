@@ -106,6 +106,7 @@ export async function GET(request: NextRequest) {
     const listSQL = `
       SELECT r.id, r.name, r.category, r.tags, r.tmdb_id,
              r.doc_sheet, r.sub_type, r.size, r.type, r.created_at, r.access_level, r.import_channel, r.source,
+             r.link, r.link_code,
              COALESCE(c.title, r.name) as display_title,
              c.poster_path, c.vote_average, c.vote_count, c.release_date, c.status as tmdb_status
       FROM xx_resources r
