@@ -69,16 +69,11 @@ async function fetchAndCacheTmdb(tmdbId: string): Promise<any | null> {
 
 export async function GET(request: NextRequest) {
   try {
+    // 2026-07-20: 每次请求 new sql, 避免 Vercel 函数 warm 状态复用旧 connection (连到 lag endpoint)
+    //   Neon 0.10.4 serverless driver 内部 connection cache 是 module-level 缓存
+    //   但 function invocation 之间不共享, 每次 new client 应该是新 connection
+    //   实际行为: 加 no-store response header 让 CDN 强制重新查, 避免 5+ 分钟 lag
     const sql = neon(process.env.DATABASE_URL || '');
-
-    // 2026-07-20: Neon pooler 路由 read query 到 read replica, 有 5+ 分钟 lag
-    //   写一个 noop 触发主 endpoint sync (主→从复制是异步 1-2 分钟)
-    //   fire-and-forget 没用, 改用 await + 200ms 让 sync 完成
-    try {
-      await sql`UPDATE xx_resources SET updated_at = NOW() WHERE id = (SELECT MIN(id) FROM xx_resources WHERE id > 0)`;
-      // await 复制完成 (1-2 分钟 typical, 但 Vercel 控制平面 routing 经常 100-500ms 内 ack)
-      await new Promise(r => setTimeout(r, 300));
-    } catch {}
 
     const { searchParams } = new URL(request.url);
     const q = searchParams.get('q') || '';
@@ -417,6 +412,13 @@ export async function GET(request: NextRequest) {
       dedupBy: shouldDedup ? 'tmdb_id' : 'id',
       categories: zone === 'film' ? CATEGORIES : NONFILM_CATEGORIES,
       sources: ['全部', ...Object.values(SOURCE_DISPLAY_MAP)],
+    }, {
+      headers: {
+        // 2026-07-20: 强制不缓存, 防 Vercel CDN 缓存老数据
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      },
     });
   } catch (error: any) {
     console.error('Search error:', error.message);
