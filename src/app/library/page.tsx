@@ -14,6 +14,14 @@ interface Resource {
   codePrice?: number;
   unlockId?: number;
   unlocked?: boolean;
+  sourceDisplay?: string;
+  displayCategory?: string;
+  createdAt?: string;
+}
+interface CategoryBtn {
+  name: string;
+  key: string;
+  count: number;
 }
 
 // 3 大区配置
@@ -24,24 +32,6 @@ const SECTIONS = [
 ] as const;
 
 type SectionKey = typeof SECTIONS[number]['key'];
-
-const SOURCES_BY_SECTION: Record<SectionKey, string[]> = {
-  // 2026-07-18: 泽泽妈妈区全是 115 链接, 用 sheet 分类 (顶部按钮组), 网盘分类无意义
-  zezhe: [],
-  vip: ['全部', '115网盘', '百度网盘', '夸克网盘', '磁力链接', 'ed2k链接'],
-  code: ['全部', '115网盘', '百度网盘', '夸克网盘', '阿里云盘', '磁力链接', 'ed2k链接'],
-};
-
-const SOURCE_KEY_MAP: Record<string, string> = {
-  '115网盘': '115', '百度网盘': 'baidu', '阿里云盘': 'aliyun',
-  '夸克网盘': 'quark', '123网盘': '123', '天翼云盘': 'tianyi',
-  '磁力链接': 'magnet', 'ed2k链接': 'ed2k', '迅雷链接': 'thunder',
-};
-const SOURCE_DISPLAY_MAP: Record<string, string> = {
-  '115': '115网盘', 'baidu': '百度网盘', 'quark': '夸克网盘',
-  'aliyun': '阿里云盘', '123': '123网盘', 'tianyi': '天翼云盘',
-  'magnet': '磁力链接', 'ed2k': 'ed2k链接', 'thunder': '迅雷链接',
-};
 
 const SECTION_COLOR: Record<SectionKey, string> = {
   zezhe: 'from-pink-500/20 to-purple-500/20 border-pink-500/40',
@@ -55,15 +45,41 @@ const SECTION_BADGE: Record<SectionKey, string> = {
   code: 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white',
 };
 
+const CATEGORY_ICONS: Record<string, string> = {
+  '电影': '🎬', '剧集': '📺', '动漫': '🈴', '纪录片': '📽️',
+  '综艺': '🎭', '演唱会': '🎤', '连载': '🆕',
+  '原盘': '💿', 'REMUX': '🔧', '系列电影': '🎞️',
+  '合集': '📦', '音乐': '🎵', '体育': '⚽', '少儿频道': '🧒',
+  '电子书': '📚', '精品课': '🎓', '文档': '📄',
+};
+
+// ISO → "2026-01-15 12:34"
+function fmtDate(iso: string | undefined | null): string {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso.slice(0, 10);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+  } catch {
+    return iso.slice(0, 10);
+  }
+}
+
 export default function LibraryPage() {
   const router = useRouter();
   const [userGroup, setUserGroup] = useState<string>('user');
   const [userId, setUserId] = useState<string>('');
   const [section, setSection] = useState<SectionKey>('zezhe');
-  const [source, setSource] = useState<string>('全部');
-  const [sheet, setSheet] = useState<string>('全部');
-  const [sheets, setSheets] = useState<{name: string; count: number}[]>([]);
+  // 分类: zezhe 用 sheet, vip/code 用 source
+  const [subCategory, setSubCategory] = useState<string>('');
+  const [categories, setCategories] = useState<CategoryBtn[]>([]);
   const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<'asc' | 'desc'>('asc');  // asc=按添加时间正序 (默认, 文档原始顺序)
   const [items, setItems] = useState<Resource[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -127,25 +143,39 @@ export default function LibraryPage() {
     return isCodeResource(item);
   };
 
-  const fetchItems = useCallback(async (p = 1) => {
+  // 切 section → 重置 subCategory + 重新拉
+  const switchSection = (s: SectionKey) => {
+    setSection(s);
+    setSubCategory('');
+  };
+
+  // 拉分类按钮列表
+  const fetchCategories = useCallback(async () => {
+    try {
+      const params = new URLSearchParams({ section, pageSize: '1' });
+      const r = await fetch(`/api/catalog?${params}&zone=library`);
+      const d = await r.json();
+      setCategories(d.categories || []);
+    } catch { setCategories([]); }
+  }, [section]);
+
+  // 拉资源列表 (改用 /api/catalog, 跟 /titles 同一套)
+  const fetchItems = useCallback(async (p = 1, reset = false) => {
     setLoading(true);
     try {
       const params = new URLSearchParams({
         page: p.toString(),
         pageSize: pageSize.toString(),
-        zone: `library_${section}`,
-        sort: 'import_time_asc',
+        section,
+        sort,
+        zone: 'library',
       });
       if (query) params.set('q', query);
-      if (section === 'zezhe') {
-        // 2026-07-18: 泽泽妈妈区用 sheet 分类替代网盘筛选
-        if (sheet !== '全部') params.set('sheet', sheet);
-      } else {
-        if (source !== '全部') params.set('source', source);
+      if (subCategory) {
+        if (section === 'zezhe') params.set('sheet', subCategory);
+        else params.set('source', subCategory);
       }
-      const res = await fetch(`/api/search?${params}`, {
-        headers: { Authorization: 'Bearer ' + getToken() },
-      });
+      const res = await fetch(`/api/catalog?${params}`);
       const data = await res.json();
       const newItems = data.items || [];
 
@@ -164,32 +194,28 @@ export default function LibraryPage() {
         }
       }
 
-      if (p === 1) setItems(newItems);
+      if (reset) setItems(newItems);
       else setItems(prev => [...prev, ...newItems]);
       setTotal(data.total || 0);
       setPage(p);
     } catch { addToast('error', '加载失败'); }
     finally { setLoading(false); }
-  }, [section, source, query, pageSize, userId, getToken, addToast]);
+  }, [section, subCategory, query, pageSize, sort, userId, getToken, addToast]);
 
-  useEffect(() => { setItems([]); setPage(1); fetchItems(1); }, [section, source, sheet]);
-
-  const handleSearch = (e: React.FormEvent) => { e.preventDefault(); fetchItems(1); };
-
-  const switchSection = (s: SectionKey) => {
-    setSection(s);
-    setSource('全部');
-    setSheet('全部');
-  };
-
-  // 2026-07-18: 加载 sheet 列表 (泽泽妈妈115文档用)
+  // 切 section / subCategory / sort → 重新拉
   useEffect(() => {
-    if (section === 'zezhe') {
-      fetch('/api/library/sheets').then(r => r.json()).then(d => {
-        if (d.sheets) setSheets(d.sheets);
-      }).catch(() => {});
-    }
-  }, [section]);
+    setItems([]);
+    setPage(1);
+    fetchItems(1, true);
+    fetchCategories();
+  }, [section, subCategory, sort]);
+
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setItems([]);
+    setPage(1);
+    fetchItems(1, true);
+  };
 
   // 解锁 code 资源
   const handleUnlock = async (item: Resource) => {
@@ -235,7 +261,8 @@ export default function LibraryPage() {
   };
 
   const currentSection = SECTIONS.find(s => s.key === section)!;
-  const currentSources = SOURCES_BY_SECTION[section];
+  const subCategoryLabel = subCategory || '全部';
+  const subCategoryType = section === 'zezhe' ? 'sheet' : '网盘';
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -246,10 +273,27 @@ export default function LibraryPage() {
               <Link href="/" className="w-9 h-9 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center text-lg">📋</Link>
               <div>
                 <h1 className="text-lg font-bold text-gray-900">资源库</h1>
-                <p className="text-xs text-gray-400">三区浏览 · 导入时间从先到后 · {total.toLocaleString()} 条</p>
+                <p className="text-xs text-gray-400">三区浏览 · 共 {total.toLocaleString()} 条</p>
               </div>
             </div>
-            <Link href="/" className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs transition text-gray-600">← 影视区</Link>
+            <div className="flex items-center gap-2">
+              {/* 排序切换 */}
+              <div className="flex items-center gap-1">
+                <button onClick={() => setSort('asc')}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                    sort === 'asc' ? 'bg-violet-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}>
+                  ↑ 正序
+                </button>
+                <button onClick={() => setSort('desc')}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
+                    sort === 'desc' ? 'bg-violet-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}>
+                  ↓ 倒序
+                </button>
+              </div>
+              <Link href="/" className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs transition text-gray-600">← 影视区</Link>
+            </div>
           </div>
 
           {/* 3 大区 Tab */}
@@ -277,12 +321,21 @@ export default function LibraryPage() {
           </div>
 
           {/* 当前区信息条 */}
-          <div className={`mb-3 px-3 py-2 rounded-lg text-xs bg-gradient-to-r ${SECTION_COLOR[section]} border flex items-center gap-2`}>
+          <div className={`mb-3 px-3 py-2 rounded-lg text-xs bg-gradient-to-r ${SECTION_COLOR[section]} border flex items-center gap-2 flex-wrap`}>
             <span className="font-medium">{currentSection.icon} {currentSection.label}</span>
             <span className="text-gray-600">·</span>
             <span className="text-gray-700">{currentSection.desc}</span>
+            {subCategory && (
+              <>
+                <span className="text-gray-600">·</span>
+                <span className="text-gray-700">
+                  分类: <span className="font-semibold text-violet-700">{subCategoryLabel}</span>
+                  <span className="text-gray-500 text-[10px] ml-1">({subCategoryType})</span>
+                </span>
+              </>
+            )}
             <span className="text-gray-600">·</span>
-            <span className="text-gray-600">按导入时间从先到后排序</span>
+            <span className="text-gray-600">按添加时间{sort === 'asc' ? '正序 (文档原始顺序)' : '倒序'}</span>
           </div>
 
           {/* 搜索框 */}
@@ -299,30 +352,27 @@ export default function LibraryPage() {
             </button>
           </form>
 
-          {/* Source / Sheet filter */}
-          <div className="flex gap-1.5 overflow-x-auto pb-1">
-            {section === 'zezhe' ? (
-              // 2026-07-18: 泽泽妈妈区按导入 sheet 分类 (全是 115 链接, 网盘分类无意义)
-              <>
-                <button onClick={() => setSheet('全部')}
-                  className={`px-2.5 py-0.5 rounded text-xs whitespace-nowrap transition ${sheet === '全部' ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500 hover:text-gray-700'}`}>
-                  全部
+          {/* 分类按钮: zezhe → sheet, vip/code → source */}
+          <div className="mb-2">
+            <div className="text-[10px] text-gray-400 mb-1.5">
+              {section === 'zezhe' ? '按 sheet 分类' : '按网盘类型分类'} · 共 {categories.length} 个
+            </div>
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              <button onClick={() => setSubCategory('')}
+                className={`px-2.5 py-1 rounded text-xs whitespace-nowrap transition ${
+                  !subCategory ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500 hover:text-gray-700'
+                }`}>
+                全部
+              </button>
+              {categories.map(c => (
+                <button key={c.key} onClick={() => setSubCategory(c.key)}
+                  className={`px-2.5 py-1 rounded text-xs whitespace-nowrap transition ${
+                    subCategory === c.key ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500 hover:text-gray-700'
+                  }`}>
+                  {c.name} <span className="opacity-60">{c.count.toLocaleString()}</span>
                 </button>
-                {sheets.map(sh => (
-                  <button key={sh.name} onClick={() => setSheet(sh.name)}
-                    className={`px-2.5 py-0.5 rounded text-xs whitespace-nowrap transition ${sheet === sh.name ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500 hover:text-gray-700'}`}>
-                    {sh.name} <span className="opacity-60">{sh.count}</span>
-                  </button>
-                ))}
-              </>
-            ) : (
-              currentSources.map(src => (
-                <button key={src} onClick={() => setSource(src)}
-                  className={`px-2.5 py-0.5 rounded text-xs whitespace-nowrap transition ${source === src ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500 hover:text-gray-700'}`}>
-                  {src}
-                </button>
-              ))
-            )}
+              ))}
+            </div>
           </div>
         </div>
       </header>
@@ -330,14 +380,14 @@ export default function LibraryPage() {
       <main className="max-w-[1600px] mx-auto px-4 py-4">
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
           {/* Table header */}
-          <div className="grid grid-cols-[60px_70px_1fr_90px_80px_70px_70px_70px_140px] gap-2 px-3 py-2 bg-gray-50 border-b border-gray-200 text-xs font-medium text-gray-500 uppercase tracking-wide">
+          <div className="grid grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px] gap-2 px-3 py-2.5 bg-gray-50 border-b border-gray-200 text-sm font-medium text-gray-500 uppercase tracking-wide">
             <div>分类</div>
             <div>标签</div>
             <div>名称</div>
             <div>来源</div>
             <div>大小</div>
             <div>提取码</div>
-            <div>导入时间</div>
+            <div>添加时间</div>
             <div>状态</div>
             <div>操作</div>
           </div>
@@ -347,59 +397,54 @@ export default function LibraryPage() {
             const isAdmin = isAdminDirectOpen(item);
             const isCodeLock = codeResourceLocked(item);
             const isUnlocked = item.unlocked;
+            // 分类列: zezhe 用 doc_sheet, 其他用 category
+            const showCategory = section === 'zezhe' && item.docSheet
+              ? item.docSheet
+              : item.category;
+            const showIcon = CATEGORY_ICONS[showCategory] || '📁';
 
             return (
               <div key={item.id}
-                className={`grid grid-cols-[60px_70px_1fr_90px_80px_70px_70px_70px_140px] gap-2 px-3 py-2 border-b border-gray-100 hover:bg-violet-50/30 transition text-sm items-center ${isVipLock ? 'bg-amber-50/30' : ''} ${isCodeLock ? 'bg-cyan-50/30' : ''}`}>
-                {/* 分类 — 2026-07-18: 泽泽妈妈115文档用 doc_sheet (21-sheet 库的 sheet 名), 其他用 category */}
+                className={`grid grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px] gap-2 px-3 py-2.5 border-b border-gray-100 hover:bg-violet-50/30 transition text-base items-center ${isVipLock ? 'bg-amber-50/30' : ''} ${isCodeLock ? 'bg-cyan-50/30' : ''}`}>
+                {/* 分类 — sheet 优先, category 兜底 */}
                 <div>
-                  {(() => {
-                    const showCategory = section === 'zezhe' && item.docSheet
-                      ? item.docSheet
-                      : item.category;
-                    return (
-                      <>
-                        <div className="text-base">{getCategoryIcon(showCategory)}</div>
-                        <div className="text-[10px] text-gray-400 truncate" title={showCategory}>{showCategory}</div>
-                      </>
-                    );
-                  })()}
+                  <div className="text-2xl leading-none">{showIcon}</div>
+                  <div className="text-[11px] text-gray-500 truncate mt-1" title={showCategory}>{showCategory}</div>
                 </div>
                 {/* 标签 (大区角标) */}
                 <div>
-                  <div className={`px-1.5 py-0.5 rounded text-[10px] font-medium text-center ${SECTION_BADGE[section]}`}>
+                  <div className={`px-2 py-0.5 rounded text-[11px] font-semibold text-center ${SECTION_BADGE[section]}`}>
                     {section === 'zezhe' ? '👑 ZEZHE' : section === 'vip' ? '🔒 VIP' : '💎 CODE'}
                   </div>
                   {item.payType === 'code' && section === 'vip' && (
-                    <div className="text-[9px] text-amber-600 mt-0.5 text-center">💎付费</div>
+                    <div className="text-[10px] text-amber-600 mt-0.5 text-center">💎付费</div>
                   )}
                 </div>
                 {/* 名称 */}
                 <div className="min-w-0">
-                  <div className="text-gray-900 font-medium text-sm leading-snug line-clamp-2" title={item.name}>{item.name}</div>
+                  <div className="text-gray-900 font-medium text-base leading-relaxed line-clamp-2" title={item.name}>{item.name}</div>
                   {item.tmdbIdRaw && item.tmdbIdRaw !== 'NOMATCH' && item.tmdbIdRaw !== 'GARBLED' && item.tmdbIdRaw.length >= 4 && (
-                    <div className="text-[10px] text-green-600 font-mono mt-0.5">🎬 TMDB: {item.tmdbIdRaw}</div>
+                    <div className="text-xs text-green-600 font-mono mt-1">🎬 TMDB: {item.tmdbIdRaw}</div>
                   )}
                 </div>
                 {/* 来源 */}
-                <div className="text-xs text-gray-500 truncate">{SOURCE_DISPLAY_MAP[item.source] || item.source || '—'}</div>
+                <div className="text-sm text-gray-600 truncate">{item.sourceDisplay || item.source || '—'}</div>
                 {/* 大小 */}
-                <div className="text-xs text-gray-400 truncate">{item.size || '—'}</div>
+                <div className="text-sm text-gray-500 truncate">{item.size || '—'}</div>
                 {/* 提取码 */}
-                <div className="text-xs">
+                <div className="text-sm">
                   {item.linkCode ? (
-                    <button onClick={() => handleCopy(item.linkCode!, '提取码')} className="px-2 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded text-[11px] font-mono" title="点击复制提取码">
+                    <button onClick={() => handleCopy(item.linkCode!, '提取码')} className="px-2 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded text-xs font-mono" title="点击复制提取码">
                       {item.linkCode}
                     </button>
                   ) : <span className="text-gray-300">—</span>}
                 </div>
-                {/* 导入时间 */}
-                <div className="text-[10px] text-gray-400 font-mono" title={item.tmdbIdRaw}>
-                  {/* 简单时间显示 (创建时间顺序) */}
-                  <div className="text-gray-600">#{item.id}</div>
+                {/* 添加时间 (真实日期) */}
+                <div className="text-sm text-gray-600 font-mono" title={`资源 ID: ${item.id}`}>
+                  {fmtDate(item.createdAt)}
                 </div>
                 {/* 状态 */}
-                <div className="text-xs">
+                <div className="text-sm">
                   {isVipLock && <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-700 rounded text-[10px]">🔒 锁</span>}
                   {isUnlocked && <span className="px-1.5 py-0.5 bg-green-500/20 text-green-700 rounded text-[10px]">✓ 已解锁</span>}
                   {isAdmin && <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-700 rounded text-[10px]">👑 免流明</span>}
@@ -408,17 +453,17 @@ export default function LibraryPage() {
                 <div className="flex gap-1">
                   {isMagnetOrEd2k(item.link) && !isVipLock && !isCodeLock ? (
                     <button onClick={() => handleCopy(item.link, '链接')}
-                      className="px-2 py-1 bg-violet-600 hover:bg-violet-500 rounded text-[10px] text-white font-medium transition">
+                      className="px-2.5 py-1 bg-violet-600 hover:bg-violet-500 rounded text-xs text-white font-medium transition">
                       📋 复制
                     </button>
                   ) : isVipLock ? (
                     <button onClick={() => addToast('vip', '需要 VIP 才能打开')} disabled
-                      className="px-2 py-1 bg-amber-500/30 text-amber-700 rounded text-[10px] font-medium cursor-not-allowed">
+                      className="px-2.5 py-1 bg-amber-500/30 text-amber-700 rounded text-xs font-medium cursor-not-allowed">
                       🔒 VIP 锁
                     </button>
                   ) : isCodeLock ? (
                     <button onClick={() => handleUnlock(item)} disabled={unlocking.has(item.id)}
-                      className="px-2 py-1 bg-gradient-to-r from-cyan-500 to-blue-500 hover:opacity-90 rounded text-[10px] text-white font-medium transition disabled:opacity-50">
+                      className="px-2.5 py-1 bg-gradient-to-r from-cyan-500 to-blue-500 hover:opacity-90 rounded text-xs text-white font-medium transition disabled:opacity-50">
                       {unlocking.has(item.id) ? '解锁中...' :
                         isAdmin ? '👑 免流明' :
                         isUnlocked ? '🔓 已解锁' :
@@ -426,7 +471,7 @@ export default function LibraryPage() {
                     </button>
                   ) : (
                     <button onClick={() => handleOpen(item)}
-                      className="px-2 py-1 bg-violet-600 hover:bg-violet-500 rounded text-[10px] text-white font-medium transition">
+                      className="px-2.5 py-1 bg-violet-600 hover:bg-violet-500 rounded text-xs text-white font-medium transition">
                       {isMagnetOrEd2k(item.link) ? '📋 复制' : '🔗 打开'}
                     </button>
                   )}
@@ -436,7 +481,7 @@ export default function LibraryPage() {
           })}
 
           {items.length === 0 && !loading && (
-            <div className="py-16 text-center text-gray-400 text-sm">
+            <div className="py-16 text-center text-gray-400 text-base">
               {section === 'code' ? '💎 暂无单独付费资源' : section === 'vip' ? '🔒 暂无 VIP 资源' : '👑 暂无泽泽妈妈文档资源'}
             </div>
           )}
@@ -448,7 +493,7 @@ export default function LibraryPage() {
 
         {items.length < total && (
           <div className="flex justify-center mt-6">
-            <button onClick={() => fetchItems(page + 1)} disabled={loading}
+            <button onClick={() => fetchItems(page + 1, false)} disabled={loading}
               className="px-8 py-3 bg-white hover:bg-gray-100 border border-gray-200 rounded-xl text-sm text-gray-700 disabled:opacity-50 transition shadow-sm">
               {loading ? '加载中...' : `加载更多 (剩余 ${(total - items.length).toLocaleString()} 条)`}
             </button>
@@ -477,15 +522,4 @@ export default function LibraryPage() {
       </div>
     </div>
   );
-}
-
-function getCategoryIcon(category: string): string {
-  const icons: Record<string, string> = {
-    '电影': '🎬', '剧集': '📺', '动漫': '🈴', '纪录片': '📽️',
-    '综艺': '🎭', '演唱会': '🎤', '连载': '🆕',
-    '原盘': '💿', 'REMUX': '🔧', '系列电影': '🎞️',
-    '合集': '📦', '音乐': '🎵', '体育': '⚽', '少儿频道': '🧒',
-    '电子书': '📚', '精品课': '🎓', '文档': '📄',
-  };
-  return icons[category] || '📁';
 }
