@@ -9,10 +9,6 @@
     {
       "path": "/api/cron/match-task",
       "schedule": "0 2 * * *"
-    },
-    {
-      "path": "/api/cron/sync-pooler",
-      "schedule": "*/2 * * * *"
     }
   ]
 }

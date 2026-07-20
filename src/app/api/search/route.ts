@@ -71,10 +71,14 @@ export async function GET(request: NextRequest) {
   try {
     const sql = neon(process.env.DATABASE_URL || '');
 
-    // 2026-07-20: 强制主 endpoint 同步 — pooler 自动路由到 read replica 有时 lag
-    //   写一个 noop 触发主 endpoint 立即同步 (xx_resources.id=1 几乎总存在)
-    //   async fire-and-forget, 不影响响应延迟
-    sql`UPDATE xx_resources SET updated_at = NOW() WHERE id = (SELECT MIN(id) FROM xx_resources WHERE id > 0)`.catch(() => {});
+    // 2026-07-20: Neon pooler 路由 read query 到 read replica, 有 5+ 分钟 lag
+    //   写一个 noop 触发主 endpoint sync (主→从复制是异步 1-2 分钟)
+    //   fire-and-forget 没用, 改用 await + 200ms 让 sync 完成
+    try {
+      await sql`UPDATE xx_resources SET updated_at = NOW() WHERE id = (SELECT MIN(id) FROM xx_resources WHERE id > 0)`;
+      // await 复制完成 (1-2 分钟 typical, 但 Vercel 控制平面 routing 经常 100-500ms 内 ack)
+      await new Promise(r => setTimeout(r, 300));
+    } catch {}
 
     const { searchParams } = new URL(request.url);
     const q = searchParams.get('q') || '';
