@@ -47,7 +47,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   try {
     // 1. 看资源是否存在
     const exists = await sql`SELECT id, name, source, status FROM xx_resources WHERE id = ${resourceId}`;
-    if (!exists[0]) return NextResponse.json({ error: '资源不存在', status: 404 });
+    if (!exists[0]) return NextResponse.json({ error: '资源不存在' }, { status: 404 });
 
     if (hard) {
       // 硬删: 先数一下副表多少, 再物理删除主表 (CASCADE 自动清理)
