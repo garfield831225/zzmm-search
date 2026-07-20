@@ -36,7 +36,7 @@ const CARDS: Card[] = [
   { id: 'invites', title: '邀请码', desc: '生成/列表/复制/清理', icon: Key, href: '/admin/invites', category: '用户管理', color: 'text-rose-700', bg: 'bg-rose-50 hover:bg-rose-100' },
   { id: 'blacklist', title: '黑名单', desc: '用户/IP/设备拉黑', icon: ShieldOff, href: '/admin/blacklist', category: '用户管理', color: 'text-red-700', bg: 'bg-red-50 hover:bg-red-100' },
   { id: 'codes', title: '激活码', desc: '4 模板 + 流明码', icon: Code2, href: '/admin/codes', category: '用户管理', color: 'text-pink-700', bg: 'bg-pink-50 hover:bg-pink-100' },
-  { id: 'users', title: '用户列表', desc: '查/改用户状态', icon: Users, href: '/api/admin/users?pageSize=50', category: '用户管理', color: 'text-fuchsia-700', bg: 'bg-fuchsia-50 hover:bg-fuchsia-100', external: true },
+  { id: 'users', title: '用户列表', desc: '查/改用户状态', icon: Users, href: '/admin/users', category: '用户管理', color: 'text-fuchsia-700', bg: 'bg-fuchsia-50 hover:bg-fuchsia-100' },
 
   // ===== 统计 =====
   { id: 'stats-dashboard', title: '数据大屏', desc: '6 大总览 + 4 图表', icon: BarChart3, href: '/admin/stats-dashboard', category: '数据统计', color: 'text-indigo-700', bg: 'bg-indigo-50 hover:bg-indigo-100' },

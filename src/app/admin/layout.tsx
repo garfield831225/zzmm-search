@@ -61,6 +61,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <Link href="/admin/codes" className="text-white/60 hover:text-white">🎫 卡密</Link>
           <Link href="/admin/invites" className="text-white/60 hover:text-white">🎟️ 邀请码</Link>
           <Link href="/admin/blacklist" className="text-white/60 hover:text-white">🚫 黑名单</Link>
+          <Link href="/admin/users" className="text-white/60 hover:text-white">👥 用户列表</Link>
           <Link href="/admin/stats-dashboard" className="text-white/60 hover:text-white">📊 详细统计</Link>
           <Link href="/admin/import" className="text-white/60 hover:text-white">📥 导入</Link>
           <Link href="/admin/import-tg" className="text-white/60 hover:text-white">📡 TG导入</Link>
