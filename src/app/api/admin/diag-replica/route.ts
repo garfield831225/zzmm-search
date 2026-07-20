@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     let neonInfo: any = null;
     try {
       neonInfo = await sql`SELECT * FROM neon.neon_stat_replication` as any[];
-    } catch (e) { neonInfo = e.message; }
+    } catch (e: any) { neonInfo = e?.message || String(e); }
 
     return NextResponse.json({
       in_recovery: recovery[0]?.in_recovery,
