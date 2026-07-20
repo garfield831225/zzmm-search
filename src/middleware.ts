@@ -85,6 +85,7 @@ const PUBLIC_PATHS = [
   '/api/admin/diag-direct',      // 2026-07-20 临时诊断 Vercel neon endpoint
   '/api/admin/diag-tg-analyze',  // 2026-07-21 临时诊断: 重跑 TG JSON 只统计不入库
   '/api/admin/sync-now',         // 2026-07-21 临时: 强制主 endpoint 同步 (修 read replica lag)
+  '/api/admin/diag-replica',     // 2026-07-21 临时: 看 read replica 状态 + replication lag
   '/api/feedback',                // 2026-07-17 用户失效反馈 (Bearer 内部鉴权)
   '/api/admin/feedback',          // 2026-07-17 admin 反馈处理 (Bearer 内部鉴权)
   '/api/diag-multi-link',         // 2026-07-17 diag: 找多网盘资源示例
