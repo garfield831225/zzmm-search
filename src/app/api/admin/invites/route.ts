@@ -52,9 +52,9 @@ export async function POST(req: NextRequest) {
   const sql = neon(process.env.DATABASE_URL || '');
   try {
     const codes: string[] = [];
+    // 2026-07-21: JS 算 expires_at (Neon template tag 不会执行 SQL 表达式, 字符串会被当字面量)
+    const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
     for (let i = 0; i < count; i++) codes.push(genInviteCode());
-    // 批量插入
-    const expiresAt = `NOW() + INTERVAL '${days} days'`;
     for (const code of codes) {
       await sql`INSERT INTO xx_invite_codes (code, note, created_by, expires_at, is_used)
                 VALUES (${code}, ${note}, ${a.userId}, ${expiresAt}, false)`;
