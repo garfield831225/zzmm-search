@@ -15,7 +15,10 @@ import { neon, neonConfig } from '@neondatabase/serverless';
 // 性能影响: 每次 catalog 调用增加 ~50ms, 但能保证看到最新数据 (用户痛点: 看不到 683 条新导入)
 neonConfig.fetchConnectionCache = false;
 
-export const runtime = 'nodejs';
+// 2026-07-21: 改 Edge runtime - Edge 每次请求新建 V8 isolate context, 不会复用 Neon fetch module-level cache
+// 这是修 Vercel 函数 warm 命中老 read replica 看不到新数据的终极方案
+// (fetchConnectionCache 在 Neon 0.10.4 已废弃永远 true, 只有 Edge runtime 才能绕过)
+export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 

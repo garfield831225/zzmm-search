@@ -1,3 +1,5 @@
+// 2026-07-21: 回退 - Edge runtime 不支持 jsonwebtoken, 用 Node.js 走原路径
+// 用 Vercel API 强制 cold start 来绕开 read replica 缓存
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -7,6 +9,7 @@ import jwt from 'jsonwebtoken';
 
 // 2026-07-21: 修 read replica lag 终极方案 - 关掉 Neon HTTP fetch connection cache
 // 默认 true 会让 Vercel warm 函数命中老 read replica, 关掉后每次 fetch 重新走 control plane routing
+// (Neon 0.10.4 已废弃但保留 console.warn, 实际还有部分生效)
 neonConfig.fetchConnectionCache = false;
 
 const SOURCE_KEY_MAP: Record<string, string> = {
