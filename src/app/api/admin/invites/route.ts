@@ -159,3 +159,48 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
+
+// PATCH 改过期时间 (延期)
+// body: { id, days } — days 是从今天起算的新天数 (覆盖原 expires_at)
+// 也支持 { ids: [1,2,3], days } 批量
+export async function PATCH(req: NextRequest) {
+  const a = authAdmin(req);
+  if (a.error) return NextResponse.json({ error: a.error }, { status: a.status });
+
+  const sql = neon(process.env.DATABASE_URL || '');
+  try {
+    const body = await req.json().catch(() => ({}));
+    const days = parseInt(String(body.days || 30), 10);
+    if (!Number.isFinite(days) || days < 1 || days > 3650) {
+      return NextResponse.json({ error: 'days 必须在 1-3650 之间' }, { status: 400 });
+    }
+    const newExpiresAt = new Date(Date.now() + days * 86400000).toISOString();
+
+    // 批量 (ids: [1,2,3])
+    if (Array.isArray(body.ids) && body.ids.length > 0) {
+      const ids = body.ids.map((x: any) => parseInt(String(x), 10)).filter((n: number) => n > 0);
+      if (ids.length === 0) return NextResponse.json({ error: 'ids 数组为空' }, { status: 400 });
+      const r = await sql`
+        UPDATE xx_invite_codes
+        SET expires_at = ${newExpiresAt}
+        WHERE id = ANY(${ids}::int[]) AND is_used = false
+      `;
+      return NextResponse.json({ success: true, updated: r.length, expires_at: newExpiresAt });
+    }
+
+    // 单个 (id)
+    const id = parseInt(String(body.id || 0), 10);
+    if (!id) return NextResponse.json({ error: '需要 id 或 ids' }, { status: 400 });
+    const r = await sql`
+      UPDATE xx_invite_codes
+      SET expires_at = ${newExpiresAt}
+      WHERE id = ${id} AND is_used = false
+    `;
+    if (r.length === 0) {
+      return NextResponse.json({ error: '邀请码不存在或已使用' }, { status: 404 });
+    }
+    return NextResponse.json({ success: true, updated: 1, expires_at: newExpiresAt });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}

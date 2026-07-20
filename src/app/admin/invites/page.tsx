@@ -188,6 +188,48 @@ export default function InvitesPage() {
     } catch (e: any) { showToast('error', e.message); }
   };
 
+  // 延期单个 / 批量 (用 PATCH 端点)
+  const extendOne = async (id: number) => {
+    const days = prompt('延期天数 (1-3650, 从今天起算):', '30');
+    const n = parseInt(days || '', 10);
+    if (!n || n < 1 || n > 3650) { showToast('error', '天数 1-3650'); return; }
+    try {
+      const r = await fetch('/api/admin/invites', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ id, days: n }),
+      });
+      const d = await r.json();
+      if (d.error) showToast('error', d.error);
+      else {
+        const expDate = new Date(d.expires_at).toLocaleDateString('zh-CN');
+        showToast('success', `✅ 已延期到 ${expDate}`); fetchList();
+      }
+    } catch (e: any) { showToast('error', e.message); }
+  };
+
+  const extendSelected = async () => {
+    if (selected.size === 0) { showToast('error', '未选择'); return; }
+    const days = prompt(`延期 ${selected.size} 个邀请码 (1-3650 天):`, '30');
+    const n = parseInt(days || '', 10);
+    if (!n || n < 1 || n > 3650) { showToast('error', '天数 1-3650'); return; }
+    try {
+      const r = await fetch('/api/admin/invites', {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ ids: Array.from(selected), days: n }),
+      });
+      const d = await r.json();
+      if (d.error) showToast('error', d.error);
+      else {
+        const expDate = new Date(d.expires_at).toLocaleDateString('zh-CN');
+        showToast('success', `✅ ${d.updated} 个延期到 ${expDate}`); fetchList();
+      }
+    } catch (e: any) { showToast('error', e.message); }
+  };
+
   const cleanupUsed = async () => {
     if (!confirm(`确认清理所有已使用的邀请码？此操作不可恢复。`)) return;
     try {
@@ -318,6 +360,9 @@ export default function InvitesPage() {
                   <button onClick={() => exportSelected('csv')} className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-lg text-xs text-amber-300 flex items-center gap-1">
                     <Download className="w-3 h-3" /> 导出 .csv
                   </button>
+                  <button onClick={extendSelected} className="px-3 py-1.5 bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 rounded-lg text-xs text-violet-300 flex items-center gap-1">
+                    <Calendar className="w-3 h-3" /> 延期选中
+                  </button>
                   <button onClick={deleteSelected} className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded-lg text-xs text-red-300 flex items-center gap-1">
                     <Trash2 className="w-3 h-3" /> 删除选中
                   </button>
@@ -394,9 +439,18 @@ export default function InvitesPage() {
                         <td className="py-2 px-2 text-xs text-white/60">{i.expires_at ? new Date(i.expires_at).toLocaleDateString('zh-CN') : '永久'}</td>
                         <td className="py-2 px-2">
                           {!i.is_used && (
-                            <button onClick={() => deleteOne(i.id)} className="px-2 py-1 bg-white/5 hover:bg-red-500/20 rounded text-xs text-red-300 flex items-center gap-1">
-                              <Trash2 className="w-3 h-3" /> 删
-                            </button>
+                            <div className="flex gap-1">
+                              <button
+                                onClick={() => extendOne(i.id)}
+                                title="延期 (从今天起算 N 天)"
+                                className="px-2 py-1 bg-white/5 hover:bg-violet-500/20 rounded text-xs text-violet-300 flex items-center gap-1"
+                              >
+                                <Calendar className="w-3 h-3" /> 延
+                              </button>
+                              <button onClick={() => deleteOne(i.id)} className="px-2 py-1 bg-white/5 hover:bg-red-500/20 rounded text-xs text-red-300 flex items-center gap-1">
+                                <Trash2 className="w-3 h-3" /> 删
+                              </button>
+                            </div>
                           )}
                         </td>
                       </tr>
