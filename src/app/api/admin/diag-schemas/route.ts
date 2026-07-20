@@ -1,4 +1,4 @@
-// 2026-07-20 临时: 查 code/activate/invite 相关表名
+// 2026-07-20 临时: 查 xx_activation_codes 表结构
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 
@@ -9,9 +9,9 @@ export async function GET(req: NextRequest) {
   const key = req.nextUrl.searchParams.get('key');
   if (key !== 'zzmm-batch-test') return NextResponse.json({ error: 'no' }, { status: 403 });
   const sql = neon(process.env.DATABASE_URL || '');
-  const r = await sql`SELECT table_name FROM information_schema.tables
-    WHERE table_schema = 'public'
-    AND (table_name LIKE '%code%' OR table_name LIKE '%activ%' OR table_name LIKE '%invite%' OR table_name LIKE '%vip%')
-    ORDER BY table_name`;
-  return NextResponse.json({ tables: r.map((x: any) => x.table_name) });
+  const r = await sql`SELECT column_name, data_type, is_nullable
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'xx_activation_codes'
+    ORDER BY ordinal_position`;
+  return NextResponse.json({ columns: r });
 }
