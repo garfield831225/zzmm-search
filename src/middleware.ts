@@ -83,6 +83,7 @@ const PUBLIC_PATHS = [
   '/api/admin/resources',         // 2026-07-20 admin 删整个资源 (双轨鉴权)
   '/api/admin/sync-pooler',      // 2026-07-20 admin 强制同步 Neon read replica (防 Vercel 函数 lag)
   '/api/admin/diag-direct',      // 2026-07-20 临时诊断 Vercel neon endpoint
+  '/api/admin/diag-schemas',     // 2026-07-20 临时查表名 (xx_codes 不存在, 找正确名)
   '/api/feedback',                // 2026-07-17 用户失效反馈 (Bearer 内部鉴权)
   '/api/admin/feedback',          // 2026-07-17 admin 反馈处理 (Bearer 内部鉴权)
   '/api/diag-multi-link',         // 2026-07-17 diag: 找多网盘资源示例
