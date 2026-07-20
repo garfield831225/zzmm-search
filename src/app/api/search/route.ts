@@ -379,8 +379,8 @@ export async function GET(request: NextRequest) {
     const groups = Array.from(groupsMap.values()).sort((a, b) => b.count - a.count);
 
     // 应用 dedup
-    const isFilmZone = zone === 'film';
-    const shouldDedup = (dedupByParam === 'tmdb_id' && isFilmZone) || dedupByParam === 'tmdb_id';
+    // 2026-07-20: dedupBy=tmdb_id 默认去重, dedupBy=id 保留全部
+    const shouldDedup = dedupByParam === 'tmdb_id';
     if (shouldDedup) {
       const seen = new Set<string>();
       const deduped: any[] = [];
