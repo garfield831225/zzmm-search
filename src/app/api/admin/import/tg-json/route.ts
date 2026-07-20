@@ -105,6 +105,47 @@ export async function POST(req: NextRequest) {
   // 2026-07-18: 网盘白名单 - 非网盘链接 (导航站/TG 频道主页) 直接不入库
   const NETDISK_SOURCES = new Set(['115', 'baidu', 'quark', 'aliyun', 'xunlei', '123', 'uc', 'tianyi', 'yidong', 'magnet', 'ed2k']);
 
+  // 2026-07-21: 细分识别 - 把 "other" 进一步归类, 让用户知道跳过的具体是什么
+  // 不入库但统计, 让用户区分"导航站链接"vs"TG 频道主页"vs"论坛链接"
+  function classifyNonDisk(link: string): string {
+    const l = link.toLowerCase();
+    if (l.startsWith('magnet:')) return 'magnet_skip'; // 已经是 magnet 兜底, 不应到这里
+    if (l.startsWith('ed2k://')) return 'ed2k_skip';
+    // 导航站 (BT 资源索引站, 几乎都失效)
+    if (l.includes('dmhy')) return 'dmhy';          // 动漫花园
+    if (l.includes('1337x')) return '1337x';
+    if (l.includes('nyaa')) return 'nyaa';
+    if (l.includes('bthd') || l.includes('broadtheater')) return 'bthd';
+    if (l.includes('rarbg')) return 'rarbg';
+    if (l.includes('thepiratebay') || l.includes('piratebay')) return 'tpb';
+    if (l.includes('rutor')) return 'rutor';
+    if (l.includes('rutracker')) return 'rutracker';
+    if (l.includes('kisssub') || l.includes('kisssub.org')) return 'kisssub';
+    if (l.includes('acg.rip') || l.includes('acgnx')) return 'acg_rip';
+    if (l.includes('mikan')) return 'mikan';
+    // TG 频道/群组主页
+    if (l.includes('t.me/')) return 'tg_channel';
+    if (l.includes('telegram.me')) return 'tg_channel';
+    if (l.includes('telegram.org')) return 'tg_web';
+    // 论坛
+    if (l.includes('nodeseek')) return 'nodeseek';
+    if (l.includes('hjdns')) return 'hjdns';
+    if (l.includes('butter')) return 'butterfly';
+    if (l.includes('52pojie')) return '52pojie';
+    if (l.includes('ourbits')) return 'ourbits';
+    if (l.includes('hdchina')) return 'hdchina';
+    if (l.includes('hdsky')) return 'hdsky';
+    if (l.includes('lemonhd')) return 'lemonhd';
+    if (l.includes('ptchina')) return 'ptchina';
+    // 短链 (跳转类)
+    if (l.includes('bit.ly') || l.includes('t.cn') || l.includes('tinyurl')) return 'short_url';
+    // 图片/外链
+    if (l.match(/\.(jpg|jpeg|png|gif|webp|mp4)(\?|$)/)) return 'image';
+    if (l.includes('youtu') || l.includes('youtube')) return 'youtube';
+    // 内部 unknown 但实际上可能有效
+    return 'other_non_disk';
+  }
+
   // 4. 遍历 messages, 提取链接 + 分类
   // 2026-07-17 改造: 1 消息 = 1 资源 + N 链接 (主链接入 xx_resources, 副链接入 xx_resource_links)
   // 主链接按 SOURCE_SORT 优先级选 (1=115 优先, 10=磁力最后)
@@ -112,6 +153,8 @@ export async function POST(req: NextRequest) {
   const l2Candidates: any[] = []; // L2 telegra.ph 链接 (入 xx_resources + xx_telegram_l3_queue, 维持原逻辑)
   const byCategory: Record<string, number> = {};
   const bySource: Record<string, number> = {};
+  // 2026-07-21: 细分统计 - 跳过的"非网盘"按类型计数
+  const bySkippedSource: Record<string, number> = {};
   let skippedNoLink = 0;
   let skippedNonDisk = 0;
 
@@ -135,6 +178,9 @@ export async function POST(req: NextRequest) {
       if (l.type === 'telegra_ph') return false;
       if (!NETDISK_SOURCES.has(l.type)) {
         skippedNonDisk++;
+        // 2026-07-21: 细分识别, 让用户知道跳过的具体类型
+        const kind = classifyNonDisk(l.url);
+        bySkippedSource[kind] = (bySkippedSource[kind] || 0) + 1;
         return false;
       }
       return true;
@@ -396,6 +442,8 @@ export async function POST(req: NextRequest) {
     },
     by_category: byCategory,
     by_source: bySource,
+    // 2026-07-21: 细分"非网盘跳过"按类型 - 导航站/TG频道/短链/图片 各自多少
+    by_skipped_source: bySkippedSource,
     errors: errors.length > 0 ? errors : undefined,
     user: auth.username,
     group: auth.group,
