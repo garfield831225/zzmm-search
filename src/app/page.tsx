@@ -870,41 +870,86 @@ export default function HomePage() {
                     <h2 className="text-xl font-bold leading-tight pr-4">{selectedItem.name}</h2>
                     <div className="flex items-center gap-1 shrink-0">
                       {isAdmin && (
-                        <button
-                          onClick={async (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (!confirm(`🗑️ 删整个资源 (含所有链接)?\n\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}\n来源: ${selectedItem.source}\n链接: ${selectedItem.links?.length || 0} 条\n\n此操作软删, 不影响其他同名资源`)) return;
-                            const token = getToken();
-                            if (!token) {
-                              addToast('error', '❌ 未登录或 token 失效');
-                              return;
-                            }
-                            console.log('[DELETE resource] sending', { resourceId: selectedItem.id });
-                            const r = await fetch(`/api/admin/resources/${selectedItem.id}`, {
-                              method: 'DELETE',
-                              headers: { Authorization: 'Bearer ' + token },
-                            });
-                            const d = await r.json();
-                            console.log('[DELETE resource] response', r.status, d);
-                            if (d.ok) {
-                              addToast('success', `🗑️ 资源已删除 (软删 ${d.subLinks} 条链接)`);
-                              setSelectedItem(null);
-                              setTimeout(() => fetchItems(1), 500);
-                            } else if (r.status === 401) {
-                              addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
-                            } else if (r.status === 403) {
-                              addToast('error', `❌ 403 需要 admin 权限`);
-                            } else if (r.status === 404) {
-                              addToast('error', `❌ 404 资源不存在`);
-                            } else {
-                              addToast('error', `❌ ${r.status} ${d.error || '删除失败'}`);
-                            }
-                          }}
-                          className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded text-xs font-medium"
-                          title="删整个资源 (含所有链接)">
-                          🗑️ 删资源
-                        </button>
+                        <>
+                          <button
+                            onClick={async (e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (!confirm(`🗑️ 软删整个资源 (含所有链接)?\n\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}\n来源: ${selectedItem.source}\n链接: ${selectedItem.links?.length || 0} 条\n\n软删 = status='deleted', 可恢复\n不影响其他同名资源`)) return;
+                              const token = getToken();
+                              if (!token) {
+                                addToast('error', '❌ 未登录或 token 失效');
+                                return;
+                              }
+                              console.log('[DELETE resource] sending', { resourceId: selectedItem.id });
+                              const r = await fetch(`/api/admin/resources/${selectedItem.id}`, {
+                                method: 'DELETE',
+                                headers: { Authorization: 'Bearer ' + token },
+                              });
+                              const d = await r.json();
+                              console.log('[DELETE resource] response', r.status, d);
+                              if (d.ok) {
+                                addToast('success', `🗑️ 已软删 (${d.subLinks} 条链接, 资源可恢复)`);
+                                setSelectedItem(null);
+                                setTimeout(() => fetchItems(1), 500);
+                              } else if (r.status === 401) {
+                                addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
+                              } else if (r.status === 403) {
+                                addToast('error', `❌ 403 需要 admin 权限`);
+                              } else if (r.status === 404) {
+                                addToast('error', `❌ 404 资源不存在`);
+                              } else {
+                                addToast('error', `❌ ${r.status} ${d.error || '删除失败'}`);
+                              }
+                            }}
+                            className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded text-xs font-medium"
+                            title="软删: status='deleted', 可恢复">
+                            🗑️ 软删
+                          </button>
+                          <button
+                            onClick={async (e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              // 三级确认, 防止误操作
+                              if (!confirm(`🔥 硬删整个资源?\n\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}\n\n⚠️ 物理删除: 数据从数据库清空, 不可恢复\n⚠️ 同时级联删除 xx_resource_links / xx_link_feedback / xx_publish_log 全部关联行`)) return;
+                              if (!confirm(`🔥 真的要硬删?\n\n最后一次确认: 删除后无法恢复!\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}`)) return;
+                              const hardConfirm = prompt(`输入资源 ID ${selectedItem.id} 确认硬删:`);
+                              if (hardConfirm !== String(selectedItem.id)) {
+                                addToast('error', '❌ 硬删已取消 (ID 不匹配)');
+                                return;
+                              }
+                              const token = getToken();
+                              if (!token) {
+                                addToast('error', '❌ 未登录或 token 失效');
+                                return;
+                              }
+                              console.log('[DELETE resource hard] sending', { resourceId: selectedItem.id });
+                              const r = await fetch(`/api/admin/resources/${selectedItem.id}?hard=true`, {
+                                method: 'DELETE',
+                                headers: { Authorization: 'Bearer ' + token },
+                              });
+                              const d = await r.json();
+                              console.log('[DELETE resource hard] response', r.status, d);
+                              if (d.ok) {
+                                const cascaded = d.cascaded ? ` (副表 ${d.cascaded.xx_resource_links} 链接, ${d.cascaded.xx_link_feedback} 反馈)` : '';
+                                addToast('success', `🔥 已硬删, 不可恢复${cascaded}`);
+                                setSelectedItem(null);
+                                setTimeout(() => fetchItems(1), 500);
+                              } else if (r.status === 401) {
+                                addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
+                              } else if (r.status === 403) {
+                                addToast('error', `❌ 403 需要 admin 权限`);
+                              } else if (r.status === 404) {
+                                addToast('error', `❌ 404 资源不存在`);
+                              } else {
+                                addToast('error', `❌ ${r.status} ${d.error || '硬删失败'}`);
+                              }
+                            }}
+                            className="px-2 py-1 bg-red-700/30 hover:bg-red-700/50 text-red-200 rounded text-xs font-bold border border-red-500/30"
+                            title="硬删: 物理删除, 不可恢复">
+                            🔥 硬删
+                          </button>
+                        </>
                       )}
                       <button onClick={() => setSelectedItem(null)} className="p-1.5 hover:bg-white/10 rounded-lg transition text-white/40 hover:text-white">✕</button>
                     </div>
