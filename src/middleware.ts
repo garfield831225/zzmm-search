@@ -80,6 +80,7 @@ const PUBLIC_PATHS = [
   '/api/admin/diag-migrate-resource-links', // 2026-07-17 资源-链接 1对N 一次性迁移 (xx_resource_links + xx_link_feedback)
   '/api/admin/migrate-old-data',  // 2026-07-17 老数据入副表 (xx_resources → xx_resource_links)
   '/api/admin/links',             // 2026-07-17 admin 改/删资源链接
+  '/api/admin/resources',         // 2026-07-20 admin 删整个资源 (双轨鉴权)
   '/api/feedback',                // 2026-07-17 用户失效反馈 (Bearer 内部鉴权)
   '/api/admin/feedback',          // 2026-07-17 admin 反馈处理 (Bearer 内部鉴权)
   '/api/diag-multi-link',         // 2026-07-17 diag: 找多网盘资源示例
