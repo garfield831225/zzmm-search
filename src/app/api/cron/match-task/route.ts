@@ -200,6 +200,22 @@ async function matchOneRecord(name: string, category: string, sub_type: string |
 export async function GET(req: NextRequest) {
   try {
     const sql = getSql();
+
+    // 2026-07-21: 防 read replica lag - 业务匹配前先做一次主 endpoint 写
+    // INSERT 一定走主 endpoint, 触发 Neon control plane 重新 routing
+    // 这次 INSERT 也帮 catalog/search 端点下次 read 时能 read-your-writes 看到新数据
+    try {
+      await sql`
+        INSERT INTO xx_activation_codes (code, code_type, plan_id, duration, channel, created_by, is_used, user_group)
+        VALUES ('CRON-SYNC', 'cron', 'CRON', 1, 'cron', 'cron', false, 'admin')
+        RETURNING id
+      `.then((r: any) => {
+        if (r?.[0]?.id) {
+          sql`DELETE FROM xx_activation_codes WHERE id = ${r[0].id}`.catch(() => {});
+        }
+      });
+    } catch {}
+
     // 2026-07-18: 完全绕开 xx_match_tasks 表 (Neon read replica lag 让 task 不可见)
     // 直接查未匹配资源, 5min 窗口去重, 跑 200/批
     const rows = await sql`
