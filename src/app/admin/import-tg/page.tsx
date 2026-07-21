@@ -39,6 +39,12 @@ interface L3Status {
 const CHANNEL_OPTIONS = [
   { value: 'tg_baidu', label: 'TG 百度网盘', icon: '🅱️' },
   { value: 'tg_quark', label: 'TG 夸克网盘', icon: '🍊' },
+  { value: 'tg_aliyun', label: 'TG 阿里云盘', icon: '☁️' },
+  { value: 'tg_xunlei', label: 'TG 迅雷网盘', icon: '⚡' },
+  { value: 'tg_123', label: 'TG 123网盘', icon: '🔢' },
+  { value: 'tg_uc', label: 'TG UC网盘', icon: '🐻' },
+  { value: 'tg_tianyi', label: 'TG 天翼云盘', icon: '☁️' },
+  { value: 'tg_yidong', label: 'TG 移动云盘', icon: '📱' },
   { value: 'tg_music', label: 'TG 音乐', icon: '🎵' },
   { value: 'tg_other', label: 'TG 其他', icon: '📦' },
 ];

@@ -6,7 +6,7 @@
 export type ResourceSource = '115' | 'baidu' | 'quark' | 'aliyun' | 'xunlei' | '123' | 'uc' | 'tianyi' | 'yidong' | 'magnet' | 'ed2k' | 'telegra_ph' | 'other';
 export type ResourceAccessLevel = 'basic' | 'vip' | 'code';
 export type ResourcePayType = 'free' | 'code';
-export type ImportChannel = 'zezemom_excel' | 'tg_baidu' | 'tg_quark' | 'tg_music' | 'other';
+export type ImportChannel = 'zezemom_excel' | 'tg_baidu' | 'tg_quark' | 'tg_music' | 'tg_aliyun' | 'tg_xunlei' | 'tg_123' | 'tg_uc' | 'tg_tianyi' | 'tg_yidong' | 'other';
 
 // ─── 全局写死 sort 优先级 (G5-a) ────────────────────────────────────────
 // 打开组 (1-9) + 复制组 (10) — 所有资源统一按这个排
@@ -178,14 +178,26 @@ export function detectImportChannel(link: string, hint?: string): ImportChannel 
     if (h.includes('baidu')) return 'tg_baidu';
     if (h.includes('quark')) return 'tg_quark';
     if (h.includes('music')) return 'tg_music';
+    if (h.includes('aliyun') || h.includes('alipan')) return 'tg_aliyun';
+    if (h.includes('xunlei')) return 'tg_xunlei';
+    if (h.includes('123')) return 'tg_123';
+    if (h.includes('uc')) return 'tg_uc';
+    if (h.includes('tianyi') || h.includes('189')) return 'tg_tianyi';
+    if (h.includes('yidong') || h.includes('139')) return 'tg_yidong';
     if (h.includes('zezemom') || h.includes('zzmm')) return 'zezemom_excel';
   }
   // 没 hint 时按主链接 source 反推
   const src = detectSource(link);
   if (src === 'baidu') return 'tg_baidu';
   if (src === 'quark') return 'tg_quark';
+  if (src === 'aliyun') return 'tg_aliyun';
+  if (src === 'xunlei') return 'tg_xunlei';
+  if (src === '123') return 'tg_123';
+  if (src === 'uc') return 'tg_uc';
+  if (src === 'tianyi') return 'tg_tianyi';
+  if (src === 'yidong') return 'tg_yidong';
   if (src === '115') return 'zezemom_excel';
-  // 磁力/迅雷/123 等 → 算 tg 其他
+  // 磁力/ed2k → 算 tg 其他
   return 'other';
 }
 
