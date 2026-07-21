@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   if (!id) return NextResponse.json({ error: 'id 必填' }, { status: 400 });
   const sql = neon(process.env.DATABASE_URL || '');
   try {
-    const r = await sql`SELECT id, name, status, source, link IS NOT NULL as has_link, link_code IS NOT NULL as has_code, tmdb_id, tmdb_type, matched_tmdb_at, created_at, updated_at FROM xx_resources WHERE id = ${id}`;
+    const r = await sql`SELECT id, name, status, source, link IS NOT NULL as has_link, link_code IS NOT NULL as has_code, tmdb_id, matched_tmdb_at, created_at, updated_at FROM xx_resources WHERE id = ${id}`;
     const sub = await sql`SELECT id, source, url, status FROM xx_resource_links WHERE resource_id = ${id}`;
     return NextResponse.json({ found: r.length > 0, resource: r[0] || null, sub_links: sub });
   } catch (e: any) {
