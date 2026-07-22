@@ -77,6 +77,19 @@ const KEYWORD_CATEGORY_RULES: KeywordRule[] = [
   { patterns: ['纪录片', '纪录', 'BBC', 'NHK'], category: '纪录片', priority: 20 },
   // 演唱会 (优先级比音乐低因为音乐 keyword 已经覆盖部分)
   { patterns: ['演唱会', 'live', 'LIVE', 'concert', 'Concert', '巡演', '音乐会'], category: '演唱会', priority: 65 },
+  // 2026-07-22 加: 电影 keyword (2025) / WEB-4K / BluRay / WEB-DL / REMUX / 蓝光
+  // 之前 4K / WEB-DL 等没分类 → 全走"其他", 现加电影规则
+  { patterns: [
+    // 短链
+    'S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9',
+    // 网盘元数据
+    'WEB-DL', 'web.dl', 'WEBRip', 'webrip', 'BluRay', 'bluray', 'BD',
+    'REMUX', 'Remux', 'HDTV', 'UHD', 'HDR', 'DV', 'DoVi',
+    '4K', '1080p', '720p', '2160p', '1440p',
+    'x264', 'x265', 'H.264', 'H.265', 'HEVC', 'AVC', 'AV1',
+    'DTS', 'DTS-HD', 'TrueHD', 'Atmos', 'DDP', 'EAC3', 'AC3', 'AAC',
+    '蓝光', '原盘', '重制', '国配', '国语', '中字', '中英',
+  ], category: '电影', priority: 35 },
 ];
 
 // ─── 标准 category 列表 (匹配用, 不匹配则 fallback) ────────────────

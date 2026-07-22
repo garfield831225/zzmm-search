@@ -450,6 +450,26 @@ export async function POST(req: NextRequest) {
     },
     by_category: byCategory,
     by_source: bySource,
+    // 2026-07-22: 按网盘类型分类 - 用户要"每个类型的网盘都加一下"
+    // 包括 10 种网盘 (115/baidu/quark/aliyun/xunlei/123/uc/tianyi/yidong/magnet/ed2k)
+    by_source_disk: (() => {
+      const map: Record<string, number> = {};
+      for (const m of messages) {
+        if (!Array.isArray(m.text)) continue;
+        for (const t of m.text) {
+          if (typeof t === 'object' && (t.type === 'text_link' || t.type === 'link' || t.type === 'code')) {
+            const url = t.href || t.text || '';
+            if (url) {
+              const src = detectSource(url);
+              if (src !== 'other' && src !== 'telegra_ph') {
+                map[src] = (map[src] || 0) + 1;
+              }
+            }
+          }
+        }
+      }
+      return map;
+    })(),
     // 2026-07-21: 细分"非网盘跳过"按类型 - 导航站/TG频道/短链/图片 各自多少
     by_skipped_source: bySkippedSource,
     errors: errors.length > 0 ? errors : undefined,
