@@ -101,8 +101,17 @@ export function detectSource(link: string): ResourceSource {
   if (l.includes('aliyun.com') || l.includes('aliyundrive') || l.includes('alipan')) return 'aliyun';
   // 迅雷网盘
   if (l.includes('xunlei.com') || l.includes('pan.xunlei')) return 'xunlei';
-  // 123 网盘
-  if (l.includes('123pan.com') || l.includes('123685')) return '123';
+  // 123 网盘 (含官方短链服务: 123684 / 123865 / 123912 + 主域名 123pan.com/cn + share 子域)
+  // 2026-07-22 修复: 之前只识别 123pan.com 和 123685, 漏了 123684/123865/123912 等短链
+  // 短链服务的合法域名 (从 123684 主页 JS 拿到的):
+  //   SOURCE_DOMAINS = ['123865.com', '123912.com', '123684.com', '123pan.com', '123pan.cn']
+  if (
+    l.includes('123865.com') ||
+    l.includes('123912.com') ||
+    l.includes('123684.com') ||
+    l.includes('123pan.com') ||
+    l.includes('123pan.cn')
+  ) return '123';
   // UC 网盘
   if (l.includes('drive.uc.cn') || l.includes('uc.cn')) return 'uc';
   // 天翼云盘
