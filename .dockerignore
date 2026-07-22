@@ -1,0 +1,49 @@
+# ---- build artifacts ----
+node_modules
+.next
+.next/**
+out
+build
+dist
+*.tsbuildinfo
+
+# ---- git & logs ----
+.git
+.gitignore
+.gitattributes
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ---- env files (security) ----
+.env
+.env.*
+!.env.example
+
+# ---- editor & os ----
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# ---- test artifacts ----
+coverage
+.nyc_output
+playwright-report
+test-results
+
+# ---- docker assets (avoid recursion) ----
+docker
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+
+# ---- other ----
+data
+README.md
+*.md
+.eslintrc*
+.prettierrc*

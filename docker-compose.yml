@@ -1,16 +1,49 @@
+# ============================================================
+# zzmm-search production stack
+# services:
+#   - nextjs : Next.js standalone (port 3000, internal)
+#   - caddy  : reverse proxy + auto SSL (port 80, 443, exposed)
+# deploy on: 极空间 Z4 Pro (NAS) @ 192.168.3.8 / 223.72.106.229
+# domain: zzmm-search.uk (Cloudflare proxy enabled)
+# ============================================================
+
 services:
-  zzmm-search:
-    image: node:20-alpine
-    container_name: zzmm-search
+  nextjs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: zzmm-search:latest
+    container_name: zzmm-nextjs
+    restart: unless-stopped
+    env_file: .env.production
+    expose:
+      - "3000"
+    networks:
+      - appnet
+    # 注意: 不用 volumes bind mount, 数据走 Neon 远程
+    # 健康检查在 Dockerfile 里
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: zzmm-caddy
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "80:80"     # HTTP -> 自动 redirect to HTTPS
+      - "443:443"   # HTTPS -> reverse proxy to nextjs
     volumes:
-      - ./data:/app/data:ro
-    working_dir: /app
-    command: ["node", "server.js"]
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/meta"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # 自动 SSL 证书持久化
+      - caddy_config:/config
+    networks:
+      - appnet
+    depends_on:
+      - nextjs
+    # caddy 启动后会自动申请 Let's Encrypt 证书 (HTTP-01 challenge via port 80)
+
+networks:
+  appnet:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:

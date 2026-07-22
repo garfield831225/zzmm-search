@@ -1,0 +1,45 @@
+# ============================================================
+# zzmm-search.uk 反代 + 自动 SSL (Let's Encrypt HTTP-01)
+# Cloudflare proxy (orange cloud) -> NAS:443 -> Next.js:3000
+# CF SSL 模式: Full
+# ============================================================
+
+{
+    # admin API 关闭 (安全)
+    admin off
+    # log 写到 stdout
+    log default
+    email admin@zzmm-search.uk
+}
+
+# ---- 主域 ----
+zzmm-search.uk,
+www.zzmm-search.uk {
+    encode zstd gzip
+    reverse_proxy nextjs:3000 {
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Real-IP {remote_host}
+    }
+    header {
+        # security
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # 移除 server header
+        -Server
+    }
+    # log per-request to stdout
+    log {
+        output stdout
+        format console
+    }
+}
+
+# ---- 旧域名 301 跳转 ----
+# 如果用户后续把旧 zzmm-search.cc.cd 解析到 NAS, 这里跳新域名
+# (CF 已经可以配 Page Rules, 这块是兜底)
+zzmm-search.cc.cd,
+www.zzmm-search.cc.cd {
+    redir https://zzmm-search.uk{uri} permanent
+}
