@@ -81,7 +81,8 @@ export default function CodesPage() {
 
   // token 鉴权
   useEffect(() => {
-    const t = typeof window !== 'undefined' ? (localStorage.getItem('zzmm_token') || '') : '';
+    // 2026-07-20: 统一 token 读取 (token / adminToken / zzmm_token), login + register 两条路径都覆盖
+    const t = typeof window !== 'undefined' ? (localStorage.getItem('token') || localStorage.getItem('adminToken') || localStorage.getItem('zzmm_token') || '') : '';
     if (t) { setToken(t); setAuthed(true); }
   }, []);
 
@@ -96,7 +97,7 @@ export default function CodesPage() {
       if (fCodeType) params.set('code_type', fCodeType);
       if (fStatus) params.set('status', fStatus);
       if (fBatch) params.set('batch_id', fBatch);
-      const r = await fetch('/api/admin/codes?' + params, { headers: { Authorization: 'Bearer ' + token } });
+      const r = await fetch('/api/admin/codes?' + params, { credentials: 'include', headers: {  Authorization: 'Bearer ' + token  } });
       let d = await r.json();
       if (d.error) showToast('❌ ' + d.error);
       else {
@@ -125,7 +126,8 @@ export default function CodesPage() {
       if (genPlan === 'lumen') body.lumen_amount = genLumenAmount;
       const r = await fetch('/api/admin/codes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        credentials: 'include',
+        headers: {  'Content-Type': 'application/json', Authorization: 'Bearer ' + token  },
         body: JSON.stringify(body),
       });
       const d = await r.json();
@@ -146,7 +148,7 @@ export default function CodesPage() {
     if (!resourceSearch.trim()) { setResourceResults([]); return; }
     const t = setTimeout(async () => {
       try {
-        const r = await fetch(`/api/search?q=${encodeURIComponent(resourceSearch)}&pageSize=10`, { headers: { Authorization: 'Bearer ' + token } });
+        const r = await fetch(`/api/search?q=${encodeURIComponent(resourceSearch)}&pageSize=10`, { credentials: 'include', headers: {  Authorization: 'Bearer ' + token  } });
         const d = await r.json();
         setResourceResults((d.items || []).slice(0, 10));
       } catch {}
@@ -161,9 +163,10 @@ export default function CodesPage() {
   const markSent = async (ids: number[], sent: boolean, note?: string) => {
     if (!ids.length) return;
     const r = await fetch('/api/admin/codes', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-      body: JSON.stringify({ ids, sent_to_customer: sent, sent_note: note || null }),
+        method: 'PATCH',
+        credentials: 'include',
+        headers: {  'Content-Type': 'application/json', Authorization: 'Bearer ' + token  },
+        body: JSON.stringify({ ids, sent_to_customer: sent, sent_note: note || null }),
     });
     const d = await r.json();
     if (d.error) showToast('❌ ' + d.error);
@@ -438,9 +441,85 @@ export default function CodesPage() {
               {selectedIds.length > 0 && (
                 <>
                   <span className="text-sm text-violet-300">已选 {selectedIds.length} 个</span>
+                  <button
+                    onClick={() => {
+                      const picked = codes.filter(c => selectedIds.includes(c.id));
+                      copyText(picked.map(c => c.code).join('\n'), `已复制 ${picked.length} 个码`);
+                    }}
+                    className="px-2 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded text-xs text-amber-300 flex items-center gap-1"
+                  >
+                    <Copy className="w-3 h-3" /> 复制选中
+                  </button>
+                  <button
+                    onClick={() => {
+                      const picked = codes.filter(c => selectedIds.includes(c.id));
+                      const txt = picked.map(c => c.code).join('\n');
+                      const blob = new Blob([txt], { type: 'text/plain' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a'); a.href = url; a.download = `codes_selected_${Date.now()}.txt`; a.click();
+                      URL.revokeObjectURL(url);
+                      showToast('✅ 已下载 .txt');
+                    }}
+                    className="px-2 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded text-xs text-amber-300 flex items-center gap-1"
+                  >
+                    <Download className="w-3 h-3" /> 导出 .txt
+                  </button>
+                  <button
+                    onClick={() => {
+                      const picked = codes.filter(c => selectedIds.includes(c.id));
+                      const lines = ['code,plan_id,duration,channel,batch_id,is_used,created_at'];
+                      for (const c of picked) {
+                        lines.push(`${c.code},${c.plan_id || ''},${c.duration || ''},${c.channel || ''},${c.batch_id || ''},${c.is_used},${c.created_at}`);
+                      }
+                      const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a'); a.href = url; a.download = `codes_selected_${Date.now()}.csv`; a.click();
+                      URL.revokeObjectURL(url);
+                      showToast('✅ 已下载 .csv');
+                    }}
+                    className="px-2 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded text-xs text-amber-300 flex items-center gap-1"
+                  >
+                    <Download className="w-3 h-3" /> 导出 .csv
+                  </button>
                   <input value={sentNote} onChange={e => setSentNote(e.target.value)} placeholder="备注(可选)" className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-xs w-32" />
                   <button onClick={() => markSent(selectedIds, true, sentNote)} className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 rounded text-xs">📦 标记已发</button>
                   <button onClick={() => markSent(selectedIds, false)} className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-xs">↩️ 取消已发</button>
+                  <button
+                    onClick={async () => {
+                      const days = prompt(`延期 ${selectedIds.length} 个激活码 (1-3650 天):`, '30');
+                      const n = parseInt(days || '', 10);
+                      if (!n || n < 1 || n > 3650) { showToast('❌ 天数 1-3650'); return; }
+                      const r = await fetch('/api/admin/codes', {
+                        method: 'PATCH',
+                        credentials: 'include',
+                        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+                        body: JSON.stringify({ extend: true, ids: selectedIds, days: n }),
+                      });
+                      const d = await r.json();
+                      if (d.error) showToast('❌ ' + d.error);
+                      else { showToast(`✅ ${d.updated} 个延期到 ${new Date(d.expires_at).toLocaleDateString('zh-CN')}`); fetchList(); }
+                    }}
+                    className="px-2 py-1 bg-violet-500/20 hover:bg-violet-500/30 border border-violet-500/30 rounded text-xs text-violet-300"
+                  >
+                    🗓 延期选中
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`确认删除选中的 ${selectedIds.length} 个激活码？(只删未使用)`)) return;
+                      const r = await fetch('/api/admin/codes', {
+                        method: 'DELETE',
+                        credentials: 'include',
+                        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+                        body: JSON.stringify({ action: 'batch', ids: selectedIds }),
+                      });
+                      const d = await r.json();
+                      if (d.error) showToast('❌ ' + d.error);
+                      else { showToast(`✅ 删除 ${d.deleted} 个${d.deleted < d.requested ? ` (跳过 ${d.requested - d.deleted} 个已用)` : ''}`); fetchList(); }
+                    }}
+                    className="px-2 py-1 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 rounded text-xs text-red-300 flex items-center gap-1"
+                  >
+                    <X className="w-3 h-3" /> 删除选中
+                  </button>
                 </>
               )}
               <button onClick={fetchList} disabled={loading} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-sm flex items-center gap-1">

@@ -307,8 +307,40 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, 
         return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
       }
     }
+    // 2026-07-14 第五优先: bigram 相似度兜底 (处理 "珊瑚礁水族馆" vs "Coral Reef Aquarium" 这种同义不同形)
+    for (const c of candidates) {
+      const t = c.result.title || c.result.name || '';
+      if (!t) continue;
+      const tn = norm(t);
+      if (bigramSim(cn, tn) >= 0.6) {
+        return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
+      }
+    }
     return null;
   } catch { return null; }
+}
+
+// 2026-07-14 bigram 相似度 (用于匹配 "珊瑚礁水族馆" vs "Coral Reef Aquarium" 这种同义不同形)
+function normStr(s: string) {
+  return s.toLowerCase().replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '').trim();
+}
+function bigramSet(s: string) {
+  const cs = Array.from(s);
+  const pairs: string[] = [];
+  for (let i = 0; i < cs.length - 1; i++) pairs.push(cs[i] + cs[i + 1]);
+  if (cs.length === 1) pairs.push(cs[0]);
+  return pairs;
+}
+function bigramSim(a: string, b: string): number {
+  if (!a || !b) return 0;
+  const a0 = normStr(a), b0 = normStr(b);
+  if (!a0 || !b0) return 0;
+  if (a0 === b0) return 1;
+  const sA = bigramSet(a0), sB = bigramSet(b0);
+  let inter = 0;
+  for (let i = 0; i < sA.length; i++) { if (sB.includes(sA[i])) inter++; }
+  const u = sA.length + sB.length - inter;
+  return u === 0 ? 0 : inter / u;
 }
 
 // sub_type → tmdb 类型
@@ -360,25 +392,27 @@ async function matchOne(rawName: string, category: string, subType: string | nul
       ];
 
     // 强制按类别决定 TMDB 搜索类型（关键！剧集不能匹配 movie，电影不能匹配 tv）
+    // 2026-07-14: 加 tv 兜底 (很多"电影"分类的 IMAX/纪录片实际是 tv; 默认加 tv 让召回率提升)
     let typeOrder: ('tv' | 'movie')[];
     if (category === '演唱会') {
-      typeOrder = ['movie'];
+      typeOrder = ['movie', 'tv'];
     } else if (category === '纪录片') {
       typeOrder = ['tv', 'movie'];
     } else if (subType) {
       // 有 sub_type → 直接按 sub_type 查对应类型
       const tmdbType = subTypeToTmdb(subType);
-      typeOrder = [tmdbType];
+      typeOrder = [tmdbType, tmdbType === 'movie' ? 'tv' : 'movie'];
     } else if (['连载', '剧集', '动漫', '综艺', '少儿频道'].includes(category)) {
       // 剧集类只搜 tv
       typeOrder = ['tv'];
     } else if (['电影', '华语电影', '外语电影', '动画电影', 'REMUX', '系列电影'].includes(category)) {
-      // 电影类只搜 movie
-      typeOrder = ['movie'];
+      // 电影类先 movie, 再 tv 兜底 (IMAX 纪录片经常被分类为"电影")
+      typeOrder = ['movie', 'tv'];
     } else if (season !== null) {
       typeOrder = ['tv'];
     } else {
-      typeOrder = ['movie'];
+      // 默认兜底: movie + tv
+      typeOrder = ['movie', 'tv'];
     }
 
     let keyIdx = 0;

@@ -16,32 +16,35 @@ export async function GET() {
     path: '/',
   });
 
-  // 干扰线 - 浅灰色
-  const lines = Array.from({ length: 6 }, () => {
+  // 2026-07-14 修法 B: 字符更清晰
+  // 1) 干扰线 6 → 2, 透明度 0.6 → 0.25, 颜色 #666 → #444 (更淡, 不抢字符)
+  // 2) 噪点 15 → 6, 透明度 0.4 → 0.3
+  // 3) 字符旋转 ±12.5° → 0° (不旋转, 减少误读)
+  // 4) 字符间距 27 → 30 (加宽, 避免重叠)
+  // 5) 字体 24 → 26 (更大)
+  const lines = Array.from({ length: 2 }, () => {
     const x1 = Math.random() * 120;
     const y1 = Math.random() * 40;
     const x2 = Math.random() * 120;
     const y2 = Math.random() * 40;
-    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#666666" stroke-width="1.5" opacity="0.6"/>`;
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#444444" stroke-width="1" opacity="0.25"/>`;
   }).join('');
 
-  // 噪点 - 灰色小点
-  const dots = Array.from({ length: 15 }, () => {
+  const dots = Array.from({ length: 6 }, () => {
     const x = Math.random() * 120;
     const y = Math.random() * 40;
-    return `<circle cx="${x}" cy="${y}" r="1" fill="#555555" opacity="0.4"/>`;
+    return `<circle cx="${x}" cy="${y}" r="1" fill="#555555" opacity="0.3"/>`;
   }).join('');
 
-  // 字母 - 纯白+微旋转
+  // 字符: 不旋转, y 略小波动, 字体更大, 间距更宽
   const letters = code.split('').map((c, i) => {
-    const x = 16 + i * 27;
-    const y = 28 + (Math.random() - 0.5) * 6;
-    const rotate = (Math.random() - 0.5) * 25;
-    return `<text x="${x}" y="${y}" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#ffffff" transform="rotate(${rotate}, ${x}, ${y})">${c}</text>`;
+    const x = 15 + i * 30;
+    const y = 30 + (Math.random() - 0.5) * 2;  // 上下微调 ±1px
+    return `<text x="${x}" y="${y}" font-family="Arial, sans-serif" font-size="26" font-weight="bold" fill="#ffffff">${c}</text>`;
   }).join('');
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40">
-  <rect width="120" height="40" fill="#1a1a2e" rx="6"/>
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="130" height="40">
+  <rect width="130" height="40" fill="#1a1a2e" rx="6"/>
   ${lines}
   ${dots}
   ${letters}

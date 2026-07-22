@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import {
-  BarChart3, Users, Key, FileText, Target, Upload, DollarSign,
+  BarChart3, Users, Key, FileText, Target, Upload, DollarSign, MessageSquareWarning,
   ShieldOff, Code2, Settings, ListChecks, Database, Network, Activity,
   Zap, Server, AlertCircle, Tv, ExternalLink, RefreshCw, CheckCircle2, XCircle,
 } from 'lucide-react';
@@ -25,8 +25,10 @@ interface Card {
 const CARDS: Card[] = [
   // ===== 资源管理 (zzmm-search 内部) =====
   { id: 'import', title: '泽泽妈文档导入', desc: '21 sheet 文档批量导入', icon: Upload, href: '/admin/import', category: '资源管理', color: 'text-violet-700', bg: 'bg-violet-50 hover:bg-violet-100' },
+  { id: 'import-tg', title: 'TG 频道导入', desc: 'result.json → VIP 锁资源 (L1+L2+L3 队列)', icon: Network, href: '/admin/import-tg', category: '资源管理', color: 'text-cyan-700', bg: 'bg-cyan-50 hover:bg-cyan-100' },
   { id: 'match', title: 'TMDB 匹配', desc: '单条手动匹配 / 占位符识别', icon: Target, href: '/admin/match', category: '资源管理', color: 'text-blue-700', bg: 'bg-blue-50 hover:bg-blue-100' },
   { id: 'tg-organize', title: 'TG 群整理', desc: '115 群消息审核入库', icon: ListChecks, href: '/admin/tg-organize', category: '资源管理', color: 'text-cyan-700', bg: 'bg-cyan-50 hover:bg-cyan-100' },
+  { id: 'feedback', title: '失效反馈', desc: '用户链接失效反馈处理', icon: MessageSquareWarning, href: '/admin/feedback', category: '资源管理', color: 'text-amber-700', bg: 'bg-amber-50 hover:bg-amber-100' },
   { id: 'pay-config', title: '单条付费配置', desc: '按类别/资源设 unlock 价格', icon: DollarSign, href: '/admin/pay-config', category: '资源管理', color: 'text-emerald-700', bg: 'bg-emerald-50 hover:bg-emerald-100' },
   { id: 'publish', title: '手动发布资源', desc: '发布单条到主站', icon: FileText, href: '/admin/publish', category: '资源管理', color: 'text-amber-700', bg: 'bg-amber-50 hover:bg-amber-100' },
 
@@ -34,7 +36,7 @@ const CARDS: Card[] = [
   { id: 'invites', title: '邀请码', desc: '生成/列表/复制/清理', icon: Key, href: '/admin/invites', category: '用户管理', color: 'text-rose-700', bg: 'bg-rose-50 hover:bg-rose-100' },
   { id: 'blacklist', title: '黑名单', desc: '用户/IP/设备拉黑', icon: ShieldOff, href: '/admin/blacklist', category: '用户管理', color: 'text-red-700', bg: 'bg-red-50 hover:bg-red-100' },
   { id: 'codes', title: '激活码', desc: '4 模板 + 流明码', icon: Code2, href: '/admin/codes', category: '用户管理', color: 'text-pink-700', bg: 'bg-pink-50 hover:bg-pink-100' },
-  { id: 'users', title: '用户列表', desc: '查/改用户状态', icon: Users, href: '/api/admin/users?pageSize=50', category: '用户管理', color: 'text-fuchsia-700', bg: 'bg-fuchsia-50 hover:bg-fuchsia-100', external: true },
+  { id: 'users', title: '用户列表', desc: '查/改用户状态', icon: Users, href: '/admin/users', category: '用户管理', color: 'text-fuchsia-700', bg: 'bg-fuchsia-50 hover:bg-fuchsia-100' },
 
   // ===== 统计 =====
   { id: 'stats-dashboard', title: '数据大屏', desc: '6 大总览 + 4 图表', icon: BarChart3, href: '/admin/stats-dashboard', category: '数据统计', color: 'text-indigo-700', bg: 'bg-indigo-50 hover:bg-indigo-100' },
@@ -74,15 +76,20 @@ export default function AdminDashboard() {
   const [bridgeHealth, setBridgeHealth] = useState<any>(null);
 
   useEffect(() => {
-    const cookieToken = document.cookie.split('; ').find(r => r.startsWith('zzmm_token='))?.split('=')[1];
-    if (!cookieToken) {
+    // 2026-07-17: 之前用 document.cookie 读 httpOnly cookie 永远读不到, 改用 localStorage
+    try {
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      if (u?.group !== 'admin') {
+        router.push('/login?redirect=/admin');
+        return;
+      }
+      setAuthed(true);
+      setChecking(false);
+      fetchStats();
+      fetchBridge();
+    } catch {
       router.push('/login?redirect=/admin');
-      return;
     }
-    setAuthed(true);
-    setChecking(false);
-    fetchStats();
-    fetchBridge();
   }, [router]);
 
   const fetchStats = async () => {

@@ -54,8 +54,8 @@ export default function ShopPage() {
             </div>
             <div className="bg-white/5 rounded-xl p-5 border border-white/5">
               <div className="text-2xl mb-2">2️⃣</div>
-              <h3 className="font-semibold mb-1">扫码支付</h3>
-              <p className="text-xs text-white/50">联系站长微信 / 支付宝转账</p>
+              <h3 className="font-semibold mb-1">添加店长微信</h3>
+              <p className="text-xs text-white/50">联系店长微信转账</p>
             </div>
             <div className="bg-white/5 rounded-xl p-5 border border-white/5">
               <div className="text-2xl mb-2">3️⃣</div>
@@ -65,26 +65,15 @@ export default function ShopPage() {
           </div>
 
           {/* 联系方式 */}
-          <div className="grid md:grid-cols-2 gap-4 mb-6">
+          <div className="mb-6">
             <div className="bg-gradient-to-br from-green-600/10 to-emerald-600/10 border border-green-500/20 rounded-xl p-5">
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-2xl">💬</span>
-                <h3 className="font-semibold text-green-300">微信支付</h3>
+                <h3 className="font-semibold text-green-300">添加店长微信</h3>
               </div>
-              <p className="text-sm text-white/70 mb-2">添加站长微信（HK 麦盘人）</p>
+              <p className="text-sm text-white/70 mb-2">添加店长微信（HK 麦盘人）</p>
               <div className="bg-black/30 rounded-lg p-3 text-center">
-                <code className="text-lg font-mono text-green-300">HK_Maipan_ZeZe</code>
-              </div>
-              <p className="text-xs text-white/40 mt-2">备注：泽泽妈妈资源 + 资源名</p>
-            </div>
-            <div className="bg-gradient-to-br from-blue-600/10 to-cyan-600/10 border border-blue-500/20 rounded-xl p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-2xl">💰</span>
-                <h3 className="font-semibold text-blue-300">支付宝</h3>
-              </div>
-              <p className="text-sm text-white/70 mb-2">扫码转账（截图发给站长）</p>
-              <div className="bg-black/30 rounded-lg p-3 text-center">
-                <code className="text-lg font-mono text-blue-300">hk_maipan@163.com</code>
+                <code className="text-lg font-mono text-green-300">HKmaipanren</code>
               </div>
               <p className="text-xs text-white/40 mt-2">备注：泽泽妈妈资源 + 资源名</p>
             </div>
@@ -119,7 +108,7 @@ export default function ShopPage() {
         </motion.div>
 
         <p className="text-center text-xs text-white/30 mt-6">
-          有问题？联系站长微信 HK_Maipan_ZeZe
+          有问题？联系店长微信 HKmaipanren
         </p>
       </div>
     </div>

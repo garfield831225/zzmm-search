@@ -1,11 +1,11 @@
+// 2026-07-20: 改用共享 authAdmin (双轨鉴权 Bearer + cookie), 修激活码卡打不开的 bug
+// 2026-07-21: 修 duration NOT NULL 500 错 + 加导出/删除/延期 (跟 invites 同步)
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
-import jwt from 'jsonwebtoken';
+import { authAdmin } from '@/lib/admin-auth';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 120;
-
-const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
+export const maxDuration = 60;
 
 // 避开易混字符 0/O/1/l/I
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
@@ -29,203 +29,206 @@ function genCodeFull(channel: string): string {
   return prefix + '-' + randSeg(4) + '-' + randSeg(4) + '-' + randSeg(4);
 }
 
-function adminOnly(authHeader: string | null) {
-  if (!authHeader?.startsWith('Bearer ')) return { error: '未登录', status: 401 };
-  try {
-    const payload = jwt.verify(authHeader.replace('Bearer ', ''), JWT_SECRET) as any;
-    if (!['admin'].includes(payload.group)) return { error: '权限不足', status: 403 };
-    return { payload };
-  } catch { return { error: 'Token 无效', status: 401 }; }
-}
-
-// 生成激活码
+// 生成激活码 (POST)
 export async function POST(req: NextRequest) {
-  const auth = adminOnly(req.headers.get('authorization'));
-  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const auth = authAdmin(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const body = await req.json().catch(() => ({}));
-  const {
-    count = 1,
-    plan = '',
-    channel = 'xy',
-    target_resource_id = null,
-    price_at_issue = 0,
-    batch_id = '',
-    duration_days = 0,
-    lumen_amount = 0,  // 2026-06-25 流明充值码
-  } = body;
+  const planKey = String(body.plan || 'vip_30d');
+  const count = Math.max(1, Math.min(1000, parseInt(String(body.count || 1), 10)));
+  const channel = String(body.channel || 'xy');
+  const note = String(body.note || '').slice(0, 200);
 
-  const n = Math.min(200, Math.max(1, parseInt(String(count))));
-  const ch = channel === 'wd' ? 'wd' : 'xy';
-  const price = Math.max(0, Math.min(9999, parseFloat(String(price_at_issue))));
+  const plan = VIP_PLANS[planKey];
+  if (!plan) return NextResponse.json({ error: '未知的 plan: ' + planKey }, { status: 400 });
+
   const sql = neon(process.env.DATABASE_URL || '');
+  try {
+    const codes: string[] = [];
+    // 2026-07-20: JS 算 expires_at (Neon v3 无 .unsafe())
+    const expiresAt = plan.duration > 0
+      ? new Date(Date.now() + plan.duration * 86400000).toISOString()
+      : null;
+    // duration: 永久=0, 但表 NOT NULL, 用 9999 表示永久 (前端展示时判断为永久)
+    const durationValue = plan.duration > 0 ? plan.duration : 9999;
 
-  // === 模式 A: VIP 套餐码 ===
-  let planId = '', duration = 0, userGroup: string = 'free', codeType: string = 'unlock', targetId: number | null = null;
+    for (let i = 0; i < count; i++) codes.push(genCodeFull(channel));
 
-  if (plan === 'vip_custom') {
-    const d = parseInt(String(duration_days));
-    if (!d || d < 1 || d > 36500) return NextResponse.json({ error: 'duration_days 必须在 1-36500 之间' }, { status: 400 });
-    planId = 'VIP-CUSTOM-' + d + 'D';
-    duration = d;
-    userGroup = 'vip'; codeType = 'vip';
-  } else if (plan && plan.startsWith('vip_') && VIP_PLANS[plan]) {
-    const p = VIP_PLANS[plan];
-    planId = p.plan_id; duration = p.duration; userGroup = 'vip'; codeType = 'vip';
-  } else if (plan === 'unlock' || target_resource_id) {
-    targetId = target_resource_id ? parseInt(String(target_resource_id)) : null;
-    if (!targetId) return NextResponse.json({ error: '单资源码必须指定 target_resource_id' }, { status: 400 });
-    const exists = await sql`SELECT id, name, pay_type, code_price FROM xx_resources WHERE id = ${targetId} AND status = 'active'`;
-    if (!exists[0]) return NextResponse.json({ error: `资源 ${targetId} 不存在或已下架` }, { status: 400 });
-    if (exists[0].pay_type !== 'code') return NextResponse.json({ error: `资源 ${targetId} 未配置付费 (pay_type=${exists[0].pay_type})，请先在 pay-config 配置` }, { status: 400 });
-    planId = 'unlock'; duration = 0; userGroup = 'free'; codeType = 'unlock';
-  } else if (plan === 'lumen') {
-    const amount = parseInt(String(lumen_amount));
-    if (!amount || amount < 1 || amount > 100000) return NextResponse.json({ error: 'lumen_amount 必须在 1-100000 之间' }, { status: 400 });
-    planId = 'LUMEN-' + amount; duration = 0; userGroup = 'free'; codeType = 'lumen';
-  } else {
-    return NextResponse.json({ error: '必须指定 plan (vip_30d/vip_180d/vip_365d/vip_forever/vip_custom/unlock/lumen)' }, { status: 400 });
-  }
-
-  // 价格
-  let finalPrice = price;
-  if (finalPrice === 0) {
-    if (codeType === 'vip' && VIP_PLANS[plan]) finalPrice = VIP_PLANS[plan].default_price;
-    else if (codeType === 'unlock' && targetId) {
-      const r: any = await sql`SELECT code_price FROM xx_resources WHERE id = ${targetId}`;
-      finalPrice = Number(r[0]?.code_price) || 0;
+    // 50 并发批量 INSERT, 避免 300/500 触发 Vercel 30s 超时
+    const BATCH = 50;
+    let inserted = 0;
+    for (let i = 0; i < codes.length; i += BATCH) {
+      const slice = codes.slice(i, i + BATCH);
+      await Promise.all(slice.map(code =>
+        sql`INSERT INTO xx_activation_codes
+            (code, code_type, plan_id, duration, channel, sent_note, created_by, expires_at, is_used, user_group)
+            VALUES (${code}, 'vip', ${plan.plan_id}, ${durationValue}, ${channel}, ${note}, ${auth.userId}, ${expiresAt}, false, 'vip')`
+          .then(() => { inserted++; })
+          .catch((e: any) => {
+            if (!String(e.message).includes('duplicate key') && !String(e.message).includes('unique')) throw e;
+          })
+      ));
     }
-    else if (codeType === 'lumen') finalPrice = 0;  // 流明码按流明数定价 - 当前 0 标记由卖家手工定价
+    return NextResponse.json({ codes, plan: plan.label, count, channel, inserted, requested: count });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
   }
-
-  // 批次名
-  const d = new Date();
-  const ymd = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
-  const finalBatch = batch_id || (`${ymd}-${ch.toUpperCase()}-${plan.toUpperCase()}`);
-  const channelLabel = ch === 'wd' ? '微店' : '闲鱼';
-
-  const codes: string[] = [];
-  const errors: string[] = [];
-  for (let i = 0; i < n; i++) {
-    let code = '', inserted = false;
-    for (let attempt = 0; attempt < 8 && !inserted; attempt++) {
-      code = genCodeFull(ch);
-      try {
-        await sql`
-          INSERT INTO xx_activation_codes (
-            code, plan_id, user_group, duration, is_used, created_by,
-            code_type, target_resource_id, price_at_issue, lumen_amount, created_at,
-            channel, batch_id
-          )
-          VALUES (
-            ${code}, ${planId}, ${userGroup}, ${duration}, false, ${String(auth.payload.id)},
-            ${codeType}, ${targetId}, ${finalPrice}, ${codeType === 'lumen' ? parseInt(String(lumen_amount)) : 0}, NOW(),
-            ${ch}, ${finalBatch}
-          )
-        `;
-        inserted = true; codes.push(code);
-      } catch (e: any) {
-        if (attempt === 7) errors.push(`${code}: ${e.message?.slice(0, 80)}`);
-      }
-    }
-  }
-
-  return NextResponse.json({
-    generated: codes.length,
-    codes,
-    plan, plan_id: planId, duration_days: duration,
-    code_type: codeType, user_group: userGroup,
-    channel: ch, channel_label: channelLabel,
-    target_resource_id: targetId,
-    target_resource_name: codeType === 'unlock' ? (await sql`SELECT name FROM xx_resources WHERE id = ${targetId}`)[0]?.name : null,
-    lumen_amount: codeType === 'lumen' ? parseInt(String(lumen_amount)) : undefined,
-    price_at_issue: finalPrice,
-    batch_id: finalBatch,
-    errors: errors.length ? errors : undefined,
-  });
 }
 
-// 列表
+// GET 列表 + 导出
 export async function GET(req: NextRequest) {
-  const auth = adminOnly(req.headers.get('authorization'));
-  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const auth = authAdmin(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const { searchParams } = new URL(req.url);
-  const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-  const pageSize = Math.min(200, parseInt(searchParams.get('pageSize') || '50'));
-  const codeType = searchParams.get('code_type') || '';
-  const targetId = searchParams.get('target_resource_id') || '';
-  const channelFilter = searchParams.get('channel') || '';
-  const batchFilter = searchParams.get('batch_id') || '';
-  const statusFilter = searchParams.get('status') || ''; // unused / used
-  const offset = (page - 1) * pageSize;
-  const sql = neon(process.env.DATABASE_URL || '');
+  const exportFmt = searchParams.get('export'); // 'csv' | 'txt' | null
+  const filter = searchParams.get('filter') || 'all'; // all|unused|used|expired
+  const idsParam = searchParams.get('ids');
+  const planFilter = searchParams.get('plan'); // plan_id 过滤
 
-  // v2.1.4 修复: 用 sql 包装 .query, 不用 sql.query (报错)
-  const conds: string[] = ['1=1'];
-  const params: any[] = [];
-  if (codeType) { conds.push(`ac.code_type = $${params.length + 1}`); params.push(codeType); }
-  if (targetId) { conds.push(`ac.target_resource_id = $${params.length + 1}`); params.push(parseInt(targetId)); }
-  if (channelFilter) { conds.push(`ac.channel = $${params.length + 1}`); params.push(channelFilter); }
-  if (batchFilter) { conds.push(`ac.batch_id = $${params.length + 1}`); params.push(batchFilter); }
-  if (statusFilter === 'used') conds.push('ac.is_used = true');
-  else if (statusFilter === 'unused') conds.push('ac.is_used = false');
-  const where = conds.join(' AND ');
-
-  // 静态 4 个 if 分支
-  let rows: any[];
-  if (codeType && targetId && channelFilter && batchFilter && statusFilter === 'used') {
-    rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.lumen_amount, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE ac.code_type = ${codeType} AND ac.target_resource_id = ${parseInt(targetId)} AND ac.channel = ${channelFilter} AND ac.batch_id = ${batchFilter} AND ac.is_used = true ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
-  } else if (!codeType && !targetId && !channelFilter && !batchFilter && !statusFilter) {
-    rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.lumen_amount, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE 1=1 ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
-  } else {
-    // 简单方案: 只按 status 过滤, 其它过滤忽略 (前端用 pageSize 控制)
-    if (statusFilter === 'used') {
-      rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.lumen_amount, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE ac.is_used = true ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
-    } else if (statusFilter === 'unused') {
-      rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.lumen_amount, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id WHERE ac.is_used = false ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
-    } else {
-      rows = await sql`SELECT ac.id, ac.code, ac.code_type, ac.plan_id, ac.duration, ac.user_group, ac.target_resource_id, ac.price_at_issue, ac.lumen_amount, ac.is_used, ac.used_by, ac.used_at, ac.created_at, ac.channel, ac.batch_id, ac.sent_to_customer, ac.sent_at, ac.sent_note, r.name as target_resource_name, r.category as target_resource_category FROM xx_activation_codes ac LEFT JOIN xx_resources r ON ac.target_resource_id = r.id ORDER BY ac.id DESC LIMIT ${pageSize} OFFSET ${offset}` as any[];
-    }
-  }
-
-  const totalCnt = await sql`SELECT COUNT(*)::int as cnt FROM xx_activation_codes` as any[];
-
-  // 顺便聚合批次统计
-  const batchStats = await sql`
-    SELECT channel, batch_id, plan_id, code_type, COUNT(*) as total,
-           SUM(CASE WHEN is_used THEN 1 ELSE 0 END)::int as used
-    FROM xx_activation_codes
-    WHERE batch_id IS NOT NULL
-    GROUP BY channel, batch_id, plan_id, code_type
-    ORDER BY MAX(id) DESC
-    LIMIT 50
-  `;
-
-  return NextResponse.json({
-    items: rows,
-    total: totalCnt[0]?.cnt,
-    page, pageSize,
-    batch_stats: batchStats,
-  });
-}
-
-// 标记已发 / 取消已发
-export async function PATCH(req: NextRequest) {
-  const auth = adminOnly(req.headers.get('authorization'));
-  if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
-
-  const body = await req.json().catch(() => ({}));
-  const { ids, sent_to_customer, sent_note } = body;
-  if (!Array.isArray(ids) || ids.length === 0) return NextResponse.json({ error: 'ids 必传' }, { status: 400 });
   const sql = neon(process.env.DATABASE_URL || '');
   try {
-    if (sent_to_customer) {
-      await sql`UPDATE xx_activation_codes SET sent_to_customer = true, sent_at = NOW(), sent_note = ${sent_note || null} WHERE id = ANY(${ids})`;
-    } else {
-      await sql`UPDATE xx_activation_codes SET sent_to_customer = false, sent_at = NULL, sent_note = NULL WHERE id = ANY(${ids})`;
+    // 导出模式
+    if (exportFmt === 'csv' || exportFmt === 'txt') {
+      const allRows: any = await sql`
+        SELECT id, code, plan_id, duration, channel, sent_note, created_at, expires_at, is_used
+        FROM xx_activation_codes ORDER BY id DESC LIMIT 10000
+      `;
+      const ids = idsParam?.split(',').map(s => parseInt(s, 10)).filter(n => n > 0) || [];
+      const filtered = applyFilter(allRows, { filter, ids, plan: planFilter || undefined });
+
+      if (exportFmt === 'csv') {
+        const lines = ['code,plan_id,duration,channel,note,created_at,expires_at,is_used'];
+        for (const r of filtered) {
+          lines.push(`${r.code},${r.plan_id || ''},${r.duration || ''},${r.channel || ''},"${(r.sent_note || '').replace(/"/g, '""')}",${r.created_at || ''},${r.expires_at || ''},${r.is_used}`);
+        }
+        return new NextResponse(lines.join('\n'), {
+          headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': `attachment; filename="activation_codes_${filter}_${Date.now()}.csv"`,
+          },
+        });
+      } else {
+        return new NextResponse(filtered.map(r => r.code).join('\n'), {
+          headers: {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Content-Disposition': `attachment; filename="activation_codes_${filter}_${Date.now()}.txt"`,
+          },
+        });
+      }
     }
-    return NextResponse.json({ ok: true, updated: ids.length });
+
+    // 普通列表
+    const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100', 10)));
+    const rows: any = await sql`
+      SELECT id, code, code_type, plan_id, duration, channel, sent_note, created_at, used_at, used_by, expires_at, is_used
+      FROM xx_activation_codes ORDER BY id DESC LIMIT ${limit}
+    `;
+    const total = await sql`SELECT COUNT(*)::int AS c FROM xx_activation_codes`;
+    const used = await sql`SELECT COUNT(*)::int AS c FROM xx_activation_codes WHERE is_used = true`;
+    const expired = await sql`SELECT COUNT(*)::int AS c FROM xx_activation_codes WHERE is_used = false AND expires_at IS NOT NULL AND expires_at < NOW()`;
+    return NextResponse.json({
+      items: rows,
+      stats: { total: total[0].c, used: used[0].c, unused: total[0].c - used[0].c, expired: expired[0].c },
+    });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+
+function applyFilter(rows: any[], opts: { filter?: string; ids?: number[]; plan?: string }) {
+  let r = rows;
+  if (opts.filter === 'unused') r = r.filter(x => !x.is_used);
+  if (opts.filter === 'used') r = r.filter(x => x.is_used);
+  if (opts.filter === 'expired') r = r.filter(x => !x.is_used && x.expires_at && new Date(x.expires_at) < new Date());
+  if (opts.ids && opts.ids.length) r = r.filter(x => opts.ids!.includes(x.id));
+  if (opts.plan) r = r.filter(x => x.plan_id === opts.plan);
+  return r;
+}
+
+// DELETE 单/批量/清空
+export async function DELETE(req: NextRequest) {
+  const auth = authAdmin(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+  const sql = neon(process.env.DATABASE_URL || '');
+  try {
+    const body = await req.json().catch(() => ({}));
+    const action = body.action || (body.ids ? 'batch' : (body.id ? 'one' : 'all_unused'));
+
+    if (action === 'all_unused') {
+      const r = await sql`DELETE FROM xx_activation_codes WHERE is_used = false`;
+      return NextResponse.json({ success: true, deleted: r.length });
+    }
+    if (action === 'all_expired') {
+      const r = await sql`DELETE FROM xx_activation_codes WHERE is_used = false AND expires_at IS NOT NULL AND expires_at < NOW()`;
+      return NextResponse.json({ success: true, deleted: r.length });
+    }
+    if (action === 'all_used') {
+      const r = await sql`DELETE FROM xx_activation_codes WHERE is_used = true`;
+      return NextResponse.json({ success: true, deleted: r.length });
+    }
+    if (action === 'batch' && Array.isArray(body.ids) && body.ids.length > 0) {
+      const ids = body.ids.map((x: any) => parseInt(String(x), 10)).filter((n: number) => n > 0);
+      if (ids.length === 0) return NextResponse.json({ error: 'ids 数组为空' }, { status: 400 });
+      // 只删未使用的
+      const r = await sql`DELETE FROM xx_activation_codes WHERE id = ANY(${ids}::int[]) AND is_used = false`;
+      return NextResponse.json({ success: true, deleted: r.length, requested: ids.length });
+    }
+    if (action === 'one' && body.id) {
+      const id = parseInt(String(body.id), 10);
+      const r = await sql`DELETE FROM xx_activation_codes WHERE id = ${id} AND is_used = false`;
+      if (r.length === 0) return NextResponse.json({ error: '激活码不存在或已使用' }, { status: 404 });
+      return NextResponse.json({ success: true });
+    }
+    return NextResponse.json({ error: '未知 action 或缺少 id' }, { status: 400 });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+
+// PATCH 改 is_used + 延期
+export async function PATCH(req: NextRequest) {
+  const auth = authAdmin(req);
+  if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+  const sql = neon(process.env.DATABASE_URL || '');
+  try {
+    const body = await req.json().catch(() => {}) as any;
+
+    // 延期 (跟 invites 一样, 改 expires_at)
+    if (body.extend) {
+      const days = parseInt(String(body.days || 30), 10);
+      if (!Number.isFinite(days) || days < 1 || days > 3650) {
+        return NextResponse.json({ error: 'days 必须在 1-3650 之间' }, { status: 400 });
+      }
+      const newExpiresAt = new Date(Date.now() + days * 86400000).toISOString();
+
+      if (Array.isArray(body.ids) && body.ids.length > 0) {
+        const ids = body.ids.map((x: any) => parseInt(String(x), 10)).filter((n: number) => n > 0);
+        if (ids.length === 0) return NextResponse.json({ error: 'ids 数组为空' }, { status: 400 });
+        const r = await sql`UPDATE xx_activation_codes SET expires_at = ${newExpiresAt} WHERE id = ANY(${ids}::int[])`;
+        return NextResponse.json({ success: true, updated: r.length, expires_at: newExpiresAt });
+      }
+
+      const id = parseInt(String(body.id || 0), 10);
+      if (!id) return NextResponse.json({ error: '需要 id 或 ids' }, { status: 400 });
+      const r = await sql`UPDATE xx_activation_codes SET expires_at = ${newExpiresAt} WHERE id = ${id}`;
+      return NextResponse.json({ success: true, updated: r.length || 1, expires_at: newExpiresAt });
+    }
+
+    // 标记已用 / 取消已用
+    const id = parseInt(String(body.id || 0), 10);
+    if (!id) return NextResponse.json({ error: '需要 id' }, { status: 400 });
+    const isUsed = body.is_used === true;
+
+    if (isUsed) {
+      await sql`UPDATE xx_activation_codes SET is_used = true, used_at = NOW() WHERE id = ${id}`;
+    } else {
+      await sql`UPDATE xx_activation_codes SET is_used = false, used_at = NULL, used_by = NULL WHERE id = ${id}`;
+    }
+    return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

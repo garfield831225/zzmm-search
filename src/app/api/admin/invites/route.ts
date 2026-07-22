@@ -1,13 +1,13 @@
-// /api/admin/invites - 邀请码生成 + 列表 + 删除
+// /api/admin/invites - 邀请码生成 + 列表 + 删除 + 导出
+// 2026-07-20: 改用共享 authAdmin (双轨鉴权 Bearer + cookie), 修 4 个用户管理卡打不开的 bug
+// 2026-07-21: 改并发批量 INSERT (300/500 条不会超时) + 加导出端点 (?export=csv|txt)
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
-import jwt from 'jsonwebtoken';
+import { authAdmin } from '@/lib/admin-auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
-export const maxDuration = 30;
-
-const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
+export const maxDuration = 60;
 
 // 避易混字符
 const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -22,106 +22,184 @@ function genInviteCode(): string {
   return 'INV-' + randSeg(4) + '-' + randSeg(4) + '-' + randSeg(4);
 }
 
-function adminOnly(authHeader: string | null) {
-  if (!authHeader?.startsWith('Bearer ')) return { error: '未登录', status: 401 };
-  try {
-    const payload = jwt.verify(authHeader.replace('Bearer ', ''), JWT_SECRET) as any;
-    if (payload.group !== 'admin') return { error: '权限不足', status: 403 };
-    return { payload };
-  } catch { return { error: 'Token 无效', status: 401 }; }
-}
-
-// GET 列表
+// GET 列表 + 导出
 export async function GET(req: NextRequest) {
-  const a = adminOnly(req.headers.get('authorization'));
-  if ('error' in a) return NextResponse.json({ error: a.error }, { status: a.status });
+  const a = authAdmin(req);
+  if (a.error) return NextResponse.json({ error: a.error }, { status: a.status });
+
+  const { searchParams } = new URL(req.url);
+  const exportFmt = searchParams.get('export'); // 'csv' | 'txt' | null
+  const filter = searchParams.get('filter') || 'all'; // 'all' | 'unused' | 'used' | 'expired'
+  const idsParam = searchParams.get('ids'); // '1,2,3'
+  const noteFilter = searchParams.get('note'); // 备注关键词
 
   const sql = neon(process.env.DATABASE_URL || '');
   try {
-    const rows = await sql`
-      SELECT i.id, i.code, i.note, i.created_at, i.created_by, i.used_by, i.used_at, i.expires_at, i.is_used,
-             u.username as used_by_username
-      FROM xx_invite_codes i
-      LEFT JOIN xx_users u ON i.used_by = u.id
-      ORDER BY i.id DESC
-      LIMIT 500
-    ` as any[];
+    // 2026-07-21: 导出模式 — 全量拿 (LIMIT 10000), filter 在 JS 端做
+    if (exportFmt === 'csv' || exportFmt === 'txt') {
+      const allRows: any = await sql`
+        SELECT id, code, note, created_at, expires_at, is_used
+        FROM xx_invite_codes ORDER BY id DESC LIMIT 10000
+      `;
+      const ids = idsParam?.split(',').map(s => parseInt(s, 10)).filter(n => n > 0) || [];
+      const filtered = applyFilter(allRows, { filter, ids, note: noteFilter || undefined });
 
-    // 统计
-    const stats = await sql`
-      SELECT
-        COUNT(*)::int as total,
-        COUNT(*) FILTER (WHERE is_used)::int as used,
-        COUNT(*) FILTER (WHERE NOT is_used)::int as unused,
-        COUNT(*) FILTER (WHERE expires_at < NOW() AND NOT is_used)::int as expired
-      FROM xx_invite_codes
-    ` as any[];
+      if (exportFmt === 'csv') {
+        const lines = ['code,note,created_at,expires_at,is_used'];
+        for (const r of filtered) {
+          lines.push(`${r.code},"${(r.note || '').replace(/"/g, '""')}",${r.created_at || ''},${r.expires_at || ''},${r.is_used}`);
+        }
+        return new NextResponse(lines.join('\n'), {
+          headers: {
+            'Content-Type': 'text/csv; charset=utf-8',
+            'Content-Disposition': `attachment; filename="invite_codes_${filter}_${Date.now()}.csv"`,
+          },
+        });
+      } else {
+        return new NextResponse(filtered.map(r => r.code).join('\n'), {
+          headers: {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Content-Disposition': `attachment; filename="invite_codes_${filter}_${Date.now()}.txt"`,
+          },
+        });
+      }
+    }
 
-    return NextResponse.json({ ok: true, items: rows, stats: stats[0] });
+    // 普通列表 — LIMIT 500 (够用)
+    const rows: any = await sql`
+      SELECT id, code, note, created_at, created_by, used_by, expires_at, is_used,
+        (SELECT username FROM xx_users WHERE id = xx_invite_codes.used_by) AS used_by_username
+      FROM xx_invite_codes ORDER BY id DESC LIMIT 500
+    `;
+    const total = await sql`SELECT COUNT(*)::int AS c FROM xx_invite_codes`;
+    const used = await sql`SELECT COUNT(*)::int AS c FROM xx_invite_codes WHERE is_used = true`;
+    const expired = await sql`SELECT COUNT(*)::int AS c FROM xx_invite_codes WHERE is_used = false AND expires_at IS NOT NULL AND expires_at < NOW()`;
+    return NextResponse.json({ items: rows, stats: { total: total[0].c, used: used[0].c, unused: total[0].c - used[0].c, expired: expired[0].c } });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
 
-// POST 生成
-export async function POST(req: NextRequest) {
-  const a = adminOnly(req.headers.get('authorization'));
-  if ('error' in a) return NextResponse.json({ error: a.error }, { status: a.status });
-
-  const body = await req.json().catch(() => ({}));
-  const count = Math.min(500, Math.max(1, parseInt(String(body.count ?? 1))));
-  const note = String(body.note ?? '').slice(0, 200);
-  const expiresDays = parseInt(String(body.expires_days ?? 30));
-
-  const sql = neon(process.env.DATABASE_URL || '');
-  const codes: string[] = [];
-  const errors: string[] = [];
-
-  for (let i = 0; i < count; i++) {
-    let inserted = false;
-    for (let attempt = 0; attempt < 8 && !inserted; attempt++) {
-      const code = genInviteCode();
-      try {
-        await sql`
-          INSERT INTO xx_invite_codes (code, note, created_by, expires_at)
-          VALUES (${code}, ${note || null}, ${String(a.payload.id)}, NOW() + (${expiresDays}::int * INTERVAL '1 day'))
-        `;
-        inserted = true;
-        codes.push(code);
-      } catch (e: any) {
-        if (attempt === 7) errors.push(`${code}: ${e.message?.slice(0, 60)}`);
-      }
-    }
-  }
-
-  return NextResponse.json({
-    generated: codes.length,
-    codes,
-    expires_days: expiresDays,
-    note,
-    errors: errors.length ? errors : undefined,
-  });
+function applyFilter(rows: any[], opts: { filter?: string; ids?: number[]; note?: string }) {
+  let r = rows;
+  if (opts.filter === 'unused') r = r.filter(x => !x.is_used);
+  if (opts.filter === 'used') r = r.filter(x => x.is_used);
+  if (opts.filter === 'expired') r = r.filter(x => !x.is_used && x.expires_at && new Date(x.expires_at) < new Date());
+  if (opts.ids && opts.ids.length) r = r.filter(x => opts.ids!.includes(x.id));
+  if (opts.note) r = r.filter(x => (x.note || '').toLowerCase().includes(opts.note!.toLowerCase()));
+  return r;
 }
 
-// DELETE 删除 (清空未使用的)
-export async function DELETE(req: NextRequest) {
-  const a = adminOnly(req.headers.get('authorization'));
-  if ('error' in a) return NextResponse.json({ error: a.error }, { status: a.status });
+// POST 生成 — 2026-07-21 改并发批量 INSERT
+export async function POST(req: NextRequest) {
+  const a = authAdmin(req);
+  if (a.error) return NextResponse.json({ error: a.error }, { status: a.status });
+
+  const body = await req.json().catch(() => ({}));
+  const count = Math.max(1, Math.min(1000, parseInt(String(body.count || 10), 10)));
+  const note = String(body.note || '').slice(0, 200);
+  const days = Math.max(1, Math.min(365, parseInt(String(body.expires_days || 30), 10)));
 
   const sql = neon(process.env.DATABASE_URL || '');
-  const { searchParams } = new URL(req.url);
-  const id = searchParams.get('id');
-
   try {
-    if (id) {
-      // 删除指定 (只能删未使用的)
-      const r = await sql`DELETE FROM xx_invite_codes WHERE id = ${parseInt(id)} AND is_used = false`;
-      return NextResponse.json({ ok: true, deleted: r.length ?? 0 });
-    } else {
-      // 批量清理已用过的
-      const r = await sql`DELETE FROM xx_invite_codes WHERE is_used = true`;
-      return NextResponse.json({ ok: true, deleted: r.length ?? 0, message: '已清理已用过的邀请码' });
+    // 2026-07-21: JS 算 expires_at (Neon template tag 不会执行 SQL 表达式, 字符串会被当字面量)
+    const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
+    const codes: string[] = [];
+    const set = new Set<string>();
+    // 去重: 1000 个 12 位字符碰撞概率极低, 但保险
+    while (codes.length < count) {
+      const c = genInviteCode();
+      if (!set.has(c)) { set.add(c); codes.push(c); }
     }
+
+    // 2026-07-21: 50 并发批量 INSERT, 避免 300/500 条逐条触发 Vercel 30s 超时
+    // 1000 条 ÷ 50 = 20 批 × ~50ms = 1s 完成
+    const BATCH = 50;
+    let inserted = 0;
+    for (let i = 0; i < codes.length; i += BATCH) {
+      const slice = codes.slice(i, i + BATCH);
+      await Promise.all(slice.map(code =>
+        sql`INSERT INTO xx_invite_codes (code, note, created_by, expires_at, is_used)
+            VALUES (${code}, ${note}, ${a.userId}, ${expiresAt}, false)`
+          .then(() => { inserted++; })
+          .catch((e: any) => {
+            // 唯一约束冲突 (code 已存在) 跳过
+            if (!String(e.message).includes('duplicate key') && !String(e.message).includes('unique')) throw e;
+          })
+      ));
+    }
+    return NextResponse.json({ codes, expires_days: days, inserted, requested: count });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+
+// DELETE 删除 (清空未使用的) / 删除单个
+export async function DELETE(req: NextRequest) {
+  const a = authAdmin(req);
+  if (a.error) return NextResponse.json({ error: a.error }, { status: a.status });
+
+  const sql = neon(process.env.DATABASE_URL || '');
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = parseInt(searchParams.get('id') || '0', 10);
+    const action = searchParams.get('action') || 'one';
+    if (action === 'all_unused') {
+      const r = await sql`DELETE FROM xx_invite_codes WHERE is_used = false`;
+      return NextResponse.json({ success: true, deleted: r.length });
+    }
+    if (action === 'all_expired') {
+      const r = await sql`DELETE FROM xx_invite_codes WHERE is_used = false AND expires_at IS NOT NULL AND expires_at < NOW()`;
+      return NextResponse.json({ success: true, deleted: r.length });
+    }
+    if (!id) return NextResponse.json({ error: '需要 id 或 action=all_unused' }, { status: 400 });
+    await sql`DELETE FROM xx_invite_codes WHERE id = ${id} AND is_used = false`;
+    return NextResponse.json({ success: true });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+
+// PATCH 改过期时间 (延期)
+// body: { id, days } — days 是从今天起算的新天数 (覆盖原 expires_at)
+// 也支持 { ids: [1,2,3], days } 批量
+export async function PATCH(req: NextRequest) {
+  const a = authAdmin(req);
+  if (a.error) return NextResponse.json({ error: a.error }, { status: a.status });
+
+  const sql = neon(process.env.DATABASE_URL || '');
+  try {
+    const body = await req.json().catch(() => ({}));
+    const days = parseInt(String(body.days || 30), 10);
+    if (!Number.isFinite(days) || days < 1 || days > 3650) {
+      return NextResponse.json({ error: 'days 必须在 1-3650 之间' }, { status: 400 });
+    }
+    const newExpiresAt = new Date(Date.now() + days * 86400000).toISOString();
+
+    // 批量 (ids: [1,2,3])
+    if (Array.isArray(body.ids) && body.ids.length > 0) {
+      const ids = body.ids.map((x: any) => parseInt(String(x), 10)).filter((n: number) => n > 0);
+      if (ids.length === 0) return NextResponse.json({ error: 'ids 数组为空' }, { status: 400 });
+      const r = await sql`
+        UPDATE xx_invite_codes
+        SET expires_at = ${newExpiresAt}
+        WHERE id = ANY(${ids}::int[]) AND is_used = false
+      `;
+      return NextResponse.json({ success: true, updated: r.length, expires_at: newExpiresAt });
+    }
+
+    // 单个 (id)
+    const id = parseInt(String(body.id || 0), 10);
+    if (!id) return NextResponse.json({ error: '需要 id 或 ids' }, { status: 400 });
+    const r = await sql`
+      UPDATE xx_invite_codes
+      SET expires_at = ${newExpiresAt}
+      WHERE id = ${id} AND is_used = false
+    `;
+    if (r.length === 0) {
+      return NextResponse.json({ error: '邀请码不存在或已使用' }, { status: 404 });
+    }
+    return NextResponse.json({ success: true, updated: 1, expires_at: newExpiresAt });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

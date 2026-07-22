@@ -1,47 +1,55 @@
 'use client';
+// 2026-07-17: 极简版 - 只查 localStorage.user.group, 不 fetch、不 redirect、不重试
+// 服务端鉴权那套太复杂, 用户等不了
+// 信任 localStorage, 没存就提示去登录
 import { useEffect, useState } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Shield, Home, Lock } from 'lucide-react';
+import { Shield, Home } from 'lucide-react';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const [authed, setAuthed] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    const token = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
-    const userStr = localStorage.getItem('user') || '';
-    if (!token) {
-      router.push(`/login?redirect=${encodeURIComponent(pathname)}`);
-      return;
-    }
+    // 唯一检查: localStorage.user.group === 'admin'
     try {
-      const u = JSON.parse(userStr);
-      if (u.group !== 'admin') {
-        // 不是 admin, 重定向到首页 (普通用户看到 forbidden 提示)
-        router.push('/?forbidden=admin');
-        return;
-      }
-      setAuthed(true);
-    } catch {
-      router.push('/login?redirect=' + encodeURIComponent(pathname));
-    }
-  }, [router, pathname]);
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      if (u?.group === 'admin') setIsAdmin(true);
+    } catch {}
+  }, []);
 
-  if (!mounted || !authed) {
+  if (!mounted) {
+    return <div className="min-h-screen bg-[#0a0a0f]" />;
+  }
+
+  if (!isAdmin) {
+    // 简单提示 - 不重定向, 不 fetch, 让用户自己点登录
     return (
-      <div className="min-h-screen bg-[#0a0a0f] text-white flex items-center justify-center">
-        <div className="text-white/40 text-sm">验证管理员身份...</div>
+      <div className="min-h-screen bg-[#0a0a0f] text-white flex items-center justify-center p-4">
+        <div className="max-w-md text-center">
+          <div className="text-5xl mb-3">🔐</div>
+          <h1 className="text-xl font-bold mb-2">需要 admin 登录</h1>
+          <p className="text-white/60 text-sm mb-4">
+            当前 localStorage 里没有 admin 用户信息<br />
+            请用 admin 账号登录后, 再点管理后台
+          </p>
+          <div className="flex gap-2 justify-center">
+            <Link href="/login?redirect=/admin" className="px-5 py-2.5 bg-gradient-to-r from-violet-600 to-pink-600 rounded-lg text-sm font-medium">
+              去登录
+            </Link>
+            <Link href="/" className="px-5 py-2.5 bg-white/10 hover:bg-white/20 rounded-lg text-sm">
+              回首页
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
 
+  // admin 验证通过 - 直接渲染
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white">
-      {/* 顶部 admin bar */}
       <div className="bg-[#0d0d14] border-b border-violet-500/30 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex items-center gap-3 text-xs">
           <div className="flex items-center gap-1.5 text-violet-300 font-semibold">
@@ -53,8 +61,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <Link href="/admin/codes" className="text-white/60 hover:text-white">🎫 卡密</Link>
           <Link href="/admin/invites" className="text-white/60 hover:text-white">🎟️ 邀请码</Link>
           <Link href="/admin/blacklist" className="text-white/60 hover:text-white">🚫 黑名单</Link>
+          <Link href="/admin/users" className="text-white/60 hover:text-white">👥 用户列表</Link>
           <Link href="/admin/stats-dashboard" className="text-white/60 hover:text-white">📊 详细统计</Link>
           <Link href="/admin/import" className="text-white/60 hover:text-white">📥 导入</Link>
+          <Link href="/admin/import-tg" className="text-white/60 hover:text-white">📡 TG导入</Link>
           <Link href="/admin/pay-config" className="text-white/60 hover:text-white">💰 付费配置</Link>
           <Link href="/admin/publish" className="text-white/60 hover:text-white">📢 对外发布</Link>
           <div className="ml-auto flex items-center gap-2">

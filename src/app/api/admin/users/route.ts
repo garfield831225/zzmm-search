@@ -1,45 +1,41 @@
+// 2026-07-20: 改用共享 authAdmin (双轨鉴权 Bearer + cookie), 修用户列表卡打不开的 bug
+// 兼容 ?key= JWT_SECRET 调用 (旧脚本)
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
-import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { authAdmin } from '@/lib/admin-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
-function verifyAdmin(token: string): any {
-  try {
-    const payload = jwt.verify(token, JWT_SECRET) as any;
-    if (!['admin'].includes(payload.group)) return null;
-    return payload;
-  } catch { return null; }
-}
-
 function checkKey(req: NextRequest) {
   const key = new URL(req.url).searchParams.get('key');
-  return key === process.env.JWT_SECRET;
+  return key === JWT_SECRET;
+}
+
+function isAllowed(req: NextRequest) {
+  const a = authAdmin(req);
+  if (!a.error) return true;
+  return checkKey(req);
 }
 
 // GET /api/admin/users - 列表
 export async function GET(req: NextRequest) {
+  if (!isAllowed(req)) {
+    return NextResponse.json({ error: '权限不足' }, { status: 403 });
+  }
+
+  const { searchParams } = new URL(req.url);
+  const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
+  const pageSize = Math.min(100, parseInt(searchParams.get('pageSize') || '50'));
+  const search = searchParams.get('search') || '';
+  const offset = (page - 1) * pageSize;
+
+  const sql = neon(process.env.DATABASE_URL || '');
+
   try {
-    const authHeader = req.headers.get('authorization');
-    const token = authHeader?.replace('Bearer ', '');
-    const payload = token ? verifyAdmin(token) : null;
-
-    // key 方式也允许（用于脚本调用）
-    const isAdmin = payload || checkKey(req);
-    if (!isAdmin) return NextResponse.json({ error: '权限不足' }, { status: 403 });
-
-    const { searchParams } = new URL(req.url);
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-    const pageSize = Math.min(100, parseInt(searchParams.get('pageSize') || '50'));
-    const search = searchParams.get('search') || '';
-    const offset = (page - 1) * pageSize;
-
-    const sql = neon(process.env.DATABASE_URL || '');
-
     let rows: any[];
     let total: any;
 
@@ -75,13 +71,11 @@ export async function GET(req: NextRequest) {
 
 // POST /api/admin/users - 创建管理员账户
 export async function POST(req: NextRequest) {
-  try {
-    const authHeader = req.headers.get('authorization');
-    const token = authHeader?.replace('Bearer ', '');
-    const payload = token ? verifyAdmin(token) : null;
-    const isAdmin = payload || checkKey(req);
-    if (!isAdmin) return NextResponse.json({ error: '权限不足' }, { status: 403 });
+  if (!isAllowed(req)) {
+    return NextResponse.json({ error: '权限不足' }, { status: 403 });
+  }
 
+  try {
     const { username, password } = await req.json();
     if (!username || !password || password.length < 6) {
       return NextResponse.json({ error: '用户名和密码必填，密码至少6位' }, { status: 400 });
@@ -108,13 +102,11 @@ export async function POST(req: NextRequest) {
 
 // PUT /api/admin/users - 更新用户
 export async function PUT(req: NextRequest) {
-  try {
-    const authHeader = req.headers.get('authorization');
-    const token = authHeader?.replace('Bearer ', '');
-    const payload = token ? verifyAdmin(token) : null;
-    const isAdmin = payload || checkKey(req);
-    if (!isAdmin) return NextResponse.json({ error: '权限不足' }, { status: 403 });
+  if (!isAllowed(req)) {
+    return NextResponse.json({ error: '权限不足' }, { status: 403 });
+  }
 
+  try {
     const { id, action, ...data } = await req.json();
     if (!id) return NextResponse.json({ error: '缺少用户ID' }, { status: 400 });
 
@@ -151,13 +143,11 @@ export async function PUT(req: NextRequest) {
 
 // DELETE /api/admin/users - 删除用户
 export async function DELETE(req: NextRequest) {
-  try {
-    const authHeader = req.headers.get('authorization');
-    const token = authHeader?.replace('Bearer ', '');
-    const payload = token ? verifyAdmin(token) : null;
-    const isAdmin = payload || checkKey(req);
-    if (!isAdmin) return NextResponse.json({ error: '权限不足' }, { status: 403 });
+  if (!isAllowed(req)) {
+    return NextResponse.json({ error: '权限不足' }, { status: 403 });
+  }
 
+  try {
     const { searchParams } = new URL(req.url);
     const idParam = searchParams.get('id');
     const id = idParam ? parseInt(idParam) : 0;
