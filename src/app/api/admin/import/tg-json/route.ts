@@ -94,11 +94,19 @@ export async function POST(req: NextRequest) {
   }
 
   // 3. 检测 import_channel (优先用 hint, 否则按 forward_from/title 推断)
+  // 2026-07-22: 加 6 个新网盘 (1f78159 加的 aliyun/xunlei/123/uc/tianyi/yidong)
+  // 之前只支持 4 个老 channel, 6 个新 channel 全 fallback 到 tg_baidu
   const channel: ImportChannel = (() => {
     const h = importChannelHint.toLowerCase();
+    if (h.includes('zezemom') || h.includes('zzmm')) return 'zezemom_excel';
+    if (h.includes('aliyun') || h.includes('alipan')) return 'tg_aliyun';
+    if (h.includes('xunlei')) return 'tg_xunlei';
+    if (h.includes('123')) return 'tg_123';
+    if (h.includes('uc')) return 'tg_uc';
+    if (h.includes('tianyi') || h.includes('189')) return 'tg_tianyi';
+    if (h.includes('yidong') || h.includes('139')) return 'tg_yidong';
     if (h.includes('quark')) return 'tg_quark';
     if (h.includes('music')) return 'tg_music';
-    if (h.includes('zezemom') || h.includes('zzmm')) return 'zezemom_excel';
     return 'tg_baidu';
   })();
 
