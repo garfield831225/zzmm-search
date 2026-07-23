@@ -1,5 +1,13 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { jwtVerify } from 'jose';  // 2026-07-24: 改用 jose 库, Edge Runtime 友好
+
+const JWT_SECRET_RAW = process.env.JWT_SECRET || 'cLWhs2015';
+// jose 需要 Uint8Array 形式的 secret
+const JWT_SECRET = new TextEncoder().encode(JWT_SECRET_RAW);
+
+// /vip/* 鉴权白名单: 哪些 user_group 可以进
+const VIP_ALLOWED_GROUPS = new Set(['basic', 'vip', 'admin']);
 
 // 不需要登录的路径（放行）
 const PUBLIC_PATHS = [
@@ -87,6 +95,10 @@ const PUBLIC_PATHS = [
   '/api/admin/sync-now',         // 2026-07-21 临时: 强制主 endpoint 同步 (修 read replica lag)
   '/api/admin/diag-replica',     // 2026-07-21 临时: 看 read replica 状态 + replication lag
   '/api/admin/check-by-id',       // 2026-07-21 临时: 查指定 id 真实状态 (主 endpoint 走 sync-now)
+  // 2026-07-24 zzmm-vip 影视区: API 层鉴权, 走 page 层 JWT 解码
+  '/api/vip',                       // 列表/详情 API (由路由内自己校验 group)
+  // 2026-07-24 zzmm-vip 影视区 (页面层鉴权在 middleware 里, API 自己读 JWT 二次验证)
+  '/api/vip',                       // 列表 API (中间件只挡 /vip/* 页面, API 由路由内 user_group 校验)
   '/api/feedback',                // 2026-07-17 用户失效反馈 (Bearer 内部鉴权)
   '/api/admin/feedback',          // 2026-07-17 admin 反馈处理 (Bearer 内部鉴权)
   '/api/diag-multi-link',         // 2026-07-17 diag: 找多网盘资源示例
@@ -120,7 +132,7 @@ const PUBLIC_PATHS = [
   // /api/resources/[id]/unlock-status 动态路由也走 unlock 路径检查
 ];
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // 白名单：静态资源 + 公开页面
@@ -152,6 +164,35 @@ export function middleware(request: NextRequest) {
 
   // v2.1.4 import-bridge + tg-organize GET (走 Bearer admin token 鉴权)
   if (pathname.startsWith('/api/internal/push-to-bridge') || pathname.startsWith('/api/admin/tg-organize')) {
+    return NextResponse.next();
+  }
+
+  // 2026-07-24 zzmm-vip 影视区: /vip/* 页面层鉴权, 只放 basic/vip/admin
+  // 走 JWT payload.group (login 时已塞入), 不查 DB
+  if (pathname === '/vip' || pathname.startsWith('/vip/')) {
+    const vipToken = request.cookies.get('zzmm_token')?.value ||
+                     request.cookies.get('token')?.value ||
+                     (request.headers.get('authorization')?.startsWith('Bearer ')
+                       ? request.headers.get('authorization')!.replace('Bearer ', '')
+                       : null);
+    if (!vipToken) {
+      const loginUrl = new URL('/login', request.url);
+      loginUrl.searchParams.set('redirect', pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+    try {
+      const { payload } = await jwtVerify(vipToken, JWT_SECRET);
+      const group = (payload as any)?.group;
+      if (!group || !VIP_ALLOWED_GROUPS.has(group)) {
+        // 不够格: 跳回首页 (不告诉用户有 vip 区)
+        const homeUrl = new URL('/', request.url);
+        return NextResponse.redirect(homeUrl);
+      }
+    } catch (e) {
+      const loginUrl = new URL('/login', request.url);
+      loginUrl.searchParams.set('redirect', pathname);
+      return NextResponse.redirect(loginUrl);
+    }
     return NextResponse.next();
   }
 
