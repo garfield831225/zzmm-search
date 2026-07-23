@@ -142,23 +142,42 @@ function isStatusOk(type, status) {
 }
 
 function cleanFolderName(raw) {
-  if (raw.endsWith('.iso')) {
-    const firstBracket = raw.match(/^\[([^\]]+)\]/);
+  // 2026-07-23 改进:
+  //   1) 剥掉 ? 问号 (1080p? 这种)
+  //   2) 剥掉 (YYYY) 在任意位置
+  //   3) 剥掉 1080p/720p/4K/8K 嵌入式
+  //   4) 短名 (< 2 字符) 标记为 NOMATCH
+  //   5) ISO 文件多括号时, 优先取有中文的
+
+  // 全局预处理
+  let pre = raw
+    .replace(/\?/g, ' ')              // 问号 → 空格
+    .replace(/[（(]\s*\d{4}\s*[)）]/g, ' ')  // 任意位置的 (YYYY)
+    .replace(/\b(2160p|1080p|720p|480p|4K|8K|UHD|HDTV|WEB-?DL|BluRay|BDRemux|REMUX)\b/gi, ' ')  // 嵌入式分辨率
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  // 从原始 raw 提取 year (在预处理前, 避免 (YYYY) 被剥)
+  let year = '';
+  const yearMatchEarly = raw.match(/\b(19\d{2}|20\d{2})\b/);
+  if (yearMatchEarly) { const y = parseInt(yearMatchEarly[1]); if (y >= 1900 && y <= 2030) year = String(y); }
+
+  if (pre.endsWith('.iso')) {
+    const firstBracket = pre.match(/^\[([^\]]+)\]/);
     if (firstBracket) {
       let extracted = firstBracket[1];
       if (!/[\u4e00-\u9fff]/.test(extracted)) {
-        const allBrackets = [...raw.matchAll(/\[([^\]]+)\]/g)];
+        const allBrackets = [...pre.matchAll(/\[([^\]]+)\]/g)];
         if (allBrackets.length >= 2) extracted = allBrackets[1][1];
       }
       extracted = extracted.replace(/\s*\d{4}(?=\W|$)/, '').trim();
       extracted = extracted.replace(/^(4K|8K|2160p|1080p|720p|DIY|CEE|美版|日版|港版|欧版|韩版|台版|DV|HDR|Dolby|Atmos|DTS|HEVC|LPCM)\s*/i, '');
-      if (extracted.length >= 2) return { cleanName: extracted, year: '', season: null };
+      if (extracted.length >= 2) return { cleanName: extracted, year, season: null };
     }
   }
+  // 用 preprocessed 字符串 (剥掉 ? + 嵌入式 1080p)
+  raw = pre;
   raw = raw.replace(/\s*\( ?\d{4} ?\)\s*$/, '').replace(/\s*（ ?\d{4} ?）\s*$/, '').trim();
-  let year = '';
-  const yearMatch = raw.match(/\b(19\d{2}|20\d{2})\b/);
-  if (yearMatch) { const y = parseInt(yearMatch[1]); if (y >= 1900 && y <= 2030) year = String(y); }
   let season = null;
   const seasonMatch = raw.match(/第([一二三四五六七八九十\d]+)季|S(\d{1,2})/i);
   if (seasonMatch) season = seasonMatch[1] ? chineseToNumber(seasonMatch[1]) : parseInt(seasonMatch[2]);
