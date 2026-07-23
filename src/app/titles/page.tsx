@@ -73,7 +73,7 @@ export default function TitlesPage() {
   // 分类选择: zezhe 用 sheet, vip/code 用 source, '' (全部) 不分类
   const [subCategory, setSubCategory] = useState<string>('');  // 当前选中的 sheet/source 名 (空 = 全部)
   const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<'asc' | 'desc'>('asc');  // asc=按添加时间正序 (默认, 文档原始顺序)
+  const [sort, setSort] = useState<'asc' | 'desc'>('desc');  // desc=按添加时间倒序 (默认)
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);

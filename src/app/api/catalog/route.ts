@@ -26,11 +26,13 @@ const SOURCE_DISPLAY_MAP: Record<string, string> = {
   '115': '115网盘', 'baidu': '百度网盘', 'quark': '夸克网盘',
   'aliyun': '阿里云盘', '123': '123网盘', 'tianyi': '天翼云盘',
   'magnet': '磁力链接', 'ed2k': 'ed2k链接', 'thunder': '迅雷链接',
+  'xunlei': '迅雷', 'uc': 'UC网盘', 'yidong': '移动云盘',
 };
 const SOURCE_KEY_MAP: Record<string, string> = {
   '115网盘': '115', '百度网盘': 'baidu', '阿里云盘': 'aliyun',
   '夸克网盘': 'quark', '123网盘': '123', '天翼云盘': 'tianyi',
   '磁力链接': 'magnet', 'ed2k链接': 'ed2k', '迅雷链接': 'thunder',
+  '迅雷': 'xunlei', 'UC网盘': 'uc', '移动云盘': 'yidong',
 };
 
 export async function GET(request: NextRequest) {

@@ -79,7 +79,7 @@ export default function LibraryPage() {
   const [subCategory, setSubCategory] = useState<string>('');
   const [categories, setCategories] = useState<CategoryBtn[]>([]);
   const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<'asc' | 'desc'>('asc');  // asc=按添加时间正序 (默认, 文档原始顺序)
+  const [sort, setSort] = useState<'asc' | 'desc'>('desc');  // desc=按添加时间倒序 (默认)
   const [items, setItems] = useState<Resource[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
