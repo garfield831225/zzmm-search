@@ -79,7 +79,7 @@ export default function AdminDashboard() {
     // 2026-07-17: 之前用 document.cookie 读 httpOnly cookie 永远读不到, 改用 localStorage
     try {
       const u = JSON.parse(localStorage.getItem('user') || '{}');
-      if (u?.group !== 'admin') {
+      if (u?.user_group !== 'admin' && u?.group !== 'admin') {
         router.push('/login?redirect=/admin');
         return;
       }
