@@ -12,10 +12,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     setMounted(true);
-    // 唯一检查: localStorage.user.group === 'admin'
+    // 唯一检查: localStorage.user.user_group (兼容老 group 字段)
     try {
       const u = JSON.parse(localStorage.getItem('user') || '{}');
-      if (u?.group === 'admin') setIsAdmin(true);
+      if (u?.user_group === 'admin' || u?.group === 'admin') setIsAdmin(true);
     } catch {}
   }, []);
 

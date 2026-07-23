@@ -94,7 +94,8 @@ export default function AdminDashboard() {
 
   const fetchStats = async () => {
     try {
-      const r = await fetch('/api/admin/stats/dashboard');
+      const token = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
+      const r = await fetch('/api/admin/stats/dashboard', { headers: { Authorization: `Bearer ${token}` } });
       const j = await r.json();
       if (!j.error) setStats(j);
     } catch {}
@@ -102,7 +103,8 @@ export default function AdminDashboard() {
 
   const fetchBridge = async () => {
     try {
-      const r = await fetch('/api/admin/bridge-health');
+      const token = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
+      const r = await fetch('/api/admin/bridge-health', { headers: { Authorization: `Bearer ${token}` } });
       const j = await r.json();
       setBridgeHealth(j);
     } catch {}
