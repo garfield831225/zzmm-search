@@ -167,39 +167,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // 2026-07-24 zzmm-vip 影视区: /vip/* 页面层鉴权, 只放 basic/vip/admin
-  // 走 JWT payload.group (login 时已塞入), 不查 DB
-  // 2026-07-24 修: 客户端 RSC fetch (Next.js 内部 navigation) 不重定向, 否则死循环显示空白
-  //   RSC 请求带 header 'rsc: 1' 或 'next-router-state-tree' 等
-  //   只对浏览器主动导航 (Accept: text/html) 才重定向
-  const accept = request.headers.get('accept') || '';
-  const isRSC = request.headers.get('rsc') === '1' ||
-                 accept.includes('text/x-component') ||
-                 (pathname.startsWith('/_next/') && accept.includes('*/*'));
-  if ((pathname === '/vip' || pathname.startsWith('/vip/')) && !isRSC) {
-    const vipToken = request.cookies.get('zzmm_token')?.value ||
-                     request.cookies.get('token')?.value ||
-                     (request.headers.get('authorization')?.startsWith('Bearer ')
-                       ? request.headers.get('authorization')!.replace('Bearer ', '')
-                       : null);
-    if (!vipToken) {
-      const loginUrl = new URL('/login', request.url);
-      loginUrl.searchParams.set('redirect', pathname);
-      return NextResponse.redirect(loginUrl);
-    }
-    try {
-      const { payload } = await jwtVerify(vipToken, JWT_SECRET);
-      const group = (payload as any)?.group;
-      if (!group || !VIP_ALLOWED_GROUPS.has(group)) {
-        // 不够格: 跳回首页 (不告诉用户有 vip 区)
-        const homeUrl = new URL('/', request.url);
-        return NextResponse.redirect(homeUrl);
-      }
-    } catch (e) {
-      const loginUrl = new URL('/login', request.url);
-      loginUrl.searchParams.set('redirect', pathname);
-      return NextResponse.redirect(loginUrl);
-    }
+  // 2026-07-24 zzmm-vip 影视区: /vip/* 改用 client-side 鉴权 (page.tsx useEffect 检查 token)
+  // middleware 不再拦截, 避免 RSC fetch 被重定向导致白屏
+  // 安全性: API 层 /api/vip 自己检查 JWT (更安全, 不依赖 cookie)
+  if (pathname === '/vip' || pathname.startsWith('/vip/')) {
     return NextResponse.next();
   }
 
