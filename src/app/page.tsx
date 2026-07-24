@@ -380,7 +380,12 @@ export default function HomePage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-white">
+    <div className="min-h-screen bg-[#0a0a0f] text-white relative">
+      {/* 2026-07-25: 顶部 hero 光晕 (深空黑 + 紫粉 radial gradient, 克制版) */}
+      <div className="absolute inset-0 pointer-events-none opacity-30" style={{
+        backgroundImage: 'radial-gradient(circle at 20% 0%, rgba(99, 102, 241, 0.12) 0%, transparent 45%), radial-gradient(circle at 80% 0%, rgba(168, 85, 247, 0.10) 0%, transparent 50%), radial-gradient(circle at 50% 50%, rgba(236, 72, 153, 0.05) 0%, transparent 60%)'
+      }} />
+      <div className="relative z-0">
       {/* 2026-06-04: 强制激活守卫 — 已登录但未激活任何资源 */}
       {mounted && mustActivate && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
@@ -418,7 +423,7 @@ export default function HomePage() {
         </div>
       )}
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-[#0a0a0f]/95 backdrop-blur-md border-b border-white/5">
+      <header className="sticky top-0 z-40 bg-[#0a0a0f]/70 backdrop-blur-xl border-b border-white/[0.06]">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
@@ -484,14 +489,14 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Search */}
+          {/* Search - 2026-07-25 改: 玻璃态输入框 */}
           <div className="relative flex gap-2">
             <input type="text" value={query} onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') fetchItems(1); }}
               placeholder="输入片名、类型、分类搜索..."
-              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-5 py-3 pl-12 text-white placeholder-white/30 focus:outline-none focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/20 transition" />
+              className="flex-1 bg-white/[0.03] border border-white/[0.06] rounded-xl px-5 py-3 pl-12 text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/15 focus:bg-white/[0.05] transition backdrop-blur-sm" />
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none">🔍</span>
-            <button onClick={() => fetchItems(1)} className="px-5 py-3 bg-violet-600 hover:bg-violet-500 rounded-xl text-white font-medium transition shrink-0">搜索</button>
+            <button onClick={() => fetchItems(1)} className="px-5 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:opacity-90 rounded-xl text-white font-medium transition shrink-0 shadow-[0_0_12px_rgba(168,85,247,0.2)]">搜索</button>
           </div>
 
           {/* 2026-07-20: 显示重复切换 + 按 TMDB 分组按钮 (搜出多条同名时显示) */}
@@ -559,36 +564,44 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Filter Bar */}
-          <div className="flex flex-col gap-2 mt-4">
+          {/* Filter Bar - 2026-07-25 改: 玻璃态 pill + 紫粉渐变激活态 (克制版) */}
+          <div className="flex flex-col gap-1.5 mt-4 p-2 rounded-2xl bg-white/[0.02] border border-white/[0.04] backdrop-blur-sm">
             {/* 分类 */}
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
               {CATEGORIES.map((cat) => (
                 <button key={cat} onClick={() => setCategory(cat)}
-                  className={`px-4 py-1.5 rounded-full text-sm whitespace-nowrap transition shrink-0 ${category === cat ? 'bg-violet-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{cat}</button>
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition shrink-0 ${category === cat
+                    ? 'bg-gradient-to-r from-violet-500/25 to-fuchsia-500/25 text-white border border-violet-400/40 shadow-[0_0_12px_rgba(168,85,247,0.15)]'
+                    : 'bg-white/[0.03] text-white/55 hover:text-white/85 hover:bg-white/[0.06] border border-transparent'}`}>{cat}</button>
               ))}
             </div>
             {/* 来源 */}
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
               {SOURCES.map((src) => (
                 <button key={src} onClick={() => setSource(src)}
-                  className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition shrink-0 ${source === src ? 'bg-pink-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{src}</button>
+                  className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${source === src
+                    ? 'bg-gradient-to-r from-pink-500/25 to-rose-500/25 text-white border border-pink-400/40'
+                    : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{src}</button>
               ))}
             </div>
             {/* 地区 */}
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-              <span className="text-xs text-white/30 self-center mr-1 shrink-0">地区</span>
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+              <span className="text-[10px] text-white/30 self-center mr-0.5 shrink-0 tracking-wider">地区</span>
               {REGIONS.map((r) => (
                 <button key={r} onClick={() => setRegion(r)}
-                  className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition shrink-0 ${region === r ? 'bg-orange-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{r}</button>
+                  className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${region === r
+                    ? 'bg-gradient-to-r from-orange-500/25 to-amber-500/25 text-white border border-orange-400/40'
+                    : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{r}</button>
               ))}
             </div>
             {/* 年份 */}
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-              <span className="text-xs text-white/30 self-center mr-1 shrink-0">年份</span>
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+              <span className="text-[10px] text-white/30 self-center mr-0.5 shrink-0 tracking-wider">年份</span>
               {YEARS.map((y) => (
                 <button key={y} onClick={() => setYear(y)}
-                  className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition shrink-0 ${year === y ? 'bg-cyan-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{y}</button>
+                  className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${year === y
+                    ? 'bg-gradient-to-r from-cyan-500/25 to-teal-500/25 text-white border border-cyan-400/40'
+                    : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{y}</button>
               ))}
             </div>
           </div>
@@ -596,24 +609,30 @@ export default function HomePage() {
       </header>
 
       {/* Content */}
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        {/* Sort & Size Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4 px-1">
+      <main className="max-w-7xl mx-auto px-4 py-6 relative">
+        {/* Sort & Size Bar - 2026-07-25 改: 玻璃态 + 紫粉激活 */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-5 px-2">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-white/40">排序</span>
-            <div className="flex gap-1">
+            <span className="text-[10px] text-white/40 tracking-wider uppercase">Sort</span>
+            <div className="flex gap-1 p-1 rounded-xl bg-white/[0.02] border border-white/[0.05]">
               <button onClick={() => setSort('release_date')}
-                className={`px-3 py-1 rounded-full text-xs transition ${sort === 'release_date' ? 'bg-violet-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>🎬 上映</button>
+                className={`px-3 py-1 rounded-lg text-xs transition ${sort === 'release_date'
+                  ? 'bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 text-white shadow-[0_0_8px_rgba(168,85,247,0.2)]'
+                  : 'text-white/50 hover:text-white/85'}`}>🎬 上映</button>
               <button onClick={() => setSort('added_time')}
-                className={`px-3 py-1 rounded-full text-xs transition ${sort === 'added_time' ? 'bg-violet-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>📅 上架</button>
+                className={`px-3 py-1 rounded-lg text-xs transition ${sort === 'added_time'
+                  ? 'bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 text-white shadow-[0_0_8px_rgba(168,85,247,0.2)]'
+                  : 'text-white/50 hover:text-white/85'}`}>📅 上架</button>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-white/40 hidden sm:inline">每页</span>
-            <div className="flex gap-1">
+            <span className="text-[10px] text-white/40 hidden sm:inline tracking-wider uppercase">Per Page</span>
+            <div className="flex gap-1 p-1 rounded-xl bg-white/[0.02] border border-white/[0.05]">
               {[30, 90, 150].map((s) => (
-                  <button key={s} onClick={() => { latestRef.current = { ...latestRef.current, pageSize: s }; setPageSize(s); }}
-                  className={`px-3 py-1 rounded-full text-xs transition ${pageSize === s ? 'bg-pink-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{s}</button>
+                <button key={s} onClick={() => { latestRef.current = { ...latestRef.current, pageSize: s }; setPageSize(s); }}
+                  className={`px-3 py-1 rounded-lg text-xs transition ${pageSize === s
+                    ? 'bg-gradient-to-r from-pink-500/30 to-rose-500/30 text-white shadow-[0_0_8px_rgba(236,72,153,0.2)]'
+                    : 'text-white/50 hover:text-white/85'}`}>{s}</button>
               ))}
             </div>
           </div>
@@ -649,10 +668,11 @@ export default function HomePage() {
             const allIds = (item as any)._allIds || [item.id];
             return (
             <motion.div key={item.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              className="group cursor-pointer" onClick={() => handleItemClick(item)}
+              className="group cursor-pointer rounded-2xl bg-white/[0.02] border border-white/[0.05] backdrop-blur-sm p-2 transition-all duration-300 hover:border-violet-400/40 hover:bg-white/[0.04] hover:shadow-[0_0_24px_rgba(168,85,247,0.12)]"
+              onClick={() => handleItemClick(item)}
             >
               {/* Poster */}
-              <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-3">
+              <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-2.5">
                 {item.tmdb?.poster_path ? (
                   <img src={`${TMDB_IMAGE_BASE}${item.tmdb.poster_path}`} alt={item.name}
                     className="w-full h-full object-cover transition group-hover:scale-105"
@@ -753,9 +773,9 @@ export default function HomePage() {
               </div>
 
               {/* Info */}
-              <div className="space-y-1">
-                <h3 className="font-medium text-sm line-clamp-2 leading-tight">{item.name}</h3>
-                <div className="flex items-center gap-2 text-xs text-white/40">
+              <div className="space-y-1 px-0.5">
+                <h3 className="font-medium text-[13px] line-clamp-2 leading-tight text-white/90 group-hover:text-white transition">{item.name}</h3>
+                <div className="flex items-center gap-2 text-[10px] text-white/40">
                   <span>{item.category}</span>
                   {item.size && <span>📦 {item.size}</span>}
                 </div>
@@ -770,7 +790,7 @@ export default function HomePage() {
                           onClick={(e) => {
                             e.stopPropagation();
                             if (isMagnetLink) handleCopyLink(l.url, e);
-                            else handleDirectOpen(l.url, l.password, e);
+                            else handleDirectOpen(l.url, e);
                           }}
                           className={`px-1.5 py-0.5 text-[10px] rounded font-medium cursor-pointer transition-all hover:scale-105 ${
                             idx === 0
@@ -801,12 +821,12 @@ export default function HomePage() {
                       <span className="text-[10px] text-white/40">+{item.links.length - 8}</span>
                     )}
                     {/* 2026-07-24: 一键开全部 (>=2 个非磁力链接才显示) */}
-                    {item.links.filter(l => l.source !== 'magnet' && l.source !== 'ed2k').length >= 2 && (
+                    {item.links && item.links.filter(l => l.source !== 'magnet' && l.source !== 'ed2k').length >= 2 && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           // 依次 window.open (0.5s 间隔避开浏览器拦截)
-                          item.links
+                          (item.links || [])
                             .filter(l => l.source !== 'magnet' && l.source !== 'ed2k')
                             .forEach((l, i) => {
                               setTimeout(() => {
@@ -1470,6 +1490,7 @@ export default function HomePage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
