@@ -82,17 +82,35 @@ async function searchXingfan(title) {
   });
 }
 
-// ---- 标题相似度 (Jaccard 字符集合) ----
+// ---- 标题相似度 (2026-07-24 改: token 子串匹配, 跨语言也能匹配) ----
+// 拆搜索词成 token (按空格/标点), 只要候选 title 含 ≥ 50% token 就算匹配
+// 适合: "Moana" 匹配 "海洋奇缘" (跨语言)
+//      "The Odyssey" 匹配 "奥德赛" (transliteration 命中)
+//      "Hello World" 匹配 "Hello World 2000" (部分 token 命中)
+// 2026-07-24 改: xingfan 搜 "Moana" 返 "海洋奇缘" 但 score 0, 因为 token 不命中
+//   兜底: 候选 URL slug 也算 (拼音), 但 slug 跟英文也难匹配
+//   最终: 信任 xingfan 搜索相关性, candidates 第一个就给 0.5 (前提 title 不是纯数字/空)
 function similarity(a, b) {
   if (!a || !b) return 0;
-  const sa = new Set(a.toLowerCase().replace(/\s+/g, '').split(''));
-  const sb = new Set(b.toLowerCase().replace(/\s+/g, '').split(''));
-  const inter = new Set([...sa].filter((x) => sb.has(x)));
-  const union = new Set([...sa, ...sb]);
-  return inter.size / union.size;
+  const aLow = a.toLowerCase().replace(/\s+/g, ' ').trim();
+  const bLow = b.toLowerCase().replace(/\s+/g, ' ').trim();
+  // 直接包含: 0.9
+  if (bLow.includes(aLow) || aLow.includes(bLow)) return 0.9;
+  // 拆 token 比
+  const tokensA = aLow.split(/[\s\-_:,.，。！？!?,;'"()]+/).filter((t) => t.length >= 2);
+  const tokensB = bLow.split(/[\s\-_:,.，。！？!?,;'"()]+/).filter((t) => t.length >= 2);
+  if (tokensA.length === 0 || tokensB.length === 0) return 0;
+  let hit = 0;
+  for (const ta of tokensA) {
+    if (tokensB.some((tb) => tb.includes(ta) || ta.includes(tb))) hit++;
+  }
+  return hit / tokensA.length;
 }
 
-// ---- 从详情页抓所有 play_url ----
+// ---- 从详情页抓所有 play_url (2026-07-24: 直接拼 playerla 第三方播放器, 不嵌 xingfan 整个丑页) ----
+// 流程: fetch 详情页 → 找所有 episode-link (/1-1.html, /1-2.html) → 每个 episode 拼完整 URL
+//   同时 fetch 第一个播放页 (/1-1.html) → 抓 var zanpiancms_player → 拿 videoId
+//   入库 playUrl = https://php.playerla.com/mjplay/?id={videoId} (干净播放器, 无派拉蒙 logo)
 async function extractPlayUrls(detailUrl) {
   const html = await xfFetch(detailUrl);
   if (!html) return [];
@@ -100,21 +118,71 @@ async function extractPlayUrls(detailUrl) {
   const $ = cheerio.load(html);
   const eps = [];
 
-  // 抓所有 episode-link, 形如 <a href=".../1-1.html" class="episode-link">
+  // 1. 抓 zanpiancms_player (如果详情页本身是播放页, 即 URL 已经是 /1-1.html)
+  const playerMatch = html.match(/var\s+zanpiancms_player\s*=\s*(\{[^;]+\})/);
+  let playerUrlTpl = '//php.playerla.com/mjplay/?id=';
+  let videoId = '';
+  if (playerMatch) {
+    try {
+      const cfg = JSON.parse(playerMatch[1]);
+      if (cfg.url) videoId = cfg.url;
+      if (cfg.apiurl) playerUrlTpl = cfg.apiurl;
+    } catch {}
+  }
+
+  // 2. 抓所有 episode-link
+  const epHrefs = [];
   $('.episode-link').each((_, el) => {
     const href = $(el).attr('href') || '';
     const m = href.match(/(\d+)-(\d+)\.html$/);
     if (m) {
-      eps.push({
+      epHrefs.push({
         season: parseInt(m[1], 10),
         episode: parseInt(m[2], 10),
-        playUrl: href.startsWith('http') ? href : `${XINGFAN_BASE}${href}`,
+        fullHref: href.startsWith('http') ? href : `${XINGFAN_BASE}${href}`,
       });
     }
   });
 
-  // 也可能详情页本身就是播放页 (有 cms_play)
-  // 电影通常直接是 /1-1.html 单集
+  // 3. 如果详情页没 videoId, 但有 episode-link, fetch 第一个播放页拿 videoId
+  if (!videoId && epHrefs.length > 0) {
+    try {
+      const firstPlayHtml = await xfFetch(epHrefs[0].fullHref);
+      if (firstPlayHtml) {
+        const m = firstPlayHtml.match(/var\s+zanpiancms_player\s*=\s*(\{[^;]+\})/);
+        if (m) {
+          try {
+            const cfg = JSON.parse(m[1]);
+            if (cfg.url) videoId = cfg.url;
+            if (cfg.apiurl) playerUrlTpl = cfg.apiurl;
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  // 4. 拼 playUrl: 优先 playerla 模板
+  for (const ep of epHrefs) {
+    const playUrl = videoId
+      ? `${playerUrlTpl.startsWith('//') ? 'https:' : ''}${playerUrlTpl}${videoId}&ep=${ep.episode}`
+      : ep.fullHref;
+    eps.push({
+      season: ep.season,
+      episode: ep.episode,
+      playUrl,
+    });
+  }
+
+  // 5. 电影单集 (没 episode-link 但详情页有 videoId)
+  if (eps.length === 0 && videoId) {
+    const m = detailUrl.match(/(\d+)-(\d+)\.html$/);
+    const season = m ? parseInt(m[1], 10) : 1;
+    const episode = m ? parseInt(m[2], 10) : 1;
+    const playUrl = `${playerUrlTpl.startsWith('//') ? 'https:' : ''}${playerUrlTpl}${videoId}`;
+    eps.push({ season, episode, playUrl });
+  }
+
+  // 6. 兜底 (什么都没抓到)
   if (eps.length === 0) {
     const m = detailUrl.match(/(\d+)-(\d+)\.html$/);
     if (m) {
@@ -213,14 +281,21 @@ async function logSyncEnd(id, status, total, success, fail, errorMsg = null) {
 
 // ---- 匹配一条资源 ----
 async function matchOne(resource) {
-  const titleToSearch = resource.title || resource.original_title;
-  if (!titleToSearch) return { status: 'no_title' };
+  // 2026-07-24: 优先用 original_title (英文) 搜, xingfan 对英文标题匹配更准
+  // 中文 title 作为 fallback
+  const titlesToTry = [resource.original_title, resource.title].filter(Boolean);
+  if (titlesToTry.length === 0) return { status: 'no_title' };
 
   let candidates;
-  try {
-    candidates = await searchXingfan(titleToSearch);
-  } catch (e) {
-    return { status: 'search_fail', err: e.message };
+  let titleToSearch = '';
+  for (const t of titlesToTry) {
+    titleToSearch = t;
+    try {
+      candidates = await searchXingfan(t);
+    } catch (e) {
+      return { status: 'search_fail', err: e.message };
+    }
+    if (candidates.length > 0) break;  // 第一个有结果的就用
   }
 
   if (candidates.length === 0) return { status: 'no_candidate' };
@@ -233,12 +308,22 @@ async function matchOne(resource) {
   }
 
   // 找最相似
-  const best = candidates
-    .map((c) => ({ ...c, score: similarity(c.title, titleToSearch) }))
-    .sort((a, b) => b.score - a.score)[0];
+  // 2026-07-24 改: 如果所有 candidate score 都 < 0.4 (跨语言匹配), 信任 xingfan 搜索顺序, 用第一个
+  const scored = candidates
+    .map((c) => ({ ...c, score: similarity(c.title, titleToSearch) }));
+  let best = scored.sort((a, b) => b.score - a.score)[0];
+  if (best.score < 0.4 && candidates.length > 0) {
+    // 跨语言 fallback: xingfan 自己知道相关性, 用第一个 candidate
+    // 但要排除纯数字/空的 title
+    const firstValid = candidates.find((c) => c.title && c.title.length >= 2 && !/^\d+$/.test(c.title));
+    if (firstValid) {
+      best = { ...firstValid, score: 0.5 };
+      if (process.env.DEBUG) console.log(`    [fallback] 用 xingfan 第一个: ${firstValid.title} (跨语言 trust)`);
+    }
+  }
 
-  // 阈值: 字符 Jaccard > 0.3 才算匹配 (避免完全无关)
-  if (best.score < 0.3) return { status: 'low_score', score: best.score };
+  // 阈值: token 命中率 > 0.4 或 fallback 0.5
+  if (best.score < 0.4) return { status: 'low_score', score: best.score };
 
   // 抓详情页拿 play_urls
   let eps;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
 interface VipLink {
@@ -61,6 +61,14 @@ export default function VipDetailPage() {
   const [links, setLinks] = useState<VipLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 2026-07-24: 当前选中的集数 / 视频 URL (inline iframe 播放)
+  const [selectedLinkId, setSelectedLinkId] = useState<number | null>(null);
+
+  // 默认选第一个 link
+  const selectedLink = useMemo(
+    () => links.find((l) => l.id === selectedLinkId) || links[0] || null,
+    [links, selectedLinkId]
+  );
 
   useEffect(() => {
     if (!id) return;
@@ -222,25 +230,40 @@ export default function VipDetailPage() {
           </div>
         </div>
 
+        {/* 2026-07-24: inline iframe 播放器 (playerla 第三方, 无派拉蒙 logo) */}
+        {selectedLink && (
+          <div className="mt-8 rounded-2xl overflow-hidden bg-black ring-1 ring-white/10 shadow-2xl">
+            <div className="relative" style={{ paddingBottom: '56.25%' }}>
+              <iframe
+                key={selectedLink.id}
+                src={selectedLink.playUrl}
+                className="absolute inset-0 w-full h-full"
+                frameBorder="0"
+                allow="autoplay; fullscreen; picture-in-picture"
+                allowFullScreen
+                title={`${resource.title} 播放`}
+              />
+            </div>
+            <div className="px-4 py-2 flex items-center justify-between text-xs text-white/40 bg-black/60">
+              <div>
+                {resource.mediaType === 'movie' ? '电影' : `第 ${selectedLink.season} 季 · 第 ${selectedLink.episode} 集`}
+                {selectedLink.source && <span className="ml-2">· {selectedLink.source}</span>}
+              </div>
+              <a href={selectedLink.playUrl} target="_blank" rel="noopener noreferrer" className="hover:text-white/80">新窗口打开 ↗</a>
+            </div>
+          </div>
+        )}
+
         {/* 播放列表区 */}
-        <div className="mt-12">
+        <div className="mt-8">
           {resource.mediaType === 'movie' ? (
             <div>
               <h2 className="text-xl font-extrabold mb-4">播放</h2>
-              {hasMovie ? (
-                <a
-                  href={links[0].playUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block px-6 py-4 rounded-2xl bg-gradient-to-r from-indigo-500 to-fuchsia-500 hover:from-indigo-400 hover:to-fuchsia-400 text-center font-extrabold text-white shadow-lg"
-                >
-                  ▶ 在新窗口播放
-                </a>
-              ) : (
-                <div className="px-6 py-4 rounded-2xl bg-white/5 text-white/40 text-center">
+              {!hasMovie ? (
+                <div className="px-6 py-8 rounded-2xl bg-white/5 text-white/40 text-center">
                   暂无播放链接, 等待匹配脚本
                 </div>
-              )}
+              ) : null}
             </div>
           ) : (
             <div>
@@ -255,18 +278,24 @@ export default function VipDetailPage() {
                     <div key={season}>
                       <h3 className="text-sm font-bold text-white/60 mb-2">第 {season} 季 · {eps.length} 集</h3>
                       <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-8 lg:grid-cols-10 gap-2">
-                        {eps.map((ep) => (
-                          <a
-                            key={ep.id}
-                            href={ep.playUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-3 py-2 rounded-lg bg-gradient-to-r from-indigo-500/20 to-fuchsia-500/20 hover:from-indigo-500/40 hover:to-fuchsia-500/40 border border-indigo-400/30 hover:border-indigo-400/60 text-center text-sm font-bold text-white transition-all"
-                            title={ep.episodeTitle || `第 ${ep.episode} 集`}
-                          >
-                            {ep.episode}
-                          </a>
-                        ))}
+                        {eps.map((ep) => {
+                          const active = (selectedLink?.id === ep.id);
+                          return (
+                            <button
+                              key={ep.id}
+                              type="button"
+                              onClick={() => setSelectedLinkId(ep.id)}
+                              className={`px-3 py-2 rounded-lg text-center text-sm font-bold transition-all ${
+                                active
+                                  ? 'bg-gradient-to-r from-indigo-500 to-fuchsia-500 text-white shadow-lg ring-2 ring-indigo-300'
+                                  : 'bg-gradient-to-r from-indigo-500/20 to-fuchsia-500/20 hover:from-indigo-500/40 hover:to-fuchsia-500/40 border border-indigo-400/30 hover:border-indigo-400/60 text-white'
+                              }`}
+                              title={ep.episodeTitle || `第 ${ep.episode} 集`}
+                            >
+                              {ep.episode}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   ))}
