@@ -62,6 +62,18 @@ export default function VipPage() {
   const [sort, setSort] = useState<SortKey>('smart');
   const [items, setItems] = useState<VipItem[]>([]);
   const [page, setPage] = useState(1);
+  const [authChecked, setAuthChecked] = useState(false);
+
+  // 2026-07-24: client-side 鉴权 - 没登录跳 /login?redirect=/vip
+  // 注: middleware 已经不放行 RSC fetch, 这里只防直接访问 HTML 的情况
+  useEffect(() => {
+    const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token');
+    if (!t) {
+      router.replace('/login?redirect=/vip');
+      return;
+    }
+    setAuthChecked(true);
+  }, [router]);
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -102,10 +114,11 @@ export default function VipPage() {
   }, [mediaType, sort, router]);
 
   useEffect(() => {
+    if (!authChecked) return;
     setItems([]);
     setPage(1);
     fetchPage(1, false);
-  }, [mediaType, sort, fetchPage]);
+  }, [mediaType, sort, fetchPage, authChecked]);
 
   const loadMore = () => {
     if (loading || !hasMore) return;

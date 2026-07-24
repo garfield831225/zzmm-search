@@ -169,7 +169,14 @@ export async function middleware(request: NextRequest) {
 
   // 2026-07-24 zzmm-vip 影视区: /vip/* 页面层鉴权, 只放 basic/vip/admin
   // 走 JWT payload.group (login 时已塞入), 不查 DB
-  if (pathname === '/vip' || pathname.startsWith('/vip/')) {
+  // 2026-07-24 修: 客户端 RSC fetch (Next.js 内部 navigation) 不重定向, 否则死循环显示空白
+  //   RSC 请求带 header 'rsc: 1' 或 'next-router-state-tree' 等
+  //   只对浏览器主动导航 (Accept: text/html) 才重定向
+  const accept = request.headers.get('accept') || '';
+  const isRSC = request.headers.get('rsc') === '1' ||
+                 accept.includes('text/x-component') ||
+                 (pathname.startsWith('/_next/') && accept.includes('*/*'));
+  if ((pathname === '/vip' || pathname.startsWith('/vip/')) && !isRSC) {
     const vipToken = request.cookies.get('zzmm_token')?.value ||
                      request.cookies.get('token')?.value ||
                      (request.headers.get('authorization')?.startsWith('Bearer ')
