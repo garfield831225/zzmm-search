@@ -54,9 +54,8 @@ async function xfFetch(path) {
 
 // ---- 在 xingfan.cc 搜标题 ----
 async function searchXingfan(title) {
-  // xingfan search URL: /search/{slug}.html 或者 /index.php?s=home-search.html&wd=
-  // 用 search query 形式
-  const searchUrl = `/search/${encodeURIComponent(title)}.html`;
+  // xingfan search URL 实测: /index.php?s=home-search.html&wd={title}
+  const searchUrl = `/index.php?s=home-search.html&wd=${encodeURIComponent(title)}`;
   const html = await xfFetch(searchUrl);
   if (!html) return [];
 
@@ -225,6 +224,13 @@ async function matchOne(resource) {
   }
 
   if (candidates.length === 0) return { status: 'no_candidate' };
+
+  // debug: 列前 3 个 candidates (算分后)
+  if (process.env.DEBUG) {
+    const scored = candidates.slice(0, 5).map((c) => ({ ...c, s: similarity(titleToSearch, c.title) })).sort((a, b) => b.s - a.s);
+    console.log(`  [${resource.id}] "${titleToSearch}" → ${candidates.length} cands, top5:`);
+    scored.forEach((c) => console.log(`    ${c.s.toFixed(2)} "${c.title}" ${c.url}`));
+  }
 
   // 找最相似
   const best = candidates

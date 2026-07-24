@@ -24,11 +24,12 @@ interface CategoryBtn {
   count: number;
 }
 
-// 3 大区配置
+// 4 大区配置 (2026-07-24 新增 tg 频道上传区)
 const SECTIONS = [
   { key: 'zezhe', label: '泽泽妈妈115文档', icon: '👑', desc: 'basic 也可以直接打开' },
   { key: 'vip', label: 'VIP 区', icon: '🔒', desc: 'VIP 可直接打开，basic 看到 VIP 锁' },
   { key: 'code', label: '单独付费区', icon: '💎', desc: '需消耗流明解锁' },
+  { key: 'tg', label: 'TG 频道上传', icon: '📡', desc: 'TG 频道抓取的资源（阿里/夸克/磁力等）' },
 ] as const;
 
 type SectionKey = typeof SECTIONS[number]['key'];
@@ -37,12 +38,14 @@ const SECTION_COLOR: Record<SectionKey, string> = {
   zezhe: 'from-pink-500/20 to-purple-500/20 border-pink-500/40',
   vip: 'from-amber-500/20 to-orange-500/20 border-amber-500/40',
   code: 'from-cyan-500/20 to-blue-500/20 border-cyan-500/40',
+  tg: 'from-emerald-500/20 to-teal-500/20 border-emerald-500/40',
 };
 
 const SECTION_BADGE: Record<SectionKey, string> = {
   zezhe: 'bg-gradient-to-r from-pink-500 to-purple-500 text-white',
   vip: 'bg-gradient-to-r from-amber-500 to-orange-500 text-white',
   code: 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white',
+  tg: 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white',
 };
 
 const CATEGORY_ICONS: Record<string, string> = {
@@ -75,7 +78,7 @@ export default function LibraryPage() {
   const [userGroup, setUserGroup] = useState<string>('user');
   const [userId, setUserId] = useState<string>('');
   const [section, setSection] = useState<SectionKey>('zezhe');
-  // 分类: zezhe 用 sheet, vip/code 用 source
+  // 分类: zezhe 用 sheet, vip/code 用 source, tg 用 import_channel
   const [subCategory, setSubCategory] = useState<string>('');
   const [categories, setCategories] = useState<CategoryBtn[]>([]);
   const [query, setQuery] = useState('');
@@ -173,6 +176,7 @@ export default function LibraryPage() {
       if (query) params.set('q', query);
       if (subCategory) {
         if (section === 'zezhe') params.set('sheet', subCategory);
+        else if (section === 'tg') params.set('source', subCategory.replace(/^tg_/, ''));
         else params.set('source', subCategory);
       }
       const res = await fetch(`/api/catalog?${params}`);
@@ -262,7 +266,7 @@ export default function LibraryPage() {
 
   const currentSection = SECTIONS.find(s => s.key === section)!;
   const subCategoryLabel = subCategory || '全部';
-  const subCategoryType = section === 'zezhe' ? 'sheet' : '网盘';
+  const subCategoryType = section === 'zezhe' ? 'sheet' : section === 'tg' ? 'TG 频道' : '网盘';
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -482,7 +486,7 @@ export default function LibraryPage() {
 
           {items.length === 0 && !loading && (
             <div className="py-16 text-center text-gray-400 text-base">
-              {section === 'code' ? '💎 暂无单独付费资源' : section === 'vip' ? '🔒 暂无 VIP 资源' : '👑 暂无泽泽妈妈文档资源'}
+              {section === 'code' ? '💎 暂无单独付费资源' : section === 'vip' ? '🔒 暂无 VIP 资源' : section === 'tg' ? '📡 暂无 TG 频道上传' : '👑 暂无泽泽妈妈文档资源'}
             </div>
           )}
 

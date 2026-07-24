@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
       await sql`DELETE FROM xx_catalog_sync_marker WHERE id = (SELECT MAX(id) FROM xx_catalog_sync_marker)`;
     } catch (e) { /* 表已存在或 sync 失败, 不阻塞主查询 */ }
 
-    // 1. Section 过滤 (跟 /library 业务规则一致: 3 大区 + 全部)
+    // 1. Section 过滤 (跟 /library 业务规则一致: 4 大区 + 全部)
     let sectionFilter = '1=1';
     let sectionChannel = '';
     if (section === 'zezhe') {
@@ -73,6 +73,11 @@ export async function GET(request: NextRequest) {
     } else if (section === 'code') {
       sectionFilter = "(r.access_level = 'code')";
       sectionChannel = 'code';
+    } else if (section === 'tg') {
+      // 2026-07-24 新增: TG 频道上传区, 包含所有 tg_* import_channel
+      // 子分类按 import_channel 区分 (tg_aliyun / tg_quark / tg_magnet / tg_baidu 等)
+      sectionFilter = "(r.import_channel LIKE 'tg\\_%' ESCAPE '\\')";
+      sectionChannel = 'tg';
     }
 
     // 2. Sheet / Source 过滤
@@ -199,6 +204,35 @@ export async function GET(request: NextRequest) {
       categories = (sourceRows || []).map((r: any) => ({
         name: SOURCE_DISPLAY_MAP[r.source] || r.source,
         key: SOURCE_DISPLAY_MAP[r.source] || r.source,
+        count: parseInt(r.cnt),
+      }));
+    } else if (section === 'tg') {
+      // 2026-07-24 新增: TG 频道上传区, 按 import_channel 子分类
+      const tgChannelRows = await sql`
+        SELECT import_channel, COUNT(*)::int as cnt
+        FROM xx_resources
+        WHERE status='active' AND import_channel LIKE 'tg\_%' ESCAPE '\\'
+        GROUP BY import_channel
+        ORDER BY cnt DESC, import_channel ASC
+      `;
+      const TG_DISPLAY_MAP: Record<string, string> = {
+        'tg_aliyun': '阿里云盘',
+        'tg_quark': '夸克网盘',
+        'tg_baidu': '百度网盘',
+        'tg_magnet': '磁力/ed2k',
+        'tg_123': '123网盘',
+        'tg_yidong': '移动云盘',
+        'tg_tianyi': '天翼云盘',
+        'tg_xunlei': '迅雷网盘',
+        'tg_uc': 'UC网盘',
+        'tg_music': '音乐',
+        'tg_115': '115网盘',
+        'tg_telegraph': 'Telegraph',
+        'tg_other': '其他',
+      };
+      categories = (tgChannelRows || []).map((r: any) => ({
+        name: TG_DISPLAY_MAP[r.import_channel] || r.import_channel,
+        key: r.import_channel,
         count: parseInt(r.cnt),
       }));
     }

@@ -34,6 +34,7 @@ const SECTIONS = [
   { key: 'zezhe', label: '泽泽妈妈115文档', icon: '👑', desc: 'basic 也可以直接打开 · 按 sheet 分类' },
   { key: 'vip', label: 'VIP 区', icon: '🔒', desc: 'VIP 可直接打开 · 按网盘分类' },
   { key: 'code', label: '单独付费区', icon: '💎', desc: '需消耗流明解锁 · 按网盘分类' },
+  { key: 'tg', label: 'TG 频道上传', icon: '📡', desc: 'TG 频道抓取的资源（阿里/夸克/磁力等）' },
 ] as const;
 
 type SectionKey = typeof SECTIONS[number]['key'];
@@ -42,6 +43,7 @@ const SECTION_BADGE: Record<string, string> = {
   zezhe: 'bg-gradient-to-r from-pink-500 to-purple-500 text-white',
   vip: 'bg-gradient-to-r from-amber-500 to-orange-500 text-white',
   code: 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white',
+  tg: 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white',
 };
 
 const CATEGORY_ICONS: Record<string, string> = {
@@ -127,6 +129,7 @@ export default function TitlesPage() {
       if (section) params.set('section', section);
       if (subCategory) {
         if (section === 'zezhe') params.set('sheet', subCategory);
+        else if (section === 'tg') params.set('source', subCategory.replace(/^tg_/, ''));
         else params.set('source', subCategory);
       }
       const res = await fetch(`/api/catalog?${params}`);
@@ -153,7 +156,7 @@ export default function TitlesPage() {
 
   const currentSection = SECTIONS.find(s => s.key === section)!;
   const subCategoryLabel = subCategory || '全部';
-  const subCategoryType = section === 'zezhe' ? 'sheet' : section === 'vip' || section === 'code' ? '网盘' : '';
+  const subCategoryType = section === 'zezhe' ? 'sheet' : section === 'tg' ? 'TG 频道' : section === 'vip' || section === 'code' ? '网盘' : '';
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white">
