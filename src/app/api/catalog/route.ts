@@ -134,7 +134,7 @@ export async function GET(request: NextRequest) {
     const listSQL = `
       SELECT r.id, r.name, r.category, r.tags, r.tmdb_id,
              r.doc_sheet, r.sub_type, r.size, r.type, r.created_at, r.access_level, r.import_channel, r.source,
-             r.link, r.link_code,
+             r.link, r.link_code, r.is_multi_link,
              COALESCE(c.title, r.name) as display_title,
              c.poster_path, c.vote_average, c.vote_count, c.release_date, c.status as tmdb_status
       FROM xx_resources r
@@ -163,6 +163,7 @@ export async function GET(request: NextRequest) {
         createdAt: row.created_at,
         importChannel: row.import_channel,
         accessLevel: row.access_level,
+        isMultiLink: row.is_multi_link || false,
         poster: row.poster_path
           ? `https://image.tmdb.org/t/p/w300${row.poster_path}`
           : null,
@@ -178,6 +179,41 @@ export async function GET(request: NextRequest) {
       }
       return base;
     });
+
+    // 2026-07-24: 查 xx_resource_links 副链接 (1对N 多链接)
+    // library 模式才需要 (titles 永不返, 跟 link/linkCode 一致)
+    let linksMap = new Map<number, any[]>();
+    if (zone === 'library' && items.length > 0) {
+      const allIds = items.map((it: any) => it.id);
+      try {
+        const linkRows = await sql`
+          SELECT resource_id, source, url, password, sort, access_level, status
+          FROM xx_resource_links
+          WHERE resource_id = ANY(${allIds})
+            AND status = 'active'
+            AND (source IS NOT NULL)
+          ORDER BY resource_id, sort ASC, id ASC
+        `;
+        for (const lr of (linkRows || [])) {
+          if (!linksMap.has(lr.resource_id)) linksMap.set(lr.resource_id, []);
+          linksMap.get(lr.resource_id)!.push({
+            source: lr.source,
+            url: lr.url,
+            password: lr.password,
+            sort: lr.sort,
+            accessLevel: lr.access_level,
+            status: lr.status,
+          });
+        }
+      } catch { linksMap = new Map(); }
+    }
+
+    // 给 items 加 links 字段
+    for (const it of items) {
+      const subLinks = linksMap.get(it.id);
+      const hasSubLinks = subLinks && subLinks.length > 0;
+      it.links = hasSubLinks ? subLinks : (it.link ? [{ source: it.source, url: it.link, password: it.linkCode, sort: 1, accessLevel: it.accessLevel, status: 'active' }] : []);
+    }
 
     // 8. 返分类按钮列表 (用于前端显示 sheet/source 按钮)
     // zezhe → sheet 列表, vip/code → source 列表, '' (全部) → 不返

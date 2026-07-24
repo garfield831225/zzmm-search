@@ -17,6 +17,8 @@ interface Resource {
   sourceDisplay?: string;
   displayCategory?: string;
   createdAt?: string;
+  isMultiLink?: boolean;
+  links?: Array<{ source: string; url: string; password: string; sort: number; accessLevel?: string; status?: string }>;  // 2026-07-24 多链接
 }
 interface CategoryBtn {
   name: string;
@@ -454,8 +456,53 @@ export default function LibraryPage() {
                   {isAdmin && <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-700 rounded text-[10px]">👑 免流明</span>}
                 </div>
                 {/* 操作 */}
-                <div className="flex gap-1">
-                  {isMagnetOrEd2k(item.link) && !isVipLock && !isCodeLock ? (
+                <div className="flex gap-1 flex-wrap items-center">
+                  {/* 2026-07-24: 多链接 (1对N 副链接) 优先显示, 副链接数>=2 加开全部按钮 */}
+                  {item.links && item.links.length > 1 && !isVipLock && !isCodeLock ? (
+                    <>
+                      {item.links.slice(0, 2).map((l, idx) => {
+                        const isMagnet = l.source === 'magnet' || l.source === 'ed2k';
+                        return (
+                          <button key={idx}
+                            onClick={() => {
+                              if (isMagnet) handleCopy(l.url, '磁力链接');
+                              else window.open(l.url, '_blank', 'noopener');
+                            }}
+                            className={`px-2 py-1 rounded text-xs text-white font-medium transition ${
+                              idx === 0
+                                ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:opacity-90'
+                                : 'bg-violet-600/70 hover:bg-violet-500'
+                            }`}
+                            title={l.source + (l.password ? ` · 提取码: ${l.password}` : '')}
+                          >
+                            {isMagnet ? '📋' : '🔗'} {l.source}{idx === 0 ? '★' : ''}
+                          </button>
+                        );
+                      })}
+                      {item.links.filter(l => l.source !== 'magnet' && l.source !== 'ed2k').length >= 2 && (
+                        <button
+                          onClick={() => {
+                            item.links!
+                              .filter(l => l.source !== 'magnet' && l.source !== 'ed2k')
+                              .forEach((l, i) => {
+                                setTimeout(() => {
+                                  if (l.password) {
+                                    const ok = window.confirm(`🔗 ${l.source} (提取码: ${l.password})\n\n确定打开？`);
+                                    if (ok) window.open(l.url, '_blank', 'noopener');
+                                  } else {
+                                    window.open(l.url, '_blank', 'noopener');
+                                  }
+                                }, i * 500);
+                              });
+                          }}
+                          className="px-2 py-1 rounded text-xs text-white font-medium bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:opacity-90 transition"
+                          title="一键打开所有网盘链接"
+                        >
+                          🚀 {item.links.length}
+                        </button>
+                      )}
+                    </>
+                  ) : isMagnetOrEd2k(item.link) && !isVipLock && !isCodeLock ? (
                     <button onClick={() => handleCopy(item.link, '链接')}
                       className="px-2.5 py-1 bg-violet-600 hover:bg-violet-500 rounded text-xs text-white font-medium transition">
                       📋 复制

@@ -759,31 +759,73 @@ export default function HomePage() {
                   <span>{item.category}</span>
                   {item.size && <span>📦 {item.size}</span>}
                 </div>
-                {/* 2026-07-17: 1对N 多链接 - 卡片下网盘图标排 (副表读) */}
+                {/* 2026-07-24: 1对N 多链接 - 卡片下网盘可点击图标 (按 sort 排序, 第一个高亮) */}
                 {item.links && item.links.length > 0 && (
                   <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                    {item.links.slice(0, 8).map((l, idx) => (
-                      <span key={idx} className={`px-1.5 py-0.5 text-[10px] rounded font-medium ${
-                        l.source === 'magnet' || l.source === 'ed2k'
-                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                          : l.source === '115'
-                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                            : 'bg-white/5 text-white/60 border border-white/10'
-                      }`}>
-                        {l.source === 'magnet' || l.source === 'ed2k' ? '🧲' :
-                         l.source === '115' ? '📦' :
-                         l.source === 'baidu' ? '🅱️' :
-                         l.source === 'quark' ? '🍊' :
-                         l.source === 'aliyun' ? '☁️' :
-                         l.source === 'xunlei' ? '⚡' :
-                         l.source === '123' ? '1️⃣' :
-                         l.source === 'uc' ? '🅿️' :
-                         l.source === 'tianyi' ? '☂️' :
-                         l.source === 'yidong' ? '📱' : '🔗'} {l.source}
-                      </span>
-                    ))}
+                    {item.links.slice(0, 8).map((l, idx) => {
+                      const isMagnetLink = l.source === 'magnet' || l.source === 'ed2k';
+                      return (
+                        <button
+                          key={idx}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isMagnetLink) handleCopyLink(l.url, e);
+                            else handleDirectOpen(l.url, l.password, e);
+                          }}
+                          className={`px-1.5 py-0.5 text-[10px] rounded font-medium cursor-pointer transition-all hover:scale-105 ${
+                            idx === 0
+                              ? 'bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 text-white border border-violet-400/50 ring-1 ring-violet-300/30'
+                              : isMagnetLink
+                                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                                : l.source === '115'
+                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                  : 'bg-white/5 text-white/60 border border-white/10'
+                          }`}
+                          title={`${l.source}${l.password ? ` · 提取码: ${l.password}` : ''} · 点击${isMagnetLink ? '复制' : '打开'}`}
+                        >
+                          {l.source === 'magnet' || l.source === 'ed2k' ? '🧲' :
+                           l.source === '115' ? '📦' :
+                           l.source === 'baidu' ? '🅱️' :
+                           l.source === 'quark' ? '🍊' :
+                           l.source === 'aliyun' ? '☁️' :
+                           l.source === 'xunlei' ? '⚡' :
+                           l.source === '123' ? '1️⃣' :
+                           l.source === 'uc' ? '🅿️' :
+                           l.source === 'tianyi' ? '☂️' :
+                           l.source === 'yidong' ? '📱' : '🔗'} {l.source}
+                          {idx === 0 && <span className="ml-0.5 text-[8px]">★</span>}
+                        </button>
+                      );
+                    })}
                     {item.links.length > 8 && (
                       <span className="text-[10px] text-white/40">+{item.links.length - 8}</span>
+                    )}
+                    {/* 2026-07-24: 一键开全部 (>=2 个非磁力链接才显示) */}
+                    {item.links.filter(l => l.source !== 'magnet' && l.source !== 'ed2k').length >= 2 && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // 依次 window.open (0.5s 间隔避开浏览器拦截)
+                          item.links
+                            .filter(l => l.source !== 'magnet' && l.source !== 'ed2k')
+                            .forEach((l, i) => {
+                              setTimeout(() => {
+                                if (l.password) {
+                                  const ok = window.confirm(
+                                    `🔗 ${l.source} 链接 (提取码: ${l.password})\n\n确定打开？`
+                                  );
+                                  if (ok) window.open(l.url, '_blank', 'noopener');
+                                } else {
+                                  window.open(l.url, '_blank', 'noopener');
+                                }
+                              }, i * 500);
+                            });
+                        }}
+                        className="px-1.5 py-0.5 text-[10px] rounded font-medium cursor-pointer transition-all hover:scale-105 bg-gradient-to-r from-violet-500/40 to-fuchsia-500/40 text-white border border-violet-400/60 ring-1 ring-violet-300/40"
+                        title="一键打开所有网盘链接"
+                      >
+                        🚀 开全部
+                      </button>
                     )}
                   </div>
                 )}
