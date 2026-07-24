@@ -76,7 +76,8 @@ export async function GET(request: NextRequest) {
     } else if (section === 'tg') {
       // 2026-07-24 新增: TG 频道上传区, 包含所有 tg_* import_channel
       // 子分类按 import_channel 区分 (tg_aliyun / tg_quark / tg_magnet / tg_baidu 等)
-      sectionFilter = "(r.import_channel LIKE 'tg\\_%' ESCAPE '\\')";
+      // 注: ESCAPE '\\' 在 Neon 不可靠, 直接用 LIKE 'tg%' 即可
+      sectionFilter = "(r.import_channel LIKE 'tg%')";
       sectionChannel = 'tg';
     }
 
@@ -211,7 +212,7 @@ export async function GET(request: NextRequest) {
       const tgChannelRows = await sql`
         SELECT import_channel, COUNT(*)::int as cnt
         FROM xx_resources
-        WHERE status='active' AND import_channel LIKE 'tg\_%' ESCAPE '\\'
+        WHERE status='active' AND import_channel LIKE 'tg%'
         GROUP BY import_channel
         ORDER BY cnt DESC, import_channel ASC
       `;
