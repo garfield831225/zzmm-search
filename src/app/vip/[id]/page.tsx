@@ -1,7 +1,14 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+
+// 2026-07-24: hls.js 全局类型 (CDN 加载, 没 npm 包)
+declare global {
+  interface Window {
+    Hls?: any;
+  }
+}
 
 interface VipLink {
   id: number;
@@ -12,6 +19,7 @@ interface VipLink {
   episodeTitle: string | null;
   playUrl: string;
   lastOkAt: string | null;
+  m3u8Urls?: { source: string; url: string; expires_at: string | null }[] | null;  // 2026-07-24 备份真链
 }
 
 interface VipResource {
@@ -230,27 +238,10 @@ export default function VipDetailPage() {
           </div>
         </div>
 
-        {/* 2026-07-24: inline iframe 播放器 (playerla 第三方, 无派拉蒙 logo) */}
+        {/* 2026-07-24: 多源播放器 (优先 m3u8 真链 + hls.js, fallback playerla iframe) */}
         {selectedLink && (
           <div className="mt-8 rounded-2xl overflow-hidden bg-black ring-1 ring-white/10 shadow-2xl">
-            <div className="relative" style={{ paddingBottom: '56.25%' }}>
-              <iframe
-                key={selectedLink.id}
-                src={selectedLink.playUrl}
-                className="absolute inset-0 w-full h-full"
-                frameBorder="0"
-                allow="autoplay; fullscreen; picture-in-picture"
-                allowFullScreen
-                title={`${resource.title} 播放`}
-              />
-            </div>
-            <div className="px-4 py-2 flex items-center justify-between text-xs text-white/40 bg-black/60">
-              <div>
-                {resource.mediaType === 'movie' ? '电影' : `第 ${selectedLink.season} 季 · 第 ${selectedLink.episode} 集`}
-                {selectedLink.source && <span className="ml-2">· {selectedLink.source}</span>}
-              </div>
-              <a href={selectedLink.playUrl} target="_blank" rel="noopener noreferrer" className="hover:text-white/80">新窗口打开 ↗</a>
-            </div>
+            <PlayerStage link={selectedLink} title={resource.title} />
           </div>
         )}
 
@@ -311,5 +302,141 @@ export default function VipDetailPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// 2026-07-24: 多源播放器 (m3u8 真链 hls.js + playerla iframe fallback)
+// 用户担心第三方源被锁, 所以 m3u8 真链优先 (本地备份)
+// playerla iframe 作为 fallback (源被锁时仍可看 playerla 自己的嵌入)
+function PlayerStage({ link, title }: { link: VipLink; title: string }) {
+  const m3u8s = link.m3u8Urls || [];
+  const hasM3u8 = m3u8s.length > 0;
+  // 优先 m3u8 源, 没 m3u8 才用 playerla iframe
+  const [mode, setMode] = useState<'m3u8' | 'iframe'>(hasM3u8 ? 'm3u8' : 'iframe');
+  const [sourceIdx, setSourceIdx] = useState(0);
+  const [errored, setErrored] = useState(false);
+
+  // 选中的 m3u8 (跳过已过期的)
+  const validM3u8s = m3u8s.filter((m) => {
+    if (!m.expires_at) return true;
+    return new Date(m.expires_at).getTime() > Date.now();
+  });
+  const currentM3u8 = validM3u8s[sourceIdx] || validM3u8s[0];
+  const allM3u8Failed = errored && sourceIdx >= validM3u8s.length - 1;
+
+  return (
+    <>
+      <div className="relative" style={{ paddingBottom: '56.25%' }}>
+        {mode === 'm3u8' && currentM3u8 ? (
+          <M3u8Player url={currentM3u8.url} onError={() => {
+            if (sourceIdx < validM3u8s.length - 1) {
+              setSourceIdx(sourceIdx + 1);
+            } else {
+              setErrored(true);
+            }
+          }} />
+        ) : (
+          <iframe
+            key={link.id}
+            src={link.playUrl}
+            className="absolute inset-0 w-full h-full"
+            frameBorder={0}
+            allow="autoplay; fullscreen; picture-in-picture"
+            allowFullScreen
+            title={`${title} 播放`}
+          />
+        )}
+        {allM3u8Failed && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 text-white">
+            <p className="text-lg font-bold mb-3">m3u8 源全部失败</p>
+            <button onClick={() => { setSourceIdx(0); setErrored(false); }} className="px-4 py-2 bg-indigo-500 rounded-lg mr-2">重试</button>
+            <button onClick={() => setMode('iframe')} className="px-4 py-2 bg-white/10 rounded-lg mt-2">切到 playerla 嵌入</button>
+          </div>
+        )}
+      </div>
+      <div className="px-4 py-2 flex items-center justify-between text-xs text-white/40 bg-black/60 gap-3 flex-wrap">
+        <div>
+          {link.source && <span className="mr-2">· {link.source}</span>}
+          {mode === 'm3u8' && currentM3u8 && (
+            <span className="text-emerald-400">▶ m3u8 ({currentM3u8.source})</span>
+          )}
+          {mode === 'iframe' && <span className="text-amber-400">▶ playerla 嵌入</span>}
+        </div>
+        <div className="flex items-center gap-2">
+          {hasM3u8 && validM3u8s.length > 1 && (
+            <select value={sourceIdx} onChange={(e) => { setSourceIdx(parseInt(e.target.value, 10)); setErrored(false); }} className="bg-white/10 rounded px-2 py-1 text-white text-xs">
+              {validM3u8s.map((m, i) => <option key={i} value={i}>{m.source} {m.expires_at ? `(${new Date(m.expires_at).toLocaleTimeString()})` : ''}</option>)}
+            </select>
+          )}
+          {hasM3u8 && (
+            <button onClick={() => setMode(mode === 'm3u8' ? 'iframe' : 'm3u8')} className="px-2 py-1 bg-white/10 rounded hover:bg-white/20">
+              切 {mode === 'm3u8' ? 'playerla' : 'm3u8'}
+            </button>
+          )}
+          <a href={link.playUrl} target="_blank" rel="noopener noreferrer" className="hover:text-white/80">新窗口 ↗</a>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// 2026-07-24: hls.js m3u8 播放器
+function M3u8Player({ url, onError }: { url: string; onError: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    let hls: any = null;
+    let cancelled = false;
+
+    // Safari 原生支持 HLS
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = url;
+      video.play().catch(() => {});
+      return;
+    }
+
+    // Chrome / Firefox: 用 hls.js (CDN)
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js';
+    script.async = true;
+    script.onload = () => {
+      if (cancelled) return;
+      // @ts-ignore
+      if (window.Hls && window.Hls.isSupported()) {
+        // @ts-ignore
+        hls = new window.Hls({ debug: false });
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        hls.on(window.Hls.Events.ERROR, (_e: any, data: any) => {
+          if (data.fatal) {
+            onError();
+            try { hls?.destroy(); } catch {}
+          }
+        });
+        video.play().catch(() => {});
+      } else {
+        onError();
+      }
+    };
+    script.onerror = () => onError();
+    document.head.appendChild(script);
+
+    return () => {
+      cancelled = true;
+      try { hls?.destroy(); } catch {}
+      try { video.pause(); video.removeAttribute('src'); video.load(); } catch {}
+    };
+  }, [url, onError]);
+
+  return (
+    <video
+      ref={videoRef}
+      className="absolute inset-0 w-full h-full bg-black"
+      controls
+      playsInline
+      autoPlay
+    />
   );
 }
