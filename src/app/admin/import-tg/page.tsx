@@ -58,7 +58,8 @@ const MAX_BATCH_BYTES = 1 * 1024 * 1024;
 
 export default function ImportTgPage() {
   const [file, setFile] = useState<File | null>(null);
-  const [channelHint, setChannelHint] = useState('tg_baidu');
+  // 2026-07-24: 默认改成空, 让用户必须主动选, 防止又把所有数据标成 tg_baidu
+  const [channelHint, setChannelHint] = useState('');
   const [parsing, setParsing] = useState(false);
   const [parseProgress, setParseProgress] = useState(0);  // 0-100, 解析中显示
   const [uploading, setUploading] = useState(false);

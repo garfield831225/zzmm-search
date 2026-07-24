@@ -96,17 +96,44 @@ export async function POST(req: NextRequest) {
   // 3. 检测 import_channel (优先用 hint, 否则按 forward_from/title 推断)
   // 2026-07-22: 加 6 个新网盘 (1f78159 加的 aliyun/xunlei/123/uc/tianyi/yidong)
   // 之前只支持 4 个老 channel, 6 个新 channel 全 fallback 到 tg_baidu
+  // 2026-07-24: hint 为空时, sample 前 50 个 message 自动判 channel (防止默认 tg_baidu 把阿里数据全标错)
   const channel: ImportChannel = (() => {
     const h = importChannelHint.toLowerCase();
-    if (h.includes('zezemom') || h.includes('zzmm')) return 'zezemom_excel';
-    if (h.includes('aliyun') || h.includes('alipan')) return 'tg_aliyun';
-    if (h.includes('xunlei')) return 'tg_xunlei';
-    if (h.includes('123')) return 'tg_123';
-    if (h.includes('uc')) return 'tg_uc';
-    if (h.includes('tianyi') || h.includes('189')) return 'tg_tianyi';
-    if (h.includes('yidong') || h.includes('139')) return 'tg_yidong';
-    if (h.includes('quark')) return 'tg_quark';
-    if (h.includes('music')) return 'tg_music';
+    if (h) {
+      if (h.includes('zezemom') || h.includes('zzmm')) return 'zezemom_excel';
+      if (h.includes('aliyun') || h.includes('alipan')) return 'tg_aliyun';
+      if (h.includes('xunlei')) return 'tg_xunlei';
+      if (h.includes('123')) return 'tg_123';
+      if (h.includes('uc')) return 'tg_uc';
+      if (h.includes('tianyi') || h.includes('189')) return 'tg_tianyi';
+      if (h.includes('yidong') || h.includes('139')) return 'tg_yidong';
+      if (h.includes('quark')) return 'tg_quark';
+      if (h.includes('music')) return 'tg_music';
+      if (h.includes('baidu')) return 'tg_baidu';
+    }
+    // 智能识别: sample 前 50 个 message, 按 source 出现频次自动判
+    const sample = messages.slice(0, 50);
+    const sourceCount: Record<string, number> = {};
+    for (const msg of sample) {
+      if (!msg || msg.type !== 'message') continue;
+      const links = extractLinksFromTgMessage(msg);
+      for (const l of links) {
+        if (l.type) sourceCount[l.type] = (sourceCount[l.type] || 0) + 1;
+      }
+    }
+    if (Object.keys(sourceCount).length === 0) return 'tg_baidu';
+    // 找出现最多的 source
+    const dominant = Object.entries(sourceCount).sort((a, b) => b[1] - a[1])[0][0];
+    if (dominant === 'aliyun') return 'tg_aliyun';
+    if (dominant === 'quark') return 'tg_quark';
+    if (dominant === 'baidu') return 'tg_baidu';
+    if (dominant === 'magnet' || dominant === 'ed2k') return 'tg_magnet';
+    if (dominant === '123') return 'tg_123';
+    if (dominant === 'uc') return 'tg_uc';
+    if (dominant === 'tianyi') return 'tg_tianyi';
+    if (dominant === 'yidong') return 'tg_yidong';
+    if (dominant === 'xunlei') return 'tg_xunlei';
+    if (dominant === '115') return 'tg_115';
     return 'tg_baidu';
   })();
 

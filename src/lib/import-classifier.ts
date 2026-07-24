@@ -6,7 +6,7 @@
 export type ResourceSource = '115' | 'baidu' | 'quark' | 'aliyun' | 'xunlei' | '123' | 'uc' | 'tianyi' | 'yidong' | 'magnet' | 'ed2k' | 'telegra_ph' | 'other';
 export type ResourceAccessLevel = 'basic' | 'vip' | 'code';
 export type ResourcePayType = 'free' | 'code';
-export type ImportChannel = 'zezemom_excel' | 'tg_baidu' | 'tg_quark' | 'tg_music' | 'tg_aliyun' | 'tg_xunlei' | 'tg_123' | 'tg_uc' | 'tg_tianyi' | 'tg_yidong' | 'other';
+export type ImportChannel = 'zezemom_excel' | 'tg_baidu' | 'tg_quark' | 'tg_music' | 'tg_aliyun' | 'tg_xunlei' | 'tg_123' | 'tg_uc' | 'tg_tianyi' | 'tg_yidong' | 'tg_magnet' | 'tg_115' | 'tg_telegraph' | 'tg_other' | 'other';
 
 // ─── 全局写死 sort 优先级 (G5-a) ────────────────────────────────────────
 // 打开组 (1-9) + 复制组 (10) — 所有资源统一按这个排
