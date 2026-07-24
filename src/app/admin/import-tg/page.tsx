@@ -60,6 +60,8 @@ export default function ImportTgPage() {
   const [file, setFile] = useState<File | null>(null);
   // 2026-07-24: 默认改成空, 让用户必须主动选, 防止又把所有数据标成 tg_baidu
   const [channelHint, setChannelHint] = useState('');
+  // 2026-07-24: 加 mode tab - TG 入口也能上 Excel/CSV
+  const [importMode, setImportMode] = useState<'json' | 'excel'>('json');
   const [parsing, setParsing] = useState(false);
   const [parseProgress, setParseProgress] = useState(0);  // 0-100, 解析中显示
   const [uploading, setUploading] = useState(false);
@@ -183,6 +185,119 @@ export default function ImportTgPage() {
       addLog('❌ JSON 解析失败: ' + (e.message?.slice(0, 200) || String(e)));
     } finally {
       setParsing(false);
+    }
+  };
+
+  // 2026-07-24: Excel/CSV 解析 (动态 import xlsx)
+  // 把每行转成 message 格式: { id, type:'message', text: 'name\nlink code' }
+  // 这样下游 extractLinksFromTgMessage / extractTitleFromTgMessage 不用改
+  const handleExcelFile = async (f: File) => {
+    setFile(f);
+    setLog([]);
+    setSplitPayloads([]);
+    setBatchResults([]);
+    addLog(`📁 已选择 Excel: ${f.name} (${(f.size / 1024 / 1024).toFixed(2)}MB)`);
+    setParsing(true);
+    setParseProgress(0);
+    try {
+      // 动态 import xlsx (避免初始包变大)
+      addLog('📦 加载 xlsx 库...');
+      setParseProgress(10);
+      const XLSX = await import('xlsx');
+      addLog('📖 读取文件...');
+      const buf = await f.arrayBuffer();
+      setParseProgress(30);
+      const wb = XLSX.read(buf, { type: 'array' });
+      const sheetName = wb.SheetNames[0];
+      const sheet = wb.Sheets[sheetName];
+      const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      setParseProgress(60);
+      addLog(`✅ Sheet[${sheetName}] 共 ${rows.length} 行, 自动识别列...`);
+
+      if (rows.length === 0) {
+        addLog('❌ Excel 无数据');
+        return;
+      }
+
+      // 智能识别列名
+      const headers = Object.keys(rows[0]);
+      const lower = headers.map(c => c.toLowerCase());
+      const find = (...kws: string[]) => {
+        for (const k of kws) {
+          const i = lower.findIndex(c => c.includes(k));
+          if (i >= 0) return headers[i];
+        }
+        return '';
+      };
+      const nameCol = find('名称', 'name', '标题', 'title', '片名') || headers[0];
+      const linkCol = find('链接', 'link', 'url', '地址') || headers[1];
+      const codeCol = find('提取码', 'code', '密码', 'password') || '';
+      const catCol = find('分类', 'category', '类型') || '';
+
+      addLog(`📋 列识别: 名称=${nameCol} 链接=${linkCol} 提取码=${codeCol || '(无)'} 分类=${catCol || '(无)'}`);
+
+      // 转成 messages
+      const messages: any[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const name = String(row[nameCol] || '').trim();
+        const link = String(row[linkCol] || '').trim();
+        if (!name || !link) continue;
+        const code = codeCol ? String(row[codeCol] || '').trim() : '';
+        // text 格式: name + \n + link + 空格 + code (extractLinksFromTgMessage 解析)
+        const text = code ? `${name}\n${link} ${code}` : `${name}\n${link}`;
+        messages.push({
+          id: i + 1,
+          type: 'message',
+          text,
+          date: new Date().toISOString(),
+        });
+        if (i % 5000 === 0) {
+          setParseProgress(60 + Math.round((i / rows.length) * 30));
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
+      setParseProgress(90);
+      addLog(`✅ 转换完成: ${messages.length} 条 message`);
+
+      // 切批 (复用 JSON 切批逻辑)
+      const baseOverhead = JSON.stringify({ messages: [], channelHint }).length + 5;
+      const batches: { name: string; jsonStr: string; count: number; bytes: number }[] = [];
+      let current: any[] = [];
+      let currentBytes = baseOverhead;
+      for (let i = 0; i < messages.length; i++) {
+        const msgJson = JSON.stringify(messages[i]);
+        const msgBytes = msgJson.length + 1;
+        if (currentBytes + msgBytes > MAX_BATCH_BYTES && current.length > 0) {
+          const jsonStr = JSON.stringify({ messages: current, channelHint });
+          batches.push({ name: `批 ${batches.length + 1}`, jsonStr, count: current.length, bytes: currentBytes });
+          current = [];
+          currentBytes = baseOverhead;
+        }
+        current.push(messages[i]);
+        currentBytes += msgBytes;
+      }
+      if (current.length > 0) {
+        const jsonStr = JSON.stringify({ messages: current, channelHint });
+        batches.push({ name: `批 ${batches.length + 1}`, jsonStr, count: current.length, bytes: currentBytes });
+      }
+      setParseProgress(100);
+      addLog(`✂️ 切成 ${batches.length} 批, 共 ${messages.length} 条`);
+      addLog(`💡 准备上传. 点击下方按钮开始.`);
+      setSplitPayloads(batches);
+    } catch (e: any) {
+      addLog('❌ Excel 解析失败: ' + (e.message?.slice(0, 200) || String(e)));
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  // 包装 handleFile: 根据 mode 选 JSON 还是 Excel 解析
+  const handleAnyFile = async (f: File) => {
+    if (importMode === 'excel') {
+      await handleExcelFile(f);
+    } else {
+      await handleFile(f);
     }
   };
 
@@ -362,6 +477,26 @@ export default function ImportTgPage() {
           </ul>
         </div>
 
+        {/* 导入模式 tab: JSON / Excel/CSV */}
+        <div className="mb-4 flex gap-2 bg-white/5 p-1 rounded-xl">
+          <button
+            onClick={() => { if (!uploading) { setImportMode('json'); resetAll(); } }}
+            className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${
+              importMode === 'json' ? 'bg-cyan-600 text-white' : 'text-white/60 hover:bg-white/5'
+            }`}
+          >
+            📡 TG JSON (result.json)
+          </button>
+          <button
+            onClick={() => { if (!uploading) { setImportMode('excel'); resetAll(); } }}
+            className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${
+              importMode === 'excel' ? 'bg-amber-600 text-white' : 'text-white/60 hover:bg-white/5'
+            }`}
+          >
+            📊 Excel / CSV
+          </button>
+        </div>
+
         {/* Channel 选择 */}
         <div className="mb-6 bg-[#12121a] rounded-xl border border-white/5 p-4">
           <div className="text-sm font-medium mb-3">📡 频道类型</div>
@@ -393,15 +528,15 @@ export default function ImportTgPage() {
           onDrop={e => {
             e.preventDefault();
             const f = e.dataTransfer.files[0];
-            if (f) handleFile(f);
+            if (f) handleAnyFile(f);
           }}
         >
           <input
             ref={fileRef}
             type="file"
-            accept=".json,application/json"
+            accept={importMode === 'json' ? '.json,application/json' : '.xlsx,.xls,.csv'}
             className="hidden"
-            onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleAnyFile(f); }}
           />
           {file ? (
             <div>
@@ -432,8 +567,14 @@ export default function ImportTgPage() {
           ) : (
             <div>
               <div className="text-4xl mb-2">📤</div>
-              <div className="text-white/60">点击选择或拖拽 result.json</div>
-              <div className="text-sm text-white/40 mt-2">支持任意大小, 自动按 3.5MB/批 切片</div>
+              <div className="text-white/60">
+                点击选择或拖拽 {importMode === 'json' ? 'result.json' : 'Excel/CSV 文件'}
+              </div>
+              <div className="text-sm text-white/40 mt-2">
+                {importMode === 'json'
+                  ? '支持任意大小, 自动按 3.5MB/批 切片'
+                  : '支持 .xlsx .xls .csv, 自动识别名称/链接/提取码列'}
+              </div>
             </div>
           )}
         </div>

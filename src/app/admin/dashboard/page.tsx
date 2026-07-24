@@ -24,8 +24,8 @@ interface Card {
 
 const CARDS: Card[] = [
   // ===== 资源管理 (zzmm-search 内部) =====
-  { id: 'import', title: '泽泽妈文档导入', desc: '21 sheet 文档批量导入', icon: Upload, href: '/admin/import', category: '资源管理', color: 'text-violet-700', bg: 'bg-violet-50 hover:bg-violet-100' },
-  { id: 'import-tg', title: 'TG 频道导入', desc: 'result.json → VIP 锁资源 (L1+L2+L3 队列)', icon: Network, href: '/admin/import-tg', category: '资源管理', color: 'text-cyan-700', bg: 'bg-cyan-50 hover:bg-cyan-100' },
+  { id: 'import', title: '数据导入中心', desc: '5 个入口: TG JSON / Excel / 飞书 / CSV / 快速粘链接', icon: Upload, href: '/admin/import-hub', category: '资源管理', color: 'text-violet-700', bg: 'bg-violet-50 hover:bg-violet-100' },
+  { id: 'import-tg', title: 'TG 频道导入 (旧)', desc: '直接进 result.json 入口', icon: Network, href: '/admin/import-tg', category: '资源管理', color: 'text-cyan-700', bg: 'bg-cyan-50 hover:bg-cyan-100' },
   { id: 'match', title: 'TMDB 匹配', desc: '单条手动匹配 / 占位符识别', icon: Target, href: '/admin/match', category: '资源管理', color: 'text-blue-700', bg: 'bg-blue-50 hover:bg-blue-100' },
   { id: 'tg-organize', title: 'TG 群整理', desc: '115 群消息审核入库', icon: ListChecks, href: '/admin/tg-organize', category: '资源管理', color: 'text-cyan-700', bg: 'bg-cyan-50 hover:bg-cyan-100' },
   { id: 'feedback', title: '失效反馈', desc: '用户链接失效反馈处理', icon: MessageSquareWarning, href: '/admin/feedback', category: '资源管理', color: 'text-amber-700', bg: 'bg-amber-50 hover:bg-amber-100' },
