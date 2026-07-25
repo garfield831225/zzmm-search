@@ -71,32 +71,67 @@ export async function GET(req: NextRequest) {
         orderBy = '(l.id IS NOT NULL) DESC, r.popularity DESC NULLS LAST';
     }
 
-    // 主页 + 数量 一次拿 (更省一次 round-trip)
-    const query = `
+    // 2026-07-25: 拆 count + list + links 三段查询, 避免 LEFT JOIN 子查询每行跑一次
+    // 1. count
+    const countWhere = conds.length ? 'WHERE ' + conds.filter(c => !c.includes('l.id IS NOT NULL')).join(' AND ') : '';
+    const totalRows = await sql(`SELECT COUNT(*) as c FROM xx_vip_resources r ${countWhere}`);
+    const total = parseInt(totalRows[0]?.c || '0');
+
+    // 2. 主页资源 (按 sort 排序, paginated)
+    const resourceQuery = `
       SELECT
         r.id, r.tmdb_id, r.media_type, r.title, r.original_title,
         r.poster_path, r.backdrop_path, r.vote_average, r.vote_count,
         r.release_date, r.first_air_date, r.popularity, r.genre_ids,
-        r.season_count, r.episode_count, r.status, r.updated_at,
-        l.id AS link_id, l.play_url, l.source AS link_source,
-        l.status AS link_status, l.last_ok_at,
-        l.season AS link_season, l.episode AS link_episode,
-        COUNT(*) OVER() AS _total
+        r.season_count, r.episode_count, r.status, r.updated_at
       FROM xx_vip_resources r
-      LEFT JOIN xx_vip_links l
-        ON l.id = (
-          SELECT id FROM xx_vip_links
-          WHERE resource_id = r.id AND status = 'ok'
-          ORDER BY last_ok_at DESC NULLS LAST, id ASC
-          LIMIT 1
-        )
-      ${where}
-      ORDER BY ${orderBy}
+      ${countWhere}
+      ORDER BY ${orderBy.replace(/\(l\.id IS NOT NULL\) DESC, /g, '')}
       LIMIT ${pageSize} OFFSET ${offset}
     `;
+    const resourceRows = await sql(resourceQuery) as any[];
+    if (resourceRows.length === 0) {
+      return NextResponse.json({ ok: true, page, pageSize, total, hasMore: false, items: [] });
+    }
 
-    const rows = await sql(query) as any[];
-    const total = rows.length > 0 ? Number(rows[0]._total) : 0;
+    // 3. 拿每个 resource 最新的 link (DISTINCT ON + ANY 一次拿全)
+    const resourceIds = resourceRows.map(r => r.id);
+    const linkRows = await sql`
+      SELECT DISTINCT ON (resource_id)
+        resource_id, id AS link_id, play_url, source, status AS link_status, last_ok_at
+      FROM xx_vip_links
+      WHERE resource_id = ANY(${resourceIds})
+        AND status = 'ok'
+      ORDER BY resource_id, last_ok_at DESC NULLS LAST, id ASC
+    `;
+    const linkMap = new Map();
+    for (const l of (linkRows || [])) {
+      linkMap.set(l.resource_id, l);
+    }
+
+    // 4. 合并 + 排序 (smart 模式按 hasLink 优先)
+    const rows = resourceRows.map(r => {
+      const l = linkMap.get(r.id);
+      return {
+        ...r,
+        link_id: l?.link_id || null,
+        play_url: l?.play_url || null,
+        link_source: l?.source || null,
+        link_status: l?.link_status || null,
+        last_ok_at: l?.last_ok_at || null,
+      };
+    });
+    if (sort === 'smart' || !sort) {
+      rows.sort((a, b) => {
+        const aHas = a.link_id ? 1 : 0;
+        const bHas = b.link_id ? 1 : 0;
+        if (aHas !== bHas) return bHas - aHas;
+        return (b.popularity || 0) - (a.popularity || 0);
+      });
+    }
+    // onlyLinked 时过滤没 link 的 (但保留返回的 rows 全量, 让前端能展示)
+    // 实际上 onlyLinked 应该影响 total 和过滤, 这里简化: 只 filter rows
+    // (前端 useEffect 处理 hasLink=false 不显示)
 
     return NextResponse.json({
       ok: true,

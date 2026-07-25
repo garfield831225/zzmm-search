@@ -244,10 +244,12 @@ export default function HomePage() {
       // 2026-06-26: 传 Bearer token 让 search API 识别 admin/basic/vip user_group, 否则永远 0 条
       // 2026-07-20: cache: 'no-store' + ts= 强制绕开浏览器 + Vercel Edge + Next.js fetch cache
       // (修了万米危机"还在"的 bug, 真实 DB 已是 0 但浏览器 cache 还在)
-      const token = localStorage.getItem('token') || '';
+      // 2026-07-25: zzmm_token 是 httpOnly cookie 同步到 localStorage 的字段名, 必须 fallback
+      const token = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || localStorage.getItem('adminToken') || '';
       params.set('_t', Date.now().toString());
       const res = await fetch(`/api/search?${params}`, {
         cache: 'no-store',
+        credentials: 'include',  // 2026-07-25: 带 cookie 鉴权 (server 端 JWT 解码)
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       const data: SearchResponse = await res.json();

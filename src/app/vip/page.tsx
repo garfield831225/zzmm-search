@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface VipItem {
@@ -69,6 +69,9 @@ export default function VipPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 2026-07-25: 用 ref 同步锁防死循环 + 并发 fetch
+  const loadingRef = useRef(false);
+  const latestReq = useRef(0);
 
   // 鉴权 - localStorage 检查
   useEffect(() => {
@@ -81,8 +84,11 @@ export default function VipPage() {
   }, [router]);
 
   const fetchPage = useCallback(async (p: number, append: boolean) => {
-    if (loading) return;
+    // 同步锁: ref 立即生效, 阻止并发 fetch
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setLoading(true);
+    const reqId = ++latestReq.current;
     try {
       const params = new URLSearchParams({
         page: p.toString(),
@@ -96,6 +102,8 @@ export default function VipPage() {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('zzmm_token') || ''}` },
       });
       const data: ApiResp = await resp.json();
+      // 过期请求忽略 (只处理最新一次)
+      if (reqId !== latestReq.current) return;
       if (!data.ok) {
         setError(data.error || `HTTP ${resp.status}`);
         if (resp.status === 403) setTimeout(() => router.push('/'), 1200);
@@ -107,18 +115,25 @@ export default function VipPage() {
       setItems((prev) => (append ? [...prev, ...data.items] : data.items));
       setPage(p);
     } catch (e: any) {
-      setError(e.message || '网络错误');
+      if (reqId === latestReq.current) setError(e.message || '网络错误');
     } finally {
-      setLoading(false);
+      if (reqId === latestReq.current) setLoading(false);
+      loadingRef.current = false;
     }
-  }, [mediaType, sort, router, loading]);
+  }, [mediaType, sort, router]);
 
+  // 2026-07-25: 死循环修复 - 用 sortRef + mediaRef 替代 useCallback 重渲染
+  const sortRef = useRef(sort);
+  const mediaRef = useRef(mediaType);
+  sortRef.current = sort;
+  mediaRef.current = mediaType;
   useEffect(() => {
     if (!authChecked) return;
     setItems([]);
     setPage(1);
     fetchPage(1, false);
-  }, [mediaType, sort, fetchPage, authChecked]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mediaType, sort, authChecked]);
 
   const loadMore = () => {
     if (loading || !hasMore) return;
