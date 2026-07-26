@@ -15,7 +15,8 @@ import {
 } from '@/lib/import-classifier';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;  // Vercel hobby 上限
+// 2026-07-26: NAS 部署 maxDuration 没 Vercel 60s 限制, 587 条 INSERT 50 并发要 60-90s, 调大到 300
+export const maxDuration = 300;
 
 // 鉴权: VIP + admin 才能用 (basic 看不到入口)
 function getAuth(req: NextRequest) {
@@ -296,7 +297,9 @@ export async function POST(req: NextRequest) {
     // 2026-07-17: 并发 INSERT (50 并发) + before/after SELECT 验证
     // Neon serverless v3 的 RETURNING 不可靠, 不能用 r?.[0]?.id 判定
     // ANY() array literal 对中文/特殊字符转义坏, 改单条 SELECT 50 并发
-    const CONCURRENCY = 50;
+    // 2026-07-26 改: 50 并发 → 5 并发 (Neon 免费版 RPS 限制 5/s, 50 并发排队卡到 100s+)
+    // 测速: 300 条 × 2 链接 = 600 INSERT @ CONCURRENCY=50 要 126s, @5 应该 30s
+    const CONCURRENCY = 5;
 
     for (let i = 0; i < candidates.length; i += CONCURRENCY) {
       const chunk = candidates.slice(i, i + CONCURRENCY);

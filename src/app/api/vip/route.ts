@@ -37,6 +37,7 @@ export async function GET(req: NextRequest) {
   const mediaType = url.searchParams.get('mediaType') || '';   // '' | 'movie' | 'tv'
   const hasLink = url.searchParams.get('hasLink');              // '1' = 只看有链接
   const sort = url.searchParams.get('sort') || 'smart';         // 'smart' | 'popular' | 'rating' | 'newest'
+  const q = (url.searchParams.get('q') || '').trim().slice(0, 100);  // 2026-07-26: 搜索关键词 (限制 100 字)
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
   const pageSize = Math.min(100, Math.max(1, parseInt(url.searchParams.get('pageSize') || '48', 10)));
   const offset = (page - 1) * pageSize;
@@ -52,6 +53,15 @@ export async function GET(req: NextRequest) {
 
     const conds: string[] = [];
     if (safeMediaType) conds.push(`r.media_type = '${safeMediaType}'`);
+    if (q) {
+      // ILIKE 模糊匹配 title + original_title, 数字走 = (TMDB ID 直查)
+      const isNumeric = /^\d+$/.test(q);
+      if (isNumeric) {
+        conds.push(`(r.tmdb_id = ${parseInt(q)} OR r.title ILIKE '%${q.replace(/'/g, "''")}%' OR r.original_title ILIKE '%${q.replace(/'/g, "''")}%')`);
+      } else {
+        conds.push(`(r.title ILIKE '%${q.replace(/'/g, "''")}%' OR r.original_title ILIKE '%${q.replace(/'/g, "''")}%')`);
+      }
+    }
     if (onlyLinked) conds.push(`l.id IS NOT NULL`);
     const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
 
@@ -68,7 +78,9 @@ export async function GET(req: NextRequest) {
         break;
       case 'smart':
       default:
-        orderBy = '(l.id IS NOT NULL) DESC, r.popularity DESC NULLS LAST';
+        // 2026-07-26: 整体排序 (有 link 全放一起, 再放没 link), 不能分页错位
+        // 用 EXISTS 子查询, 避免 LEFT JOIN 影响 sort 性能
+        orderBy = `EXISTS(SELECT 1 FROM xx_vip_links l WHERE l.resource_id = r.id AND l.status = 'ok') DESC, r.popularity DESC NULLS LAST`;
     }
 
     // 2026-07-25: 拆 count + list + links 三段查询, 避免 LEFT JOIN 子查询每行跑一次
@@ -77,7 +89,7 @@ export async function GET(req: NextRequest) {
     const totalRows = await sql(`SELECT COUNT(*) as c FROM xx_vip_resources r ${countWhere}`);
     const total = parseInt(totalRows[0]?.c || '0');
 
-    // 2. 主页资源 (按 sort 排序, paginated)
+    // 2. 主页资源 (按 sort 排序, paginated) - 整体排序, 不分页错位
     const resourceQuery = `
       SELECT
         r.id, r.tmdb_id, r.media_type, r.title, r.original_title,
@@ -86,12 +98,25 @@ export async function GET(req: NextRequest) {
         r.season_count, r.episode_count, r.status, r.updated_at
       FROM xx_vip_resources r
       ${countWhere}
-      ORDER BY ${orderBy.replace(/\(l\.id IS NOT NULL\) DESC, /g, '')}
+      ORDER BY ${orderBy}
       LIMIT ${pageSize} OFFSET ${offset}
     `;
     const resourceRows = await sql(resourceQuery) as any[];
+
+    // 2026-07-26: 全站可播放统计 (不受 filter 影响, 前端顶栏展示)
+    const globalStatsRows = await sql(`
+      SELECT
+        COUNT(*)::int AS total_resources,
+        COUNT(*) FILTER (WHERE EXISTS(SELECT 1 FROM xx_vip_links l WHERE l.resource_id = r.id AND l.status = 'ok'))::int AS playable_resources
+      FROM xx_vip_resources r
+    `);
+    const globalStats = {
+      totalResources: globalStatsRows[0]?.total_resources || 0,
+      playableResources: globalStatsRows[0]?.playable_resources || 0,
+    };
+
     if (resourceRows.length === 0) {
-      return NextResponse.json({ ok: true, page, pageSize, total, hasMore: false, items: [] });
+      return NextResponse.json({ ok: true, page, pageSize, total, hasMore: false, items: [], globalStats });
     }
 
     // 3. 拿每个 resource 最新的 link (DISTINCT ON + ANY 一次拿全)
@@ -109,7 +134,7 @@ export async function GET(req: NextRequest) {
       linkMap.set(l.resource_id, l);
     }
 
-    // 4. 合并 + 排序 (smart 模式按 hasLink 优先)
+    // 4. 合并 link 数据 (排序在 SQL 端已搞定, 这里不再应用层 sort)
     const rows = resourceRows.map(r => {
       const l = linkMap.get(r.id);
       return {
@@ -121,17 +146,7 @@ export async function GET(req: NextRequest) {
         last_ok_at: l?.last_ok_at || null,
       };
     });
-    if (sort === 'smart' || !sort) {
-      rows.sort((a, b) => {
-        const aHas = a.link_id ? 1 : 0;
-        const bHas = b.link_id ? 1 : 0;
-        if (aHas !== bHas) return bHas - aHas;
-        return (b.popularity || 0) - (a.popularity || 0);
-      });
-    }
-    // onlyLinked 时过滤没 link 的 (但保留返回的 rows 全量, 让前端能展示)
-    // 实际上 onlyLinked 应该影响 total 和过滤, 这里简化: 只 filter rows
-    // (前端 useEffect 处理 hasLink=false 不显示)
+    // 2026-07-26: 不再应用层 sort - SQL 端 EXISTS 整体排序, 全表 370 个有 link 全放最前
 
     return NextResponse.json({
       ok: true,
@@ -139,6 +154,7 @@ export async function GET(req: NextRequest) {
       pageSize,
       total,
       hasMore: offset + rows.length < total,
+      globalStats,  // 2026-07-26: 全站可播放统计 (不受 filter 影响)
       items: rows.map((r) => ({
         id: Number(r.id),
         tmdbId: Number(r.tmdb_id),

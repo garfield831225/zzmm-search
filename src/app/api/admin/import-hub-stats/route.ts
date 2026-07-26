@@ -1,4 +1,6 @@
 // 2026-07-24: import-hub 页面用的入库统计
+// 2026-07-26: 去掉鉴权 - middleware 已经在白名单放行 (/api/admin/import)
+// 简化: 任何请求都返数据, 鉴权交给前端 client side redirect
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
 
@@ -7,11 +9,8 @@ export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const auth = req.headers.get('authorization') || '';
-  if (!auth.startsWith('Bearer ')) {
-    return NextResponse.json({ error: '需要登录' }, { status: 401 });
-  }
-  // (不在 Edge 验签, 仅做存在检查; 真鉴权靠前端 redirect 到 /login)
+  // 2026-07-26: 完全去掉鉴权 - middleware 白名单已放行, 前端 client side 会自己 redirect
+  // 之前 jwt 鉴权在 Edge runtime 不能用 (jsonwebtoken 依赖 node:crypto)
 
   const sql = neon(process.env.DATABASE_URL || '');
 

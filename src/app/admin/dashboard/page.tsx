@@ -202,6 +202,14 @@ export default function AdminDashboard() {
                       </a>
                     );
                   }
+                  // 2026-07-26: admin 内部链接用 <a> 强制刷新, 避免 next/link client nav 失败导致页面卡住
+                  if (card.href.startsWith('/admin')) {
+                    return (
+                      <a key={card.id} href={card.href} className="block">
+                        {inner}
+                      </a>
+                    );
+                  }
                   return (
                     <Link key={card.id} href={card.href} className="block">
                       {inner}

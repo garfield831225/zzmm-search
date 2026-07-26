@@ -114,10 +114,17 @@ export default function ImportHubPage() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch('/api/admin/import-hub-stats');
+        // 2026-07-26: 带 token + cookie, 避免 401
+        const token = (typeof window !== 'undefined') ?
+          (localStorage.getItem('zzmm_token') || localStorage.getItem('adminToken') || localStorage.getItem('token') || '') : '';
+        const r = await fetch('/api/admin/import-hub-stats', {
+          credentials: 'include',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!r.ok) { setLoading(false); return; }
         const d = await r.json();
         if (d.success) setStats({ total: d.total, channels: d.channels });
-      } catch { /* 静默 */ }
+      } catch (e) { /* 静默 */ }
       finally { setLoading(false); }
     })();
   }, []);

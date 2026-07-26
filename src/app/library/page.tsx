@@ -26,12 +26,13 @@ interface CategoryBtn {
   count: number;
 }
 
-// 4 大区配置 (2026-07-24 新增 tg 频道上传区)
+// 3 大区 + 待归类 (2026-07-25 去掉 tg 区, 4 大区变 3 大区; 2026-07-27 加 pending)
+// 硬规则: zezhe (basic 直接看) / vip (vip 会员才能看) / code (单资源付费) / pending (网盘+其他, 待关键词库扩展)
 const SECTIONS = [
-  { key: 'zezhe', label: '泽泽妈妈115文档', icon: '👑', desc: 'basic 也可以直接打开' },
-  { key: 'vip', label: 'VIP 区', icon: '🔒', desc: 'VIP 可直接打开，basic 看到 VIP 锁' },
-  { key: 'code', label: '单独付费区', icon: '💎', desc: '需消耗流明解锁' },
-  { key: 'tg', label: 'TG 频道上传', icon: '📡', desc: 'TG 频道抓取的资源（阿里/夸克/磁力等）' },
+  { key: 'zezhe', label: '泽泽妈妈115文档', icon: '👑', desc: 'basic 会员可以直接打开' },
+  { key: 'vip', label: 'VIP 区', icon: '🔒', desc: 'VIP 会员可直接打开，basic 显示 VIP 锁' },
+  { key: 'code', label: '单独付费区', icon: '💎', desc: '需消耗流明解锁 (admin 免流明)' },
+  { key: 'pending', label: '待归类', icon: '🧐', desc: '网盘 + category=其他 (待每周 cron 扩关键词库)' },
 ] as const;
 
 type SectionKey = typeof SECTIONS[number]['key'];
@@ -40,14 +41,14 @@ const SECTION_COLOR: Record<SectionKey, string> = {
   zezhe: 'from-pink-500/20 to-purple-500/20 border-pink-500/40',
   vip: 'from-amber-500/20 to-orange-500/20 border-amber-500/40',
   code: 'from-cyan-500/20 to-blue-500/20 border-cyan-500/40',
-  tg: 'from-emerald-500/20 to-teal-500/20 border-emerald-500/40',
+  pending: 'from-slate-500/20 to-zinc-500/20 border-slate-500/40',
 };
 
 const SECTION_BADGE: Record<SectionKey, string> = {
   zezhe: 'bg-gradient-to-r from-pink-500 to-purple-500 text-white',
   vip: 'bg-gradient-to-r from-amber-500 to-orange-500 text-white',
   code: 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white',
-  tg: 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white',
+  pending: 'bg-gradient-to-r from-slate-500 to-zinc-500 text-white',
 };
 
 const CATEGORY_ICONS: Record<string, string> = {
@@ -82,6 +83,8 @@ export default function LibraryPage() {
   const [section, setSection] = useState<SectionKey>('zezhe');
   // 分类: zezhe 用 sheet, vip/code 用 source, tg 用 import_channel
   const [subCategory, setSubCategory] = useState<string>('');
+  // 2026-07-27: pending 区 5 大类 (用户视角: 影视/动漫/电子书/软件/全部)
+  const [catGroup, setCatGroup] = useState<string>('');  // '' (全部) | 影视 | 动漫 | 电子书 | 软件
   const [categories, setCategories] = useState<CategoryBtn[]>([]);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<'asc' | 'desc'>('desc');  // desc=按添加时间倒序 (默认)
@@ -122,24 +125,29 @@ export default function LibraryPage() {
     } catch { addToast('error', '复制失败'); }
   }, [addToast]);
 
-  // 业务逻辑
-  // 1) basic 用户在 vip 区: 非 zezhe + access=vip → 锁
-  // 2) basic/vip 在 code 区: access=code → 都需要流明解锁 (admin 免)
-  // 3) 任何用户在 zezhe 区: 直接打开
+  // 业务逻辑 (2026-07-25 硬规则版)
+  // 1) zezhe 资源 (import_channel='zezhe' 或 'zezemom_excel') → basic + vip + admin 都直接开
+  // 2) 其他 vip 资源 → vip + admin 直接开, basic 看锁
+  // 3) code 资源 (pay_type='code') → basic + vip 都要流明解锁, admin 免
+  // 4) pending 区 (2026-07-27): 跟 source 区一致 (网盘+其他, vip/admin 直接开, basic 锁)
+  // 2026-07-27 兼容 zezhe + zezemom_excel 两种命名
+  const isZezheChannel = (ch?: string) => ch === 'zezhe' || ch === 'zezemom_excel';
   const isVipLocked = (item: Resource): boolean => {
     if (userGroup === 'admin') return false;
-    if (item.accessLevel !== 'vip') return false;
-    if (userGroup === 'vip') return false;  // VIP 自己也开
-    if (userGroup === 'basic') return true;  // basic 看 vip 区
-    return true;
+    if (userGroup === 'vip') return false;  // VIP 全开
+    if (isZezheChannel(item.importChannel)) return false;  // zezhe 永远不锁
+    if (isCodeResource(item)) return false;  // code 走付费流明, 不算锁
+    if (section === 'pending') return false;  // pending 区是待归类网盘, 也算 vip 区
+    return true;  // 其他 basic 看都是 vip 锁
   };
 
   const isAdminDirectOpen = (item: Resource): boolean => {
-    return userGroup === 'admin' && item.accessLevel === 'code';
+    return userGroup === 'admin' && isCodeResource(item);
   };
 
   const isCodeResource = (item: Resource): boolean => {
-    return item.accessLevel === 'code';
+    // pay_type 优先 (更准), 兼容 access_level
+    return item.payType === 'code' || item.accessLevel === 'code';
   };
 
   const codeResourceLocked = (item: Resource): boolean => {
@@ -148,10 +156,11 @@ export default function LibraryPage() {
     return isCodeResource(item);
   };
 
-  // 切 section → 重置 subCategory + 重新拉
+  // 切 section → 重置 subCategory + catGroup + 重新拉
   const switchSection = (s: SectionKey) => {
     setSection(s);
     setSubCategory('');
+    setCatGroup('');
   };
 
   // 拉分类按钮列表
@@ -178,16 +187,17 @@ export default function LibraryPage() {
       if (query) params.set('q', query);
       if (subCategory) {
         if (section === 'zezhe') params.set('sheet', subCategory);
-        else if (section === 'tg') params.set('source', subCategory.replace(/^tg_/, ''));
         else params.set('source', subCategory);
       }
+      // 2026-07-27: pending 区传 catGroup
+      if (section === 'pending' && catGroup) params.set('catGroup', catGroup);
       const res = await fetch(`/api/catalog?${params}`);
       const data = await res.json();
       const newItems = data.items || [];
 
-      // 查 code 资源的解锁状态
+      // 查 code 资源的解锁状态 (pay_type='code' 或 accessLevel='code')
       if (section === 'code' && userId) {
-        const codeIds = newItems.filter((i: Resource) => i.accessLevel === 'code').map((i: Resource) => i.id);
+        const codeIds = newItems.filter((i: Resource) => i.payType === 'code' || i.accessLevel === 'code').map((i: Resource) => i.id);
         if (codeIds.length > 0) {
           try {
             const ur = await fetch(`/api/user/unlocks/list?ids=${codeIds.join(',')}`, {
@@ -266,9 +276,108 @@ export default function LibraryPage() {
     }
   };
 
+  // 2026-07-26: admin 删除资源 (软删 / 硬删) — library 每条加 admin 删除能力
+  // 跟首页 detail modal 同套逻辑: DELETE /api/admin/resources/{id}[?hard=true]
+  // 软删 = status='deleted', search/catalog 看不见, 可恢复
+  // 硬删 = 物理删除 + CASCADE 清理 xx_resource_links/xx_link_feedback/xx_publish_log, 不可恢复
+  const handleAdminDelete = async (item: Resource, hard: boolean) => {
+    if (hard) {
+      // 三级确认, 防止误操作
+      if (!confirm(`🔥 硬删整个资源?\n\n资源 ID: ${item.id}\n名称: ${item.name}\n\n⚠️ 物理删除: 数据从数据库清空, 不可恢复\n⚠️ 同时级联删除 xx_resource_links / xx_link_feedback / xx_publish_log 全部关联行\n⚠️ library / titles / search 三个页面会立即同步消失`)) return;
+      if (!confirm(`🔥 真的要硬删?\n\n最后一次确认: 删除后无法恢复!\n资源 ID: ${item.id}\n名称: ${item.name}`)) return;
+      const hardConfirm = prompt(`输入资源 ID ${item.id} 确认硬删:`);
+      if (hardConfirm !== String(item.id)) {
+        addToast('error', '❌ 硬删已取消 (ID 不匹配)');
+        return;
+      }
+    } else {
+      if (!confirm(`🗑️ 软删整个资源 (含所有链接)?\n\n资源 ID: ${item.id}\n名称: ${item.name}\n来源: ${item.source}\n\n软删 = status='deleted', 可恢复\n不影响其他同名资源\n\nlibrary / titles / search 三个页面会立即同步消失`)) return;
+    }
+    const token = getToken();
+    if (!token) {
+      addToast('error', '❌ 未登录或 token 失效, 请重新登录');
+      return;
+    }
+    try {
+      const url = `/api/admin/resources/${item.id}${hard ? '?hard=true' : ''}`;
+      const r = await fetch(url, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + token },
+      });
+      const d = await r.json();
+      if (d.ok) {
+        if (hard) {
+          const cascaded = d.cascaded ? ` (副表 ${d.cascaded.xx_resource_links} 链接, ${d.cascaded.xx_link_feedback} 反馈)` : '';
+          addToast('success', `🔥 已硬删, 不可恢复${cascaded}`);
+        } else {
+          addToast('success', `🗑️ 已软删 (${d.subLinks} 条链接, 资源可恢复)`);
+        }
+        // 2026-07-26: 立即从本地列表移除, 不依赖 refetch (快)
+        setItems(prev => prev.filter(i => i.id !== item.id));
+        setTotal(prev => Math.max(0, prev - 1));
+      } else if (r.status === 401) {
+        addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
+      } else if (r.status === 403) {
+        addToast('error', `❌ 403 需要 admin 权限`);
+      } else if (r.status === 404) {
+        addToast('error', `❌ 404 资源不存在, 刷新页面`);
+      } else {
+        addToast('error', `❌ ${r.status} ${d.error || '删除失败'}`);
+      }
+    } catch (e: any) {
+      addToast('error', '❌ 网络错误: ' + e.message);
+    }
+  };
+
+  // 2026-07-26: admin 删单个链接 (PATCH/DELETE /api/admin/links) — library 每条加 admin 链接级删除
+  const handleAdminDeleteLink = async (item: Resource, source: string) => {
+    if (!confirm(`🗑️ 删除 ${source} 链接?\n\n资源 ID: ${item.id}\n来源: ${source}\n\n链接级删除, 不会动资源本身\n(其他链接不受影响)`)) return;
+    const token = getToken();
+    if (!token) {
+      addToast('error', '❌ 未登录或 token 失效, 请重新登录');
+      return;
+    }
+    try {
+      const r = await fetch('/api/admin/links', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ resourceId: item.id, source }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        addToast('success', d.resourceDeleted ? '🗑️ 已删除 (资源无链接, 已软删)' : '🗑️ 已删除');
+        // 局部更新: 从 links 数组里移除这个 source
+        setItems(prev => prev.map(i => {
+          if (i.id !== item.id) return i;
+          return {
+            ...i,
+            links: i.links?.filter(l => l.source !== source),
+          };
+        }));
+        // 如果资源被自动软删了, 移除整行
+        if (d.resourceDeleted) {
+          setItems(prev => prev.filter(i => i.id !== item.id));
+          setTotal(prev => Math.max(0, prev - 1));
+        }
+      } else if (r.status === 401) {
+        addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
+      } else if (r.status === 403) {
+        addToast('error', `❌ 403 需要 admin 权限`);
+      } else if (r.status === 404) {
+        addToast('error', `❌ 404 ${d.error} — 这条链接可能已经被删, 刷新页面`);
+      } else {
+        addToast('error', `❌ ${r.status} ${d.error || '删除失败'}`);
+      }
+    } catch (e: any) {
+      addToast('error', '❌ 网络错误: ' + e.message);
+    }
+  };
+
   const currentSection = SECTIONS.find(s => s.key === section)!;
   const subCategoryLabel = subCategory || '全部';
-  const subCategoryType = section === 'zezhe' ? 'sheet' : section === 'tg' ? 'TG 频道' : '网盘';
+  const subCategoryType = section === 'zezhe' ? 'sheet' : '网盘';
+  // 2026-07-27: pending 区的 subCategory 不传 (用 source 分组), 但为了 UI 一致也显示"网盘"
+  // 实际上 pending 区用 source 过滤 category=其他, 跟 vip/code 一致
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -326,6 +435,29 @@ export default function LibraryPage() {
             })}
           </div>
 
+          {/* 业务规则说明 (2026-07-25 用户硬规则版) - 折叠 */}
+          <details className="mb-3 text-xs">
+            <summary className="cursor-pointer text-gray-500 hover:text-gray-700 select-none">
+              💡 查看 3 大区业务规则 + 注册流程
+            </summary>
+            <div className="mt-2 p-3 bg-violet-50/50 border border-violet-200/50 rounded-lg space-y-2 text-gray-700">
+              <div className="font-medium text-gray-900">📋 资源访问规则（硬性版）</div>
+              <ul className="space-y-1 ml-2">
+                <li>• <b className="text-pink-600">👑 泽泽妈妈115文档</b>：basic 会员可直接打开（无需 VIP）</li>
+                <li>• <b className="text-amber-600">🔒 VIP 区</b>：VIP 会员直接打开，basic 会员显示 VIP 锁（需升级 VIP）</li>
+                <li>• <b className="text-cyan-600">💎 单独付费区</b>：basic + VIP 都需消耗流明解锁（admin 免流明）</li>
+              </ul>
+              <div className="font-medium text-gray-900 pt-1">🔑 注册流程</div>
+              <ul className="space-y-1 ml-2">
+                <li>• <b>1. 拿邀请码</b>：找站长微信要（站内不开放公开注册）</li>
+                <li>• <b>2. 注册</b>：用邀请码 + 邮箱 + 密码注册</li>
+                <li>• <b>3. 自动 basic</b>：注册成功自动成为 basic 会员，可看泽泽妈妈文档</li>
+                <li>• <b>4. 升级 VIP</b>：basic 会员才能买 VIP 码（30/180/365/永久）</li>
+                <li>• <b>5. 全开</b>：VIP 会员可看全站资源（含 VIP 区全部）</li>
+              </ul>
+            </div>
+          </details>
+
           {/* 当前区信息条 */}
           <div className={`mb-3 px-3 py-2 rounded-lg text-xs bg-gradient-to-r ${SECTION_COLOR[section]} border flex items-center gap-2 flex-wrap`}>
             <span className="font-medium">{currentSection.icon} {currentSection.label}</span>
@@ -358,7 +490,32 @@ export default function LibraryPage() {
             </button>
           </form>
 
-          {/* 分类按钮: zezhe → sheet, vip/code → source */}
+          {/* 2026-07-27: pending 区显示 5 大类快速 chip (影视/动漫/电子书/软件/全部) */}
+          {section === 'pending' && (
+            <div className="mb-2">
+              <div className="text-[10px] text-gray-400 mb-1.5">5 大类快速筛选 (按关键词库自动归类后)</div>
+              <div className="flex gap-1.5 overflow-x-auto pb-1">
+                {[
+                  { key: '', label: '📦 全部' },
+                  { key: '影视', label: '🎬 影视 (电影+剧集+综艺+纪录片)' },
+                  { key: '动漫', label: '🈴 动漫' },
+                  { key: '电子书', label: '📚 电子书' },
+                  { key: '软件', label: '💿 软件' },
+                ].map(g => (
+                  <button key={g.key || 'all'} onClick={() => setCatGroup(g.key)}
+                    className={`px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition font-medium ${
+                      catGroup === g.key
+                        ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-sm'
+                        : 'bg-white text-gray-600 hover:bg-violet-50 border border-gray-200'
+                    }`}>
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 分类按钮: zezhe → sheet, vip/code/pending → source */}
           <div className="mb-2">
             <div className="text-[10px] text-gray-400 mb-1.5">
               {section === 'zezhe' ? '按 sheet 分类' : '按网盘类型分类'} · 共 {categories.length} 个
@@ -386,7 +543,7 @@ export default function LibraryPage() {
       <main className="max-w-[1600px] mx-auto px-4 py-4">
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
           {/* Table header */}
-          <div className="grid grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px] gap-2 px-3 py-2.5 bg-gray-50 border-b border-gray-200 text-sm font-medium text-gray-500 uppercase tracking-wide">
+          <div className={`grid gap-2 px-3 py-2.5 bg-gray-50 border-b border-gray-200 text-sm font-medium text-gray-500 uppercase tracking-wide ${userGroup === 'admin' ? 'grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px_140px]' : 'grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px]'}`}>
             <div>分类</div>
             <div>标签</div>
             <div>名称</div>
@@ -396,6 +553,7 @@ export default function LibraryPage() {
             <div>添加时间</div>
             <div>状态</div>
             <div>操作</div>
+            {userGroup === 'admin' && <div className="text-red-600">🛠️ Admin</div>}
           </div>
 
           {items.map((item) => {
@@ -408,10 +566,12 @@ export default function LibraryPage() {
               ? item.docSheet
               : item.category;
             const showIcon = CATEGORY_ICONS[showCategory] || '📁';
+            // 2026-07-26: 顶层 admin = user_group='admin', 注意不要跟 isAdmin (isAdminDirectOpen) 撞名
+            const isTopAdmin = userGroup === 'admin';
 
             return (
               <div key={item.id}
-                className={`grid grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px] gap-2 px-3 py-2.5 border-b border-gray-100 hover:bg-violet-50/30 transition text-base items-center ${isVipLock ? 'bg-amber-50/30' : ''} ${isCodeLock ? 'bg-cyan-50/30' : ''}`}>
+                className={`grid gap-2 px-3 py-2.5 border-b border-gray-100 hover:bg-violet-50/30 transition text-base items-center ${isTopAdmin ? 'grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px_140px]' : 'grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px]'} ${isVipLock ? 'bg-amber-50/30' : ''} ${isCodeLock ? 'bg-cyan-50/30' : ''}`}>
                 {/* 分类 — sheet 优先, category 兜底 */}
                 <div>
                   <div className="text-2xl leading-none">{showIcon}</div>
@@ -527,13 +687,56 @@ export default function LibraryPage() {
                     </button>
                   )}
                 </div>
+                {/* 2026-07-26: admin 操作列 — 软删/硬删资源 + 删单个链接 (per-link) */}
+                {isTopAdmin && (
+                  <div className="flex flex-col gap-1 text-xs">
+                    {/* 资源级: 软删 + 硬删 */}
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => handleAdminDelete(item, false)}
+                        title="软删: status='deleted', search/catalog 看不见, 可恢复"
+                        className="flex-1 px-1.5 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded text-[10px] font-medium transition">
+                        🗑️ 软删
+                      </button>
+                      <button
+                        onClick={() => handleAdminDelete(item, true)}
+                        title="硬删: 物理删除 + CASCADE 清理副表, 不可恢复"
+                        className="flex-1 px-1.5 py-0.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-300 rounded text-[10px] font-bold transition">
+                        🔥 硬删
+                      </button>
+                    </div>
+                    {/* 链接级: 逐个删 (副表链接) */}
+                    {item.links && item.links.length > 0 ? (
+                      <div className="flex flex-wrap gap-0.5">
+                        {Array.from(new Set(item.links.map(l => l.source))).map(src => (
+                          <button
+                            key={src}
+                            onClick={() => handleAdminDeleteLink(item, src)}
+                            title={`删 ${src} 链接 (其他链接不受影响)`}
+                            className="px-1 py-0.5 bg-white hover:bg-red-50 text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded text-[9px] transition">
+                            ✕{src}
+                          </button>
+                        ))}
+                      </div>
+                    ) : item.source ? (
+                      <div className="flex gap-0.5">
+                        <button
+                          onClick={() => handleAdminDeleteLink(item, item.source!)}
+                          title={`删 ${item.source} 链接 (主表老字段, 标 source='${item.source} [deleted]')`}
+                          className="px-1 py-0.5 bg-white hover:bg-red-50 text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded text-[9px] transition">
+                          ✕{item.source}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
               </div>
             );
           })}
 
           {items.length === 0 && !loading && (
             <div className="py-16 text-center text-gray-400 text-base">
-              {section === 'code' ? '💎 暂无单独付费资源' : section === 'vip' ? '🔒 暂无 VIP 资源' : section === 'tg' ? '📡 暂无 TG 频道上传' : '👑 暂无泽泽妈妈文档资源'}
+              {section === 'code' ? '💎 暂无单独付费资源' : section === 'vip' ? '🔒 暂无 VIP 资源' : '👑 暂无泽泽妈妈文档资源'}
             </div>
           )}
 

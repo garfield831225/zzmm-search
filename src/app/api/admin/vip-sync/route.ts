@@ -1,6 +1,7 @@
-// 2026-07-23: NAS 端批量匹配触发器
-// POST: spawn match-direct.mjs 后台进程, 立即返回
+// 2026-07-26: NAS 端 vip TMDB 同步触发器 (跟 match-now 同款)
+// POST: spawn vip-tmdb-sync.sh 后台进程, 立即返回
 // GET: 读取日志 + PID 状态
+// DELETE: 杀掉
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn, execSync } from 'child_process';
 import { readFileSync, existsSync } from 'fs';
@@ -8,13 +9,12 @@ import jwt from 'jsonwebtoken';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30;  // spawn + 返回, 应该秒级
+export const maxDuration = 30;
 
-// 2026-07-25: NAS systemd 部署, 不是 Docker. 改用绝对路径
 const PROJECT_ROOT = process.env.ZZMM_PROJECT_ROOT || '/data_s001/docker/zzmm-search';
-const SCRIPT_PATH = `${PROJECT_ROOT}/scripts/match-direct.mjs`;
-const LOG_FILE = `${PROJECT_ROOT}/logs/match.log`;
-const PID_FILE = `${PROJECT_ROOT}/logs/match.pid`;
+const SCRIPT_PATH = `${PROJECT_ROOT}/scripts/vip-sync-tmdb.sh`;
+const LOG_FILE = `${PROJECT_ROOT}/logs/vip-sync.log`;
+const PID_FILE = `${PROJECT_ROOT}/logs/vip-sync.pid`;
 
 function authAdmin(req: NextRequest) {
   let token: string | null = null;
@@ -39,7 +39,6 @@ function authAdmin(req: NextRequest) {
 function isProcessAlive(pid: number): boolean {
   if (!pid || pid <= 0) return false;
   try {
-    // kill -0 只检查进程是否存在, 不真杀
     execSync(`kill -0 ${pid} 2>/dev/null`);
     return true;
   } catch {
@@ -50,14 +49,23 @@ function isProcessAlive(pid: number): boolean {
 function readPid(): number {
   if (!existsSync(PID_FILE)) return 0;
   try {
-    const content = readFileSync(PID_FILE, 'utf8').trim();
-    return parseInt(content) || 0;
-  } catch {
-    return 0;
-  }
+    return parseInt(readFileSync(PID_FILE, 'utf8').trim()) || 0;
+  } catch { return 0; }
 }
 
-// POST: 启动后台匹配
+function writePid(pid: number) {
+  try {
+    require('fs').writeFileSync(PID_FILE, String(pid));
+  } catch {}
+}
+
+function clearPid() {
+  try {
+    if (existsSync(PID_FILE)) require('fs').unlinkSync(PID_FILE);
+  } catch {}
+}
+
+// POST: 启动后台同步
 export async function POST(req: NextRequest) {
   const auth = authAdmin(req);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
@@ -66,16 +74,15 @@ export async function POST(req: NextRequest) {
   const existingPid = readPid();
   if (existingPid > 0 && isProcessAlive(existingPid)) {
     return NextResponse.json({
-      error: '已有匹配任务在跑',
+      error: '已有同步任务在跑',
       pid: existingPid,
       running: true,
     }, { status: 409 });
   }
 
-  // 2) 解析参数
+  // 2) 解析参数 (pagesPerTask 默认 5)
   const body = await req.json().catch(() => ({}));
-  const batchSize = Math.min(2000, Math.max(50, parseInt(body.batchSize) || 500));
-  const dryRun = body.dryRun === true;
+  const pagesPerTask = Math.min(50, Math.max(1, parseInt(body.pagesPerTask) || 5));
 
   // 3) 检查脚本是否存在
   if (!existsSync(SCRIPT_PATH)) {
@@ -84,23 +91,20 @@ export async function POST(req: NextRequest) {
     }, { status: 500 });
   }
 
-  // 4) spawn 后台进程
-  const args = [SCRIPT_PATH, '--batch', String(batchSize), '--log', LOG_FILE, '--pid', PID_FILE];
-  if (dryRun) args.push('--dry-run');
-
+  // 4) spawn 后台进程 (用 bash, 脚本自己处理 env + 多任务)
   try {
-    const child = spawn('node', args, {
+    const child = spawn('bash', [SCRIPT_PATH, String(pagesPerTask)], {
       detached: true,
       stdio: 'ignore',
-      env: { ...process.env, ENV_FILE: '/app/.env.production' },
+      env: { ...process.env },
     });
     child.unref();
+    writePid(child.pid || 0);
 
     return NextResponse.json({
       ok: true,
       pid: child.pid,
-      batchSize,
-      dryRun,
+      pagesPerTask,
       startedAt: new Date().toISOString(),
       logFile: LOG_FILE,
     });
@@ -126,16 +130,18 @@ export async function GET(req: NextRequest) {
       const content = readFileSync(LOG_FILE, 'utf8');
       logSize = content.length;
       const lines = content.split('\n').filter(Boolean);
-      // 取最后 20 行
-      logTail = lines.slice(-20);
-      // 解析 startedAt (从第一行 [timestamp] start: ... 提取)
-      if (lines[0]) {
-        const m = lines[0].match(/^\[([^\]]+)\]/);
-        if (m) startedAt = m[1];
+      logTail = lines.slice(-30);
+      // 解析 startedAt (最近一个 'sync start' 行)
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const m = lines[i].match(/\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] VIP TMDB sync start/);
+        if (m) { startedAt = m[1]; break; }
       }
       if (lines.length > 0) lastLine = lines[lines.length - 1];
     } catch {}
   }
+
+  // 解析统计 (page 5/30: ok=100 fail=0 / page 30/30: ok=600 fail=0 / DONE:)
+  const stats = parseStats(logTail);
 
   return NextResponse.json({
     running,
@@ -146,6 +152,7 @@ export async function GET(req: NextRequest) {
     logTail,
     scriptPath: SCRIPT_PATH,
     logFile: LOG_FILE,
+    stats,
   });
 }
 
@@ -156,13 +163,40 @@ export async function DELETE(req: NextRequest) {
 
   const pid = readPid();
   if (pid <= 0 || !isProcessAlive(pid)) {
+    clearPid();
     return NextResponse.json({ ok: true, killed: false, reason: 'no running task' });
   }
 
   try {
     execSync(`kill ${pid}`);
+    clearPid();
     return NextResponse.json({ ok: true, killed: true, pid });
   } catch (e: any) {
     return NextResponse.json({ error: e.message?.slice(0, 200) }, { status: 500 });
   }
+}
+
+function parseStats(logTail: string[]) {
+  let totalSuccess = 0;
+  let totalFail = 0;
+  let lastPage = 0;
+  let done = false;
+
+  for (const line of logTail) {
+    const m = line.match(/ok=(\d+)/g);
+    if (m) {
+      const nums = m.map(s => parseInt(s.split('=')[1]));
+      // 取最大 (最后一次的累计)
+      if (nums.length > 0) totalSuccess = Math.max(totalSuccess, nums[nums.length - 1]);
+    }
+    const m2 = line.match(/fail=(\d+)/g);
+    if (m2) {
+      const nums = m2.map(s => parseInt(s.split('=')[1]));
+      if (nums.length > 0) totalFail = Math.max(totalFail, nums[nums.length - 1]);
+    }
+    const m3 = line.match(/page (\d+)\/(\d+)/);
+    if (m3) lastPage = parseInt(m3[2]);
+    if (line.includes('DONE:') || line.includes('sync done')) done = true;
+  }
+  return { totalSuccess, totalFail, lastPage, done };
 }

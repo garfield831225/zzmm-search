@@ -282,10 +282,10 @@ function SuccessView({ result, router }: { result: ActivateResult; router: any }
           </button>
         ) : (
           <button
-            onClick={() => router.push('/tmdb-films')}
+            onClick={() => router.push('/')}
             className="flex-1 py-3 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl text-sm font-medium hover:opacity-90 transition flex items-center justify-center gap-1"
           >
-            去看电影 <ArrowRight className="w-4 h-4" />
+            请享受vip旅程 <ArrowRight className="w-4 h-4" />
           </button>
         )}
       </div>

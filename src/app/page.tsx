@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv, Shield } from 'lucide-react';
+import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv, Shield, Crown } from 'lucide-react';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
@@ -16,7 +16,7 @@ const YEARS = ['全部', '2026', '2025', '2024', '2023', '2022', '2021', '2020',
 
 interface DownloadToast {
   id: number;
-  type: 'success' | 'cooldown' | 'limit' | 'banned' | 'error';
+  type: 'success' | 'cooldown' | 'limit' | 'banned' | 'error' | 'warning';  // 2026-07-26 + warning (replica lag 提示)
   message: string;
 }
 
@@ -345,10 +345,12 @@ export default function HomePage() {
   };
 
   // 2026-07-15: VIP 锁 - basic 用户看非 zezhe 资源时禁止打开 (前端展示锁)
+  // 2026-07-27: 兼容 zezhe + zezemom_excel 两种命名 (历史上有混用)
+  const isZezheChannel = (ch?: string) => ch === 'zezhe' || ch === 'zezemom_excel';
   const isVipLocked = (item: ResourceItem): boolean => {
     if (!user) return false;
     if (user.group !== 'basic') return false;  // 只有 basic 用户才会被锁
-    if (item.importChannel === 'zezemom_excel') return false;  // 泽泽妈永远不锁
+    if (isZezheChannel(item.importChannel)) return false;  // 泽泽妈永远不锁
     if (item.accessLevel === 'code') return false;  // 单资源付费走流明解锁
     return true;  // 其他都锁
   };
@@ -441,6 +443,13 @@ export default function HomePage() {
               {user ? (
                 <div className="flex items-center gap-2">
                   <span className="px-3 py-1.5 bg-violet-600/30 rounded-lg text-sm text-violet-300">{user.username}</span>
+                  {/* 2026-07-25 重新启用: VIP 影视区入口 (只 vip + admin 看到, basic 看不到) */}
+                  {(user?.group === 'vip' || user?.group === 'admin') && (
+                    <Link href="/vip" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-pink-500/20 hover:from-amber-500/40 hover:to-pink-500/40 rounded-lg text-sm transition-all duration-200 text-amber-200 hover:shadow-[0_0_12px_rgba(245,158,11,0.4)] hover:scale-105 border border-amber-400/30">
+                      <Crown size={14} className="transition-transform group-hover:scale-110" />
+                      <span>VIP 影视区</span>
+                    </Link>
+                  )}
                   {/* 2026-07-15 隐藏: 用户要求不要显示 TMDB 影视区 + VIP 观影区 入口
                   <Link href="/tmdb-films" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/20 hover:bg-pink-600/50 rounded-lg text-sm transition-all duration-200 text-pink-300 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
                     <Film size={14} className="transition-transform group-hover:scale-110" />
@@ -709,7 +718,7 @@ export default function HomePage() {
                 {/* Source Badge */}
                 <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
                   {/* 2026-07-15 泽泽妈专属标识 (import_channel='zezemom_excel') - 修正: 实际值是 'zezemom_excel' 不是 'zezhe' */}
-                  {item.importChannel === 'zezemom_excel' && (
+                  {isZezheChannel(item.importChannel) && (
                     <span className="px-2 py-0.5 bg-gradient-to-r from-rose-500 to-pink-500 text-white text-xs rounded font-medium shadow-sm flex items-center gap-1">
                       <span>👑</span><span>泽泽妈</span>
                     </span>
@@ -718,7 +727,7 @@ export default function HomePage() {
                   {/* 2026-07-15 修正: 资源 access_level='basic' 不一定都是泽泽妈 - 脏数据 (baidu/quark) 也被标了 basic
                       应该按 import_channel='zezemom_excel' 判定, 才是真泽泽妈文档 */}
                   {/* 2026-07-15 VIP 锁: basic 用户看非 zezhe 资源时显示锁 (前端展示, 不卡后端) */}
-                  {user?.group === 'basic' && item.importChannel !== 'zezemom_excel' && item.accessLevel !== 'code' && (
+                  {user?.group === 'basic' && !isZezheChannel(item.importChannel) && item.accessLevel !== 'code' && (
                     <span className="px-2 py-0.5 bg-gradient-to-r from-amber-500 to-orange-500 text-black text-xs rounded font-medium flex items-center gap-1">
                       <span>🔒</span><span>VIP 锁</span>
                     </span>
@@ -733,7 +742,7 @@ export default function HomePage() {
                       💎 单资源付费
                     </span>
                   )}
-                  {item.importChannel === 'zezemom_excel' && (
+                  {isZezheChannel(item.importChannel) && (
                     <span className="px-2 py-0.5 bg-sky-500/30 border border-sky-500/40 text-sky-300 text-xs rounded">
                       📚 泽泽妈文档
                     </span>
@@ -937,41 +946,56 @@ export default function HomePage() {
                   <div className="flex items-start justify-between mb-5">
                     <h2 className="text-xl font-bold leading-tight pr-4">{selectedItem.name}</h2>
                     <div className="flex items-center gap-1 shrink-0">
-                      {isAdmin && (
-                        <>
+                      <button onClick={() => setSelectedItem(null)} className="p-1.5 hover:bg-white/10 rounded-lg transition text-white/40 hover:text-white">✕</button>
+                    </div>
+                  </div>
+                  {/* 2026-07-26: admin 显眼操作条 - 顶部 banner, 红色实心, 比角落小按钮明显 */}
+                  {isAdmin && (
+                    <div className="mb-5 p-3 bg-gradient-to-r from-red-500/15 to-orange-500/15 border-2 border-red-500/40 rounded-xl">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2 py-0.5 bg-red-500 text-white text-[10px] rounded font-bold uppercase tracking-wider">🛠️ admin</span>
+                        <span className="text-xs text-white/70">资源 ID: {selectedItem.id} · 来源: {selectedItem.source} · 链接: {selectedItem.links?.length || 0} 条</span>
+                        <div className="flex gap-2 ml-auto">
                           <button
                             onClick={async (e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              if (!confirm(`🗑️ 软删整个资源 (含所有链接)?\n\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}\n来源: ${selectedItem.source}\n链接: ${selectedItem.links?.length || 0} 条\n\n软删 = status='deleted', 可恢复\n不影响其他同名资源`)) return;
+                              if (!confirm(`🗑️ 软删整个资源 (含所有链接)?\n\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}\n来源: ${selectedItem.source}\n链接: ${selectedItem.links?.length || 0} 条\n\n软删 = status='deleted', 可恢复\n不影响其他同名资源\n\nhome / library / titles 三个页面会立即同步消失`)) return;
                               const token = getToken();
                               if (!token) {
                                 addToast('error', '❌ 未登录或 token 失效');
                                 return;
                               }
-                              console.log('[DELETE resource] sending', { resourceId: selectedItem.id });
                               const r = await fetch(`/api/admin/resources/${selectedItem.id}`, {
                                 method: 'DELETE',
                                 headers: { Authorization: 'Bearer ' + token },
                               });
                               const d = await r.json();
-                              console.log('[DELETE resource] response', r.status, d);
                               if (d.ok) {
                                 addToast('success', `🗑️ 已软删 (${d.subLinks} 条链接, 资源可恢复)`);
                                 setSelectedItem(null);
+                                // 2026-07-26 修 read replica lag: 立即从 items 移除 (不等 search 重拉)
+                                setItems(prev => prev.filter(i => i.id !== selectedItem.id));
+                                setTotal(prev => Math.max(0, prev - 1));
                                 setTimeout(() => fetchItems(1), 500);
                               } else if (r.status === 401) {
                                 addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
                               } else if (r.status === 403) {
                                 addToast('error', `❌ 403 需要 admin 权限`);
                               } else if (r.status === 404) {
-                                addToast('error', `❌ 404 资源不存在`);
+                                // 2026-07-26 修: 404 = 主端已删但 replica 还在返 (read replica lag)
+                                // 用户视角: 资源已不存在, 立即从 UI 移除
+                                addToast('warning', `⚠️ 主端已删 (replica 滞后), 立即移除`);
+                                setSelectedItem(null);
+                                setItems(prev => prev.filter(i => i.id !== selectedItem.id));
+                                setTotal(prev => Math.max(0, prev - 1));
+                                setTimeout(() => fetchItems(1), 500);
                               } else {
                                 addToast('error', `❌ ${r.status} ${d.error || '删除失败'}`);
                               }
                             }}
-                            className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded text-xs font-medium"
-                            title="软删: status='deleted', 可恢复">
+                            className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-black rounded-lg text-sm font-bold transition shadow-lg shadow-amber-500/20"
+                            title="软删: status='deleted', search/catalog 看不见, 可恢复">
                             🗑️ 软删
                           </button>
                           <button
@@ -979,7 +1003,7 @@ export default function HomePage() {
                               e.preventDefault();
                               e.stopPropagation();
                               // 三级确认, 防止误操作
-                              if (!confirm(`🔥 硬删整个资源?\n\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}\n\n⚠️ 物理删除: 数据从数据库清空, 不可恢复\n⚠️ 同时级联删除 xx_resource_links / xx_link_feedback / xx_publish_log 全部关联行`)) return;
+                              if (!confirm(`🔥 硬删整个资源?\n\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}\n\n⚠️ 物理删除: 数据从数据库清空, 不可恢复\n⚠️ 同时级联删除 xx_resource_links / xx_link_feedback / xx_publish_log 全部关联行\n⚠️ home / library / titles 三个页面会立即同步消失`)) return;
                               if (!confirm(`🔥 真的要硬删?\n\n最后一次确认: 删除后无法恢复!\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}`)) return;
                               const hardConfirm = prompt(`输入资源 ID ${selectedItem.id} 确认硬删:`);
                               if (hardConfirm !== String(selectedItem.id)) {
@@ -991,37 +1015,42 @@ export default function HomePage() {
                                 addToast('error', '❌ 未登录或 token 失效');
                                 return;
                               }
-                              console.log('[DELETE resource hard] sending', { resourceId: selectedItem.id });
                               const r = await fetch(`/api/admin/resources/${selectedItem.id}?hard=true`, {
                                 method: 'DELETE',
                                 headers: { Authorization: 'Bearer ' + token },
                               });
                               const d = await r.json();
-                              console.log('[DELETE resource hard] response', r.status, d);
                               if (d.ok) {
                                 const cascaded = d.cascaded ? ` (副表 ${d.cascaded.xx_resource_links} 链接, ${d.cascaded.xx_link_feedback} 反馈)` : '';
                                 addToast('success', `🔥 已硬删, 不可恢复${cascaded}`);
                                 setSelectedItem(null);
+                                // 2026-07-26 修 read replica lag: 立即从 items 移除
+                                setItems(prev => prev.filter(i => i.id !== selectedItem.id));
+                                setTotal(prev => Math.max(0, prev - 1));
                                 setTimeout(() => fetchItems(1), 500);
                               } else if (r.status === 401) {
                                 addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
                               } else if (r.status === 403) {
                                 addToast('error', `❌ 403 需要 admin 权限`);
                               } else if (r.status === 404) {
-                                addToast('error', `❌ 404 资源不存在`);
+                                // 2026-07-26 修: 404 = 主端已删, replica 滞后显示老数据
+                                addToast('warning', `⚠️ 主端已删 (replica 滞后), 立即移除`);
+                                setSelectedItem(null);
+                                setItems(prev => prev.filter(i => i.id !== selectedItem.id));
+                                setTotal(prev => Math.max(0, prev - 1));
+                                setTimeout(() => fetchItems(1), 500);
                               } else {
                                 addToast('error', `❌ ${r.status} ${d.error || '硬删失败'}`);
                               }
                             }}
-                            className="px-2 py-1 bg-red-700/30 hover:bg-red-700/50 text-red-200 rounded text-xs font-bold border border-red-500/30"
+                            className="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-bold transition shadow-lg shadow-red-500/30 border border-red-400/50"
                             title="硬删: 物理删除, 不可恢复">
                             🔥 硬删
                           </button>
-                        </>
-                      )}
-                      <button onClick={() => setSelectedItem(null)} className="p-1.5 hover:bg-white/10 rounded-lg transition text-white/40 hover:text-white">✕</button>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
                   {/* ── TMDB Info Section ── */}
                   {selectedItem.tmdb && (
                     <div className="mb-5 space-y-4">
@@ -1214,14 +1243,23 @@ export default function HomePage() {
                                       if (d.ok) {
                                         addToast('success', d.resourceDeleted ? '🗑️ 已删除 (资源无链接, 已软删)' : '🗑️ 已删除');
                                         setSelectedItem(prev => prev ? { ...prev, links: prev.links?.filter(x => x.source !== l.source) } : prev);
-                                        // 2026-07-20: 删完触发首页重新拉数据, 跟 library/titles 同步
+                                        // 2026-07-26 修 read replica lag: 同时从 items 移除 (如果资源也被自动软删)
+                                        if (d.resourceDeleted) {
+                                          setItems(prev => prev.filter(i => i.id !== selectedItem.id));
+                                          setTotal(prev => Math.max(0, prev - 1));
+                                        }
                                         setTimeout(() => fetchItems(1), 500);
                                       } else if (r.status === 401) {
                                         addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
                                       } else if (r.status === 403) {
                                         addToast('error', `❌ 403 需要 admin 权限`);
                                       } else if (r.status === 404) {
-                                        addToast('error', `❌ 404 ${d.error} — 这条链接可能已经被别人删了, 刷新页面`);
+                                        // 2026-07-26 修: 404 = 主端已删, replica 滞后. 立即从 UI 移除
+                                        addToast('warning', `⚠️ 主端已删 (replica 滞后), 立即移除`);
+                                        setSelectedItem(prev => prev ? { ...prev, links: prev.links?.filter(x => x.source !== l.source) } : prev);
+                                        setItems(prev => prev.filter(i => i.id !== selectedItem.id));
+                                        setTotal(prev => Math.max(0, prev - 1));
+                                        setTimeout(() => fetchItems(1), 500);
                                       } else {
                                         addToast('error', `❌ ${r.status} ${d.error || '删除失败'}`);
                                       }
@@ -1394,8 +1432,8 @@ export default function HomePage() {
         <AnimatePresence>
           {downloadToasts.map((toast) => (
             <motion.div key={toast.id} initial={{ opacity: 0, x: 80, scale: 0.8 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 80, scale: 0.8 }}
-              className={`px-5 py-3 rounded-xl text-sm font-medium shadow-lg flex items-center gap-2 min-w-[220px] ${toast.type === 'success' ? 'bg-green-600/90 text-white' : toast.type === 'cooldown' ? 'bg-orange-600/90 text-white' : toast.type === 'limit' ? 'bg-blue-600/90 text-white' : toast.type === 'banned' ? 'bg-red-700/90 text-white' : 'bg-red-600/90 text-white'}`}>
-              <span>{toast.type === 'success' ? '✓' : toast.type === 'cooldown' ? '⏳' : toast.type === 'limit' ? '📊' : toast.type === 'banned' ? '🚫' : '✕'}</span>
+              className={`px-5 py-3 rounded-xl text-sm font-medium shadow-lg flex items-center gap-2 min-w-[220px] ${toast.type === 'success' ? 'bg-green-600/90 text-white' : toast.type === 'cooldown' ? 'bg-orange-600/90 text-white' : toast.type === 'limit' ? 'bg-blue-600/90 text-white' : toast.type === 'banned' ? 'bg-red-700/90 text-white' : toast.type === 'warning' ? 'bg-amber-500/90 text-black' : 'bg-red-600/90 text-white'}`}>
+              <span>{toast.type === 'success' ? '✓' : toast.type === 'cooldown' ? '⏳' : toast.type === 'limit' ? '📊' : toast.type === 'banned' ? '🚫' : toast.type === 'warning' ? '⚠️' : '✕'}</span>
               {toast.message}
             </motion.div>
           ))}

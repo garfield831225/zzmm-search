@@ -38,6 +38,7 @@ interface ApiResp {
   hasMore: boolean;
   items: VipItem[];
   error?: string;
+  globalStats?: { totalResources: number; playableResources: number };
 }
 
 type MediaTab = '' | 'movie' | 'tv';
@@ -63,10 +64,12 @@ export default function VipPage() {
   const [authChecked, setAuthChecked] = useState(false);
   const [mediaType, setMediaType] = useState<MediaTab>('');
   const [sort, setSort] = useState<SortKey>('smart');
+  const [query, setQuery] = useState('');  // 2026-07-26: 搜索关键词
   const [items, setItems] = useState<VipItem[]>([]);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [total, setTotal] = useState(0);
+  const [globalStats, setGlobalStats] = useState<{ totalResources: number; playableResources: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 2026-07-25: 用 ref 同步锁防死循环 + 并发 fetch
@@ -96,6 +99,7 @@ export default function VipPage() {
         sort,
       });
       if (mediaType) params.set('mediaType', mediaType);
+      if (query.trim()) params.set('q', query.trim());
 
       const resp = await fetch(`/api/vip?${params.toString()}`, {
         credentials: 'include',
@@ -114,26 +118,29 @@ export default function VipPage() {
       setHasMore(data.hasMore);
       setItems((prev) => (append ? [...prev, ...data.items] : data.items));
       setPage(p);
+      if (data.globalStats) setGlobalStats(data.globalStats);
     } catch (e: any) {
       if (reqId === latestReq.current) setError(e.message || '网络错误');
     } finally {
       if (reqId === latestReq.current) setLoading(false);
       loadingRef.current = false;
     }
-  }, [mediaType, sort, router]);
+  }, [mediaType, sort, query, router]);
 
   // 2026-07-25: 死循环修复 - 用 sortRef + mediaRef 替代 useCallback 重渲染
   const sortRef = useRef(sort);
   const mediaRef = useRef(mediaType);
+  const queryRef = useRef(query);
   sortRef.current = sort;
   mediaRef.current = mediaType;
+  queryRef.current = query;
   useEffect(() => {
     if (!authChecked) return;
     setItems([]);
     setPage(1);
     fetchPage(1, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mediaType, sort, authChecked]);
+  }, [mediaType, sort, query, authChecked]);
 
   const loadMore = () => {
     if (loading || !hasMore) return;
@@ -166,10 +173,64 @@ export default function VipPage() {
               泽泽妈妈专属 · 暂不公开 · 共 {total.toLocaleString()} 部
             </p>
           </div>
-          {/* 资源数 glass badge */}
-          <div className="px-3 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.06] backdrop-blur-sm text-[11px] text-white/60">
-            {items.filter((i) => i.hasLink).length} 条可播放 · {total.toLocaleString()} 总
+          {/* 资源数 glass badge + 返回首页 */}
+          <div className="flex items-center gap-2">
+            <div className="px-3 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.06] backdrop-blur-sm text-[11px] text-white/60">
+              {/* 2026-07-26: 显示全站可播放 (不受当前 filter/search 影响) */}
+              {globalStats ? (
+                <>
+                  <span className="text-emerald-300 font-medium">{globalStats.playableResources.toLocaleString()}</span> 条可播放
+                  {' · '}
+                  <span className="text-white/80">{globalStats.totalResources.toLocaleString()}</span> 部全站
+                </>
+              ) : (
+                <>{items.filter((i) => i.hasLink).length} 条可播放 · {total.toLocaleString()} 总</>
+              )}
+            </div>
+            {/* 2026-07-25: 返回首页按钮 */}
+            <button
+              onClick={() => router.push('/')}
+              className="group flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] backdrop-blur-sm text-[11px] text-white/60 hover:text-white transition-all"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="transition-transform group-hover:-translate-x-0.5">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+              <span>返回首页</span>
+            </button>
           </div>
+        </div>
+
+        {/* 2026-07-26: 搜索框 + 返回首页 (右上角) */}
+        <div className="mb-4 flex items-center gap-3 flex-wrap">
+          <form
+            onSubmit={(e) => { e.preventDefault(); setQuery(((e.target as HTMLFormElement).elements.namedItem('q') as HTMLInputElement)?.value || ''); }}
+            className="flex-1 min-w-[240px] relative"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40">
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.3-4.3" />
+            </svg>
+            <input
+              type="text"
+              name="q"
+              defaultValue={query}
+              key={query}  // 强制 remount 每次搜索清空
+              placeholder="搜索 VIP 影视 (片名 / 原始名 / TMDB ID)..."
+              className="w-full pl-9 pr-10 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.06] focus:bg-white/[0.08] border border-white/[0.06] focus:border-violet-400/30 backdrop-blur-sm text-sm text-white placeholder-white/40 focus:outline-none transition-all"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => { setQuery(''); }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80 transition"
+                title="清空"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                </svg>
+              </button>
+            )}
+          </form>
         </div>
 
         {/* 筛选区 - 玻璃态 */}
