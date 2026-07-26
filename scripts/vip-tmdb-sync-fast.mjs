@@ -7,9 +7,11 @@ const PROXY = process.env.HTTP_PROXY || 'http://127.0.0.1:7897';
 setGlobalDispatcher(new ProxyAgent(PROXY));
 
 const DB_URL = process.env.DATABASE_URL;
+// 2026-07-27: 不硬编码 TMDB key, GitHub 误判为 secret 拒 push
+// 用户本地 export TMDB_API_KEY_1 / TMDB_API_KEY_2 环境变量
 const TMDB_KEYS = [
-  process.env.TMDB_API_KEY_1 || process.env.TMDB_API_KEY || '7985342d5961e9ee3d5ef6d969c1b8dd',
-  process.env.TMDB_API_KEY_2 || '79e41efe870e60afb09b9de8baa47cf1',
+  process.env.TMDB_API_KEY_1 || process.env.TMDB_API_KEY,
+  process.env.TMDB_API_KEY_2,
 ].filter(Boolean);
 
 if (!DB_URL) { console.error('❌ DATABASE_URL'); process.exit(1); }
