@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import * as XLSX from 'xlsx';
+import { inferDocSheetFromCategory } from '@/lib/sheet-mapping';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -154,10 +155,11 @@ async function handleZezheSync(
   let failed = 0;
   for (let i = 0; i < toInsert.length; i += BATCH) {
     const batch = toInsert.slice(i, i + BATCH);
-    const cols = 'name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
+    // 2026-07-27: 加 doc_sheet 字段 (从 category 推, 套 sheet-mapping 合并规则)
+    const cols = 'name, link, link_code, source, category, size, doc_sheet, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
     const vals = batch.map((_: any, idx: number) => {
-      const base = idx * 7;
-      return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), $${base+7})`;
+      const base = idx * 8;
+      return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, $${base+7}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), $${base+8})`;
     }).join(', ');
     const params: any[] = batch.flatMap((item: any) => [
       item.name || '',
@@ -166,6 +168,7 @@ async function handleZezheSync(
       item.source || detectSource(item.link || ''),
       item.category || '其他',
       item.size || '',
+      item.doc_sheet || inferDocSheetFromCategory(item.category || '其他'),
       'zezhe',
     ]);
     try {
@@ -218,11 +221,12 @@ export async function POST(request: NextRequest) {
 
         for (let i = 0; i < items.length; i += BATCH) {
           const batch = items.slice(i, i + BATCH);
-          const cols = 'name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at';
+          // 2026-07-27: 加 doc_sheet 字段 (从 category 推, 套 sheet-mapping 合并规则)
+          const cols = 'name, link, link_code, source, category, size, doc_sheet, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at';
           const vals = batch.map((item, idx) => {
             const offset = i + idx;
-            const base = offset * 6;
-            return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, NULL, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW())`;
+            const base = offset * 7;
+            return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, NULL, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW())`;
           }).join(', ');
           const params: any[] = batch.flatMap(item => [
             item.name || '',
@@ -231,6 +235,7 @@ export async function POST(request: NextRequest) {
             item.source || detectSource(item.link || ''),
             item.category || '其他',
             item.size || '',
+            item.doc_sheet || inferDocSheetFromCategory(item.category || '其他'),
           ]);
           try {
             const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) WHERE link IS NOT NULL AND link != '' DO NOTHING RETURNING id`, params);
@@ -296,10 +301,11 @@ export async function POST(request: NextRequest) {
 
     for (let i = 0; i < filteredItems.length; i += BATCH) {
       const batch = filteredItems.slice(i, i + BATCH);
-      const cols = 'name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
+      // 2026-07-27: 加 doc_sheet 字段 (从 category 推, 套 sheet-mapping 合并规则)
+      const cols = 'name, link, link_code, source, category, size, doc_sheet, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
       const vals = batch.map((_: any, idx: number) => {
-        const base = idx * 7;
-        return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), $${base+7})`;
+        const base = idx * 8;
+        return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, $${base+7}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), $${base+8})`;
       }).join(', ');
       const params: any[] = batch.flatMap((item: any) => [
         item.name || '',
@@ -308,6 +314,7 @@ export async function POST(request: NextRequest) {
         item.source || detectSource(item.link || ''),
         item.category || '其他',
         item.size || '',
+        item.doc_sheet || inferDocSheetFromCategory(item.category || '其他'),
         channel,
       ]);
       try {

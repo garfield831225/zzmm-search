@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
+import { inferDocSheetFromCategory } from '@/lib/sheet-mapping';
 import {
   detectCategoryByTitle, detectSource, detectImportChannel, detectAccessLevel,
   extractLinksFromTgMessage, extractTitleFromTgMessage, extractTagsFromTgMessage,
@@ -316,11 +317,13 @@ export async function POST(req: NextRequest) {
       const existedSet = new Set(beforeResults.filter(r => r.existed).map(r => r.key));
 
       // 2. INSERT (不依赖 RETURNING)
+      // 2026-07-27: 加 doc_sheet 字段 (从 category 推, 套 sheet-mapping 合并规则)
       const insertResults = await Promise.all(chunk.map(async (c) => {
         try {
+          const docSheet = c.doc_sheet || inferDocSheetFromCategory(c.category);
           await sql`
-            INSERT INTO xx_resources (name, link, link_code, source, category, size, tags, access_level, pay_type, import_channel, status, is_multi_link, created_at, updated_at)
-            VALUES (${c.name}, ${c.link}, ${c.link_code || ''}, ${c.source}, ${c.category}, ${c.size || ''}, ${c.tags || []}::text[], ${c.access_level}, ${c.pay_type}, ${c.import_channel}, 'active', ${c.is_multi_link || false}, NOW(), NOW())
+            INSERT INTO xx_resources (name, link, link_code, source, category, size, doc_sheet, tags, access_level, pay_type, import_channel, status, is_multi_link, created_at, updated_at)
+            VALUES (${c.name}, ${c.link}, ${c.link_code || ''}, ${c.source}, ${c.category}, ${c.size || ''}, ${docSheet}, ${c.tags || []}::text[], ${c.access_level}, ${c.pay_type}, ${c.import_channel}, 'active', ${c.is_multi_link || false}, NOW(), NOW())
             ON CONFLICT (link, name) DO NOTHING
           `;
           return { c, ok: true };

@@ -26,13 +26,12 @@ interface CategoryBtn {
   count: number;
 }
 
-// 3 大区 + 待归类 (2026-07-25 去掉 tg 区, 4 大区变 3 大区; 2026-07-27 加 pending)
-// 硬规则: zezhe (basic 直接看) / vip (vip 会员才能看) / code (单资源付费) / pending (网盘+其他, 待关键词库扩展)
+// 3 大区 (2026-07-27 用户拍板: 不要单独"待归类"区, 待归类作为 vip 区按网盘的分类按钮)
+// 硬规则: zezhe (basic 直接看) / vip (vip 会员才能看) / code (单资源付费)
 const SECTIONS = [
   { key: 'zezhe', label: '泽泽妈妈115文档', icon: '👑', desc: 'basic 会员可以直接打开' },
-  { key: 'vip', label: 'VIP 区', icon: '🔒', desc: 'VIP 会员可直接打开，basic 显示 VIP 锁' },
+  { key: 'vip', label: 'VIP 区', icon: '🔒', desc: 'VIP 会员可直接打开，basic 显示 VIP 锁 (含"待归类"网盘按钮)' },
   { key: 'code', label: '单独付费区', icon: '💎', desc: '需消耗流明解锁 (admin 免流明)' },
-  { key: 'pending', label: '待归类', icon: '🧐', desc: '网盘 + category=其他 (待每周 cron 扩关键词库)' },
 ] as const;
 
 type SectionKey = typeof SECTIONS[number]['key'];
@@ -41,14 +40,12 @@ const SECTION_COLOR: Record<SectionKey, string> = {
   zezhe: 'from-pink-500/20 to-purple-500/20 border-pink-500/40',
   vip: 'from-amber-500/20 to-orange-500/20 border-amber-500/40',
   code: 'from-cyan-500/20 to-blue-500/20 border-cyan-500/40',
-  pending: 'from-slate-500/20 to-zinc-500/20 border-slate-500/40',
 };
 
 const SECTION_BADGE: Record<SectionKey, string> = {
   zezhe: 'bg-gradient-to-r from-pink-500 to-purple-500 text-white',
   vip: 'bg-gradient-to-r from-amber-500 to-orange-500 text-white',
   code: 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white',
-  pending: 'bg-gradient-to-r from-slate-500 to-zinc-500 text-white',
 };
 
 const CATEGORY_ICONS: Record<string, string> = {
@@ -81,10 +78,8 @@ export default function LibraryPage() {
   const [userGroup, setUserGroup] = useState<string>('user');
   const [userId, setUserId] = useState<string>('');
   const [section, setSection] = useState<SectionKey>('zezhe');
-  // 分类: zezhe 用 sheet, vip/code 用 source, tg 用 import_channel
+  // 分类: zezhe 用 sheet, vip/code 用 source
   const [subCategory, setSubCategory] = useState<string>('');
-  // 2026-07-27: pending 区 5 大类 (用户视角: 影视/动漫/电子书/软件/全部)
-  const [catGroup, setCatGroup] = useState<string>('');  // '' (全部) | 影视 | 动漫 | 电子书 | 软件
   const [categories, setCategories] = useState<CategoryBtn[]>([]);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<'asc' | 'desc'>('desc');  // desc=按添加时间倒序 (默认)
@@ -125,19 +120,17 @@ export default function LibraryPage() {
     } catch { addToast('error', '复制失败'); }
   }, [addToast]);
 
-  // 业务逻辑 (2026-07-25 硬规则版)
+  // 业务逻辑 (2026-07-25 硬规则版, 2026-07-27 简化为 3 大区)
   // 1) zezhe 资源 (import_channel='zezhe' 或 'zezemom_excel') → basic + vip + admin 都直接开
   // 2) 其他 vip 资源 → vip + admin 直接开, basic 看锁
   // 3) code 资源 (pay_type='code') → basic + vip 都要流明解锁, admin 免
-  // 4) pending 区 (2026-07-27): 跟 source 区一致 (网盘+其他, vip/admin 直接开, basic 锁)
-  // 2026-07-27 兼容 zezhe + zezemom_excel 两种命名
+  // 兼容 zezhe + zezemom_excel 两种命名
   const isZezheChannel = (ch?: string) => ch === 'zezhe' || ch === 'zezemom_excel';
   const isVipLocked = (item: Resource): boolean => {
     if (userGroup === 'admin') return false;
     if (userGroup === 'vip') return false;  // VIP 全开
     if (isZezheChannel(item.importChannel)) return false;  // zezhe 永远不锁
     if (isCodeResource(item)) return false;  // code 走付费流明, 不算锁
-    if (section === 'pending') return false;  // pending 区是待归类网盘, 也算 vip 区
     return true;  // 其他 basic 看都是 vip 锁
   };
 
@@ -156,11 +149,10 @@ export default function LibraryPage() {
     return isCodeResource(item);
   };
 
-  // 切 section → 重置 subCategory + catGroup + 重新拉
+  // 切 section → 重置 subCategory + 重新拉
   const switchSection = (s: SectionKey) => {
     setSection(s);
     setSubCategory('');
-    setCatGroup('');
   };
 
   // 拉分类按钮列表
@@ -189,8 +181,6 @@ export default function LibraryPage() {
         if (section === 'zezhe') params.set('sheet', subCategory);
         else params.set('source', subCategory);
       }
-      // 2026-07-27: pending 区传 catGroup
-      if (section === 'pending' && catGroup) params.set('catGroup', catGroup);
       const res = await fetch(`/api/catalog?${params}`);
       const data = await res.json();
       const newItems = data.items || [];
@@ -376,8 +366,6 @@ export default function LibraryPage() {
   const currentSection = SECTIONS.find(s => s.key === section)!;
   const subCategoryLabel = subCategory || '全部';
   const subCategoryType = section === 'zezhe' ? 'sheet' : '网盘';
-  // 2026-07-27: pending 区的 subCategory 不传 (用 source 分组), 但为了 UI 一致也显示"网盘"
-  // 实际上 pending 区用 source 过滤 category=其他, 跟 vip/code 一致
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -490,32 +478,7 @@ export default function LibraryPage() {
             </button>
           </form>
 
-          {/* 2026-07-27: pending 区显示 5 大类快速 chip (影视/动漫/电子书/软件/全部) */}
-          {section === 'pending' && (
-            <div className="mb-2">
-              <div className="text-[10px] text-gray-400 mb-1.5">5 大类快速筛选 (按关键词库自动归类后)</div>
-              <div className="flex gap-1.5 overflow-x-auto pb-1">
-                {[
-                  { key: '', label: '📦 全部' },
-                  { key: '影视', label: '🎬 影视 (电影+剧集+综艺+纪录片)' },
-                  { key: '动漫', label: '🈴 动漫' },
-                  { key: '电子书', label: '📚 电子书' },
-                  { key: '软件', label: '💿 软件' },
-                ].map(g => (
-                  <button key={g.key || 'all'} onClick={() => setCatGroup(g.key)}
-                    className={`px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition font-medium ${
-                      catGroup === g.key
-                        ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-sm'
-                        : 'bg-white text-gray-600 hover:bg-violet-50 border border-gray-200'
-                    }`}>
-                    {g.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 分类按钮: zezhe → sheet, vip/code/pending → source */}
+          {/* 分类按钮: zezhe → sheet, vip/code → source */}
           <div className="mb-2">
             <div className="text-[10px] text-gray-400 mb-1.5">
               {section === 'zezhe' ? '按 sheet 分类' : '按网盘类型分类'} · 共 {categories.length} 个
@@ -736,7 +699,7 @@ export default function LibraryPage() {
 
           {items.length === 0 && !loading && (
             <div className="py-16 text-center text-gray-400 text-base">
-              {section === 'code' ? '💎 暂无单独付费资源' : section === 'vip' ? '🔒 暂无 VIP 资源' : '👑 暂无泽泽妈妈文档资源'}
+              {section === 'code' ? '💎 暂无单独付费资源' : section === 'vip' ? '🔒 暂无 VIP 资源 (待归类也算在 VIP 里)' : '👑 暂无泽泽妈妈文档资源'}
             </div>
           )}
 

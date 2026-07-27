@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
+import { inferDocSheetFromCategory } from '@/lib/sheet-mapping';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;  // Vercel hobby 上限, 1 次最多跑 50 条 telegra.ph 抓取 (1s/条 + overhead)
@@ -226,10 +227,12 @@ export async function POST(req: NextRequest) {
               const source = detectSource(u.url);
               const det = u.url.match(/[?&](?:pwd|code)=([a-zA-Z0-9_-]+)/);
               const password = u.password || det?.[1] || '';
+              // 2026-07-27: doc_sheet 从 category 推, 套 sheet-mapping 合并规则
+              const docSheet = item.doc_sheet || inferDocSheetFromCategory(category);
 
               const r = await sql`
-                INSERT INTO xx_resources (name, link, link_code, source, category, tags, access_level, pay_type, import_channel, l3_from, status, created_at, updated_at)
-                VALUES (${baseName}, ${u.url}, ${password}, ${source}, ${category}, ${tags}, ${accessLevel}, ${payType}, ${importChannel}, ${item.parent_resource_id || null}, 'active', NOW(), NOW())
+                INSERT INTO xx_resources (name, link, link_code, source, category, doc_sheet, tags, access_level, pay_type, import_channel, l3_from, status, created_at, updated_at)
+                VALUES (${baseName}, ${u.url}, ${password}, ${source}, ${category}, ${docSheet}, ${tags}, ${accessLevel}, ${payType}, ${importChannel}, ${item.parent_resource_id || null}, 'active', NOW(), NOW())
                 ON CONFLICT (link, name) DO NOTHING
                 RETURNING id
               ` as any[];

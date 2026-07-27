@@ -131,7 +131,8 @@ function isGarbled(name) {
 function subTypeToTmdb(subType) {
   if (!subType) return 'movie';
   const s = subType.toLowerCase();
-  if (['剧集', '韩剧', '欧美剧', '港台剧', '国产剧', '日剧'].some(t => s.includes(t))) return 'tv';
+  // 2026-07-27: 补 动漫/综艺/纪录片/少儿 等子类型 → 都是 tv
+  if (['剧集', '韩剧', '欧美剧', '港台剧', '国产剧', '日剧', '动漫', '动画', '综艺', '纪录片', '少儿', '演唱会', '连载'].some(t => s.includes(t))) return 'tv';
   return 'movie';
 }
 
@@ -261,6 +262,40 @@ function cleanFolderName(raw) {
   }
   const trimmed = raw.replace(/^[\[\]（）【】《》\s]+|[\[\]（）【】《》\s]+$/g, '').trim();
   if (trimmed.length >= 2 && !/[\u4e00-\u9fff]/.test(trimmed)) {
+    // 2026-07-27: 纯英文场景再清洗一遍 (剥 . 分隔的短修饰词, Blu-ray/HEVC/USA/UHD/1080p 等)
+    // 比如 "The.Summer.Hikaru.Died.. .JPN.Blu-ray.AVC.LPCM.2.0-NA" → "The Summer Hikaru Died"
+    const t = trimmed
+      .split(/[.\s_\-]+/)  // 按 . 空格 _ - 切
+      .map(s => s.trim())
+      .filter(s => {
+        if (!s) return false;
+        if (/^\d{1,2}\.\d+G$/.test(s)) return false; // 5.1 / 7.1 等
+        if (/^(19\d{2}|20\d{2})$/i.test(s)) return false; // 年份
+        if (/^(4k|8k|2160p|1080p|720p|480p|bluray|blu-ray|bdmv|remux|web-?dl|hdtv|webrip|hdr10\+?|hdr|dv|dovi|hevc|avc|x264|x265|h\.?264|h\.?265|10bit|atmos|truehd|dts-?hd|dts|dts-hd|ma\d|pcm|lpcm|ac3|aac|mp3|flac|ddp|dd5\.?1|dd7\.?1|2\.0|5\.1|7\.1|usa|uk|jp|kr|cn|eu|fr|de|hk|tw|bd|cd|dvd|iso|uhd|hd|sdr|qpel|xvid|divx|complete|criterion|extended|director|edition|theatrical|uncut|remastered|proper|repack|limited|dual|audio|multi|subs?|nfo|sample|cover|jpg|png|web|netflix|amazon|disney|appletv|hulu|paramount|sony|warners?|universal|fox|mill creek|arrow|criterion|shout|factory|vinegar|kino|lions|gate|IMDb|Blu-ray|BDRip|BRRip|remaster|multi)$/i.test(s)) return false;
+        if (s.length === 1) return false;
+        if (s.length <= 2 && !/[A-Z]/.test(s)) return false; // 单字符 + 双字符小写不要
+        return true;
+      })
+      .join(' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    // 2026-07-27: 再剥 stopword (a/the/in) + tracker + 短词 (JPN/NA), 严格 ≥ 4 字符
+    if (t.length >= 2) {
+      const STOP2 = /^(the|a|an|and|or|of|in|on|at|to|for|by|with|from|is|are|was|were|be|been|being|have|has|had|do|does|did|will|would|should|could|may|might|can|must|na|no|oh|my|his|her|its|our|your|their|i|me|you|he|she|we|they|them|us|him|this|that|these|those|some|any|all|each|every|most|more|less|very|just|only|also|even|still|too|so|if|then|than|as|but|not|n't|jp|kr|us|uk|cn|hk|tw|eu|na|au|ca|fr|de|it|es|ru|in|br|mx|jp0|kr0|us0|uk0|cn0|hk0|tw0|na0|ray|blu|nyaa|0chd|cmct|hdsky|ourbits|chdbits|hdc|tjupt|hdt|lemonhd|hds|frds|beast|tsdm|fresh|pub|web|netflix|disney|amzn|hulu|appletv|n0|n1|nan|nan0|nan1|ntsc|pal|secam)$/i;
+      const t2 = t
+        .split(/\s+/)
+        .map(s => s.replace(/[.,;:!?'"()\[\]{}]/g, '').trim())
+        .filter(s => s.length >= 4)
+        .filter(s => !STOP2.test(s))
+        .filter(s => !/@/.test(s))
+        .filter(s => !/^\d+$/.test(s))
+        .join(' ')
+        .trim();
+      if (t2.length >= 2) {
+        return { cleanName: t2, year, season };
+      }
+      return { cleanName: t, year, season };
+    }
     return { cleanName: trimmed, year, season };
   }
   const afterStrip = raw.replace(/\s*\(\d{4}\)\s*$/, '').trim();
@@ -316,10 +351,61 @@ async function searchTmdb(name, type, category, year, lang = 'zh-CN', keyIndex =
       const tn = norm(t);
       if (tn.startsWith(cn) && cn.length >= 2) return { ...c.result, tmdb_status: c.status };
     }
+    // 2026-07-27: token 全包含匹配 (剥 stopword), 解决 "The Summer Hikaru Died" vs "Summer Hikaru Died" 问题
+    const STOP_EN = /\b(the|a|an|and|or|of|in|on|at|to|for|by|with|from|is|are|was|were|be|been|being|have|has|had|do|does|did|will|would|may|might|can|must|i|me|you|he|she|we|they|this|that|some|any|all|no)\b/gi;
+    const tokens = (s) => s.toLowerCase().replace(/[^a-zA-Z0-9\u4e00-\u9fff\s]/g, ' ').split(/\s+/).filter(t => t.length >= 2 && !STOP_EN.test(t));
+    const cnTokens = tokens(name);
+    if (cnTokens.length >= 2) {
+      for (const c of candidates) {
+        const t = c.result.title || c.result.name || '';
+        if (!t) continue;
+        const tTokens = tokens(t);
+        if (cnTokens.every(tok => tTokens.includes(tok))) {
+          return { ...c.result, tmdb_status: c.status };
+        }
+      }
+    }
+    // 2026-07-27: 模糊编辑距离匹配 (中文同人不同字, 如 "侠盗石川" vs "大盗五右卫门")
+    if (cn.length >= 2) {
+      for (const c of candidates) {
+        const t = c.result.title || c.result.name || '';
+        if (!t) continue;
+        const tn = norm(t);
+        if (tn.length < 2) continue;
+        const d = levenshtein(cn, tn);
+        const maxLen = Math.max(cn.length, tn.length);
+        const allow = Math.max(2, Math.floor(maxLen * 0.3));
+        if (d <= allow) {
+          return { ...c.result, tmdb_status: c.status };
+        }
+      }
+    }
     return null;
   } catch (e) {
     return null;
   }
+}
+
+// 2026-07-27: Levenshtein 编辑距离 (中文 fuzzy 匹配)
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return dp[m][n];
 }
 
 async function matchOne(rawName, category, subType) {
@@ -385,14 +471,18 @@ async function cacheIt(r) {
 // ─── 一轮 batch ──────────────────────────────────────────────────────────────
 async function runOneBatch(batchSize) {
   try {
+    // 2026-07-27: 修 SQL 条件 (用户报"匹配不上是你匹配有问题"):
+    //   1) 去掉 `name ~ '[\u4e00-\u9fff]'` 限制 (纯英文资源也能进入 matcher, 走 en-US 策略)
+    //   2) `LENGTH(TRIM(name)) > 1` 而不是 `LENGTH(name) > 5` (放过短名字)
+    //   3) 加 `NOT (name ~ '[\x00-\x1F]')` 排除控制字符 (虽然 Neon 不会写入)
+    //   4) `category NOT IN (...)` 保持, 不匹配 音乐/体育/合集 等
     const rows = await sql`
       SELECT id, name, link, category, source, sub_type
       FROM xx_resources
       WHERE (tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id IN ('NOMATCH', 'GARBLED'))
         AND status = 'active'
         AND name IS NOT NULL
-        AND LENGTH(name) > 5
-        AND name ~ '[\u4e00-\u9fff]'
+        AND LENGTH(TRIM(name)) > 1
         AND category NOT IN ('音乐', '体育', '合集', '学习资料', '其他', '游戏', '电子书', '精品课', '文档')
         AND (last_attempt_at IS NULL OR last_attempt_at < NOW() - INTERVAL '5 minutes')
       ORDER BY id

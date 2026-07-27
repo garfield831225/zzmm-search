@@ -1,6 +1,7 @@
 // 快速导入: 粘 CSV / 粘链接, 单端点支持两种
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
+import { inferDocSheetFromCategory } from '@/lib/sheet-mapping';
 
 export const dynamic = 'force-dynamic';
 
@@ -170,15 +171,17 @@ export async function POST(request: NextRequest) {
       const batch = items.slice(i, i + BATCH);
       // 6 字段占位符 (name/link/link_code/source/category/size) + import_channel 字面量
       // 其他列 (type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at) 用 DEFAULT / NULL / 字面量
-      const cols = 'name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
+      // 2026-07-27: 加 doc_sheet 字段 (从 category 推, 套 sheet-mapping 合并规则)
+      const cols = 'name, link, link_code, source, category, size, doc_sheet, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
       const vals = batch.map((_: any, idx: number) => {
-        const base = idx * 6;
-        return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), 'quick-paste'::text)`;
+        const base = idx * 7;
+        return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, $${base+7}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), 'quick-paste'::text)`;
       }).join(', ');
-      const params: any[] = batch.flatMap((it: any) => [
-        it.name, it.link, it.link_code || '', it.source || 'other',
-        it.category || '其他', it.size || '',
-      ]);
+      const params: any[] = batch.flatMap((it: any) => {
+        const cat = it.category || '其他';
+        const docSheet = it.doc_sheet || inferDocSheetFromCategory(cat);  // 应用 sheet-mapping 合并规则
+        return [it.name, it.link, it.link_code || '', it.source || 'other', cat, it.size || '', docSheet];
+      });
       try {
         const r = await sql(
           `INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) WHERE link IS NOT NULL AND link != '' DO NOTHING RETURNING id`,

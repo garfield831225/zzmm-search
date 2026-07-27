@@ -173,14 +173,18 @@ ${'magnet:?'}xt=urn:btih:ABCDEF1234567890
         const size = sizeColIdx >= 0 ? String(row[sizeColIdx] || '').trim() : '';
 
         if (!name && !link) return;
-        items.push({ name, link, link_code, source: '', category, size });
+        // 2026-07-27: 把 sheet 名原样带入 doc_sheet (不再合并, 21-sheet 库每个 sheet 都是独立分类)
+        // catalog 显示时按 doc_sheet 分组 (用户能看到"国产剧"/"欧美剧"/"外语电影"等具体按钮)
+        // ZZMM_SHEET_MAP 只用于推 category, 不动 doc_sheet
+        items.push({ name, link, link_code, source: '', category, size, doc_sheet: sheetName });
       });
     });
     return items;
   };
 
   const parseStandard = (wb: XLSX.WorkBook): any[] => {
-    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const sheetName = wb.SheetNames[0];  // 2026-07-27: 取 sheet 名作为 doc_sheet
+    const sheet = wb.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json<any>(sheet, { defval: '' });
     if (!rows.length) return [];
     const headers = Object.keys(rows[0]);
@@ -204,6 +208,7 @@ ${'magnet:?'}xt=urn:btih:ABCDEF1234567890
         source: '',
         category: catCol ? row[catCol] : '其他',
         size: sizeCol ? (row[sizeCol] || '').toString() : '',
+        doc_sheet: sheetName,  // 2026-07-27: 原样带入
       };
     }).filter(item => item.name || item.link);
   };

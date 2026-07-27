@@ -61,7 +61,26 @@ if (dryRun) {
 }
 
 // 5. 真改: 按 category 分批 UPDATE
-console.log('\n🚀 开始 UPDATE...');
+// 2026-07-27 用户拍板: 同时写 doc_sheet (跟 category 保持一致), 套用 sheet-mapping 合并规则
+// sheet-mapping 在 src/lib/sheet-mapping.ts, 这里 SQL 硬编码 (mjs 不能 import .ts, 跟 ts 保持一致即可)
+const SHEET_MERGE_SQL = `
+  原盘 → 原盘资源,
+  追更区 → 每日更新,
+  体育 → 体育赛事
+`.split(',').map(s => {
+  const [from, to] = s.split('→').map(x => x.trim());
+  return { from, to };
+});
+function applySheetMerge(sheet) {
+  if (!sheet) return sheet;
+  for (const m of SHEET_MERGE_SQL) {
+    if (sheet === m.from) return m.to;
+  }
+  return sheet;
+}
+const SHEET_DELETE_LIST = ['剧集', '电影'];  // 写死: 不允许写入, 应 DELETE
+
+console.log('\n🚀 开始 UPDATE (category + doc_sheet 同步)...');
 const byTarget2 = {};
 for (const c of changes) {
   if (!byTarget2[c.to]) byTarget2[c.to] = [];
@@ -69,16 +88,25 @@ for (const c of changes) {
 }
 let totalUpdated = 0;
 for (const [cat, ids] of Object.entries(byTarget2)) {
+  // 跳过 SHEET_DELETE_LIST (不允许写入 doc_sheet; 这些 category 也应改)
+  if (SHEET_DELETE_LIST.includes(cat)) {
+    console.log(`  ⏭ 跳过 ${cat} (${ids.length} 条) - 在 SHEET_DELETE_LIST, 需要 DELETE 而非 UPDATE`);
+    continue;
+  }
+  const docSheet = applySheetMerge(cat);
   // 50 一批
   for (let i = 0; i < ids.length; i += 50) {
     const chunk = ids.slice(i, i + 50);
     const orClauses = chunk.map((_, idx) => `id = $${idx + 1}`).join(' OR ');
-    const r = await sql(`UPDATE xx_resources SET category = $${chunk.length + 1} WHERE ${orClauses}`, [...chunk, cat]);
+    const r = await sql(
+      `UPDATE xx_resources SET category = $${chunk.length + 1}, doc_sheet = $${chunk.length + 2} WHERE ${orClauses}`,
+      [...chunk, cat, docSheet]
+    );
     totalUpdated += chunk.length;
-    process.stdout.write(`  ${cat}: ${totalUpdated}/${changes.length}\r`);
+    process.stdout.write(`  ${cat} → doc_sheet='${docSheet}': ${totalUpdated}/${changes.length}\r`);
   }
 }
 process.stdout.write('\n');
-console.log(`✅ 已 UPDATE ${totalUpdated} 条`);
+console.log(`✅ 已 UPDATE ${totalUpdated} 条 (category + doc_sheet)`);
 
 process.exit(0);
