@@ -312,7 +312,7 @@ function cleanFolderName(raw) {
   return { cleanName: t, year, season };
 }
 
-async function searchTmdb(name, type, category, year, lang = 'zh-CN', keyIndex = 0) {
+async function searchTmdb(name, type, category, year, lang = 'zh-CN', keyIndex = 0, useYear = false) {
   await tmdbLimiter.wait(keyIndex);
   const endpoint = type === 'tv' ? '/search/tv' : '/search/movie';
   const yearParam = type === 'tv' ? 'first_air_date_year' : 'year';
@@ -331,21 +331,46 @@ async function searchTmdb(name, type, category, year, lang = 'zh-CN', keyIndex =
       if (candidates.length >= 8) break;
     }
     if (candidates.length === 0) return null;
+
+    // 2026-07-27 用户拍板: "title 那列不能作为匹配依据么?? 剥离那么差么!!!!"
+    // 1 个候选就是它 (仅 useYear=true 时接受, useYear=false 是兜底不能 1 候选就接受)
+    // year 校验: 候选的 release_date 必须跟用户提供的 year 一致 (±2 年)
+    if (candidates.length === 1 && useYear) {
+      if (year) {
+        const releaseYear = (candidates[0].result.release_date || candidates[0].result.first_air_date || '').slice(0, 4);
+        if (releaseYear && Math.abs(parseInt(releaseYear) - parseInt(year)) > 2) {
+          return null;
+        }
+      }
+      return { ...candidates[0].result, tmdb_status: candidates[0].status };
+    }
+
+    // 多个候选: 如果用户给了 year, 先按 year 过滤 (release_date year ±2 范围内)
+    let filtered = candidates;
+    if (year) {
+      filtered = candidates.filter(c => {
+        const ry = (c.result.release_date || c.result.first_air_date || '').slice(0, 4);
+        return !ry || Math.abs(parseInt(ry) - parseInt(year)) <= 2;
+      });
+      if (filtered.length === 0) filtered = candidates;
+      if (filtered.length === 1) return { ...filtered[0].result, tmdb_status: filtered[0].status };
+    }
+
     const norm = (s) => s.toLowerCase().replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '');
     const cn = norm(name);
-    for (const c of candidates) {
+    for (const c of filtered) {
       const t = c.result.title || c.result.name || '';
       if (!t) continue;
       const tn = norm(t);
       if (tn.length === cn.length && tn === cn) return { ...c.result, tmdb_status: c.status };
     }
-    for (const c of candidates) {
+    for (const c of filtered) {
       const t = c.result.title || c.result.name || '';
       if (!t) continue;
       const tn = norm(t);
       if (tn.includes(cn) && cn.length >= 2 && tn.length - cn.length <= 6) return { ...c.result, tmdb_status: c.status };
     }
-    for (const c of candidates) {
+    for (const c of filtered) {
       const t = c.result.title || c.result.name || '';
       if (!t) continue;
       const tn = norm(t);
@@ -356,7 +381,7 @@ async function searchTmdb(name, type, category, year, lang = 'zh-CN', keyIndex =
     const tokens = (s) => s.toLowerCase().replace(/[^a-zA-Z0-9\u4e00-\u9fff\s]/g, ' ').split(/\s+/).filter(t => t.length >= 2 && !STOP_EN.test(t));
     const cnTokens = tokens(name);
     if (cnTokens.length >= 2) {
-      for (const c of candidates) {
+      for (const c of filtered) {
         const t = c.result.title || c.result.name || '';
         if (!t) continue;
         const tTokens = tokens(t);
@@ -367,7 +392,7 @@ async function searchTmdb(name, type, category, year, lang = 'zh-CN', keyIndex =
     }
     // 2026-07-27: 模糊编辑距离匹配 (中文同人不同字, 如 "侠盗石川" vs "大盗五右卫门")
     if (cn.length >= 2) {
-      for (const c of candidates) {
+      for (const c of filtered) {
         const t = c.result.title || c.result.name || '';
         if (!t) continue;
         const tn = norm(t);
@@ -380,7 +405,9 @@ async function searchTmdb(name, type, category, year, lang = 'zh-CN', keyIndex =
         }
       }
     }
-    return null;
+    // 多个候选 + 全不严格匹配 → useYear=true 才接受第 1 个, false 不接受
+    if (!useYear) return null;
+    return { ...filtered[0].result, tmdb_status: filtered[0].status };
   } catch (e) {
     return null;
   }
@@ -417,8 +444,39 @@ async function matchOne(rawName, category, subType) {
     if (['剧集', '动漫', '综艺', '少儿频道'].includes(category)) tmdbType = 'tv';
     return { id: tmdbId, tmdb_type: tmdbType, poster: '', title: rawName.replace(/\s*\{tmdb-\d+\}/, '').trim(), vote: 0, year: '' };
   }
-  const { cleanName, year, season } = cleanFolderName(rawName);
-  if (cleanName.length < 2) return 'NOMATCH';
+
+  // 2026-07-27: 用户拍板 - "title 那列不能作为匹配依据么?? 剥离那么差么!!!!"
+  // 用户表的 name 字段 = 片名/标题, 直接搜 TMDB 就行, 不要瞎剥
+  // 判定"是不是文件名字符串" (含 [xxx].iso/1080p/Blu-ray/HEVC 等典型特征) → 才走 cleanFolderName
+  // 否则直接拿 rawName 当 cleanName (再小幅清洗掉 (YYYY) 等不影响匹配的修饰)
+  const isFileNameString = /\[[^\]]+\]|\.iso|1080p|720p|2160p|480p|4K|8K|UHD|BDMV|Blu-?ray|REMUX|HDTV|WEB-?DL|HEVC|AVC|x\.?264|x\.?265|HDR10|Dolby|TrueHD|Atmos|DTS/i.test(rawName)
+    || /[（(]\d{4}[)）]/.test(rawName)  // 含 (2024) 之类年份括号
+    || /第[一二三四五六七八九十\d]+季|S\d{1,2}/i.test(rawName);  // 季号
+
+  let cleanName, year, season;
+  if (isFileNameString) {
+    // 是文件名字符串 → 才走 cleanFolderName
+    const r = cleanFolderName(rawName);
+    cleanName = r.cleanName; year = r.year; season = r.season;
+  } else {
+    // 干净标题 → 只剥 (YYYY) 跟末尾季号, 不瞎剥
+    cleanName = rawName
+      .replace(/\s*[（(]\s*\d{4}\s*[)）]\s*$/g, '')  // 末尾 (2024) 剥
+      .replace(/第[一二三四五六七八九十\d]+季.*$/g, '')  // 末尾"第X季"剥
+      .replace(/\s*\{tmdb-\d+\}/g, '')
+      .trim();
+    // 提取年份
+    const ym = cleanName.match(/[（(]\s*(19\d{2}|20\d{2})\s*[)）]/);
+    year = ym ? ym[1] : '';
+    if (year) cleanName = cleanName.replace(ym[0], '').trim();
+    const sm = cleanName.match(/第([一二三四五六七八九十\d]+)季|S(\d{1,2})/i);
+    season = sm ? (sm[1] ? chineseToNumber(sm[1]) : parseInt(sm[2])) : null;
+    if (sm) cleanName = cleanName.replace(sm[0], '').trim();
+  }
+
+  if (!cleanName || cleanName.length < 2) return 'NOMATCH';
+  if (cleanName.length > 80) cleanName = cleanName.slice(0, 80);  // 太长截断
+
   const isEng = isEnglishName(cleanName);
   const strategies = isEng
     ? [{ lang: 'en-US', useYear: true }, { lang: 'en-US', useYear: false }, { lang: 'zh-CN', useYear: true }]
@@ -437,7 +495,7 @@ async function matchOne(rawName, category, subType) {
   let keyIdx = 0;
   for (const s of strategies) {
     for (const type of typeOrder) {
-      const result = await searchTmdb(cleanName, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length);
+      const result = await searchTmdb(cleanName, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length, s.useYear);
       keyIdx++;
       if (result) {
         return {
