@@ -250,7 +250,7 @@ export async function GET(request: NextRequest) {
                CASE WHEN EXISTS (SELECT 1 FROM xx_music_cache m WHERE m.resource_id = r.id)
                      OR EXISTS (SELECT 1 FROM xx_sports_cache s WHERE s.resource_id = r.id)
                     THEN 1 ELSE 0 END as has_cover,
-               ROW_NUMBER() OVER (PARTITION BY CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN r.tmdb_id END ORDER BY ${orderClause.replace(/r\./g, 'r.')}) as rn
+               ROW_NUMBER() OVER (PARTITION BY CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN r.tmdb_id END ORDER BY r.created_at DESC, r.id ASC) as rn
         FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
         ${whereSQL}
       ) sub
