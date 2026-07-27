@@ -215,21 +215,18 @@ export async function GET(request: NextRequest) {
     END)`;
     // 2026-07-27: 外层 orderClause 改用 alias (subquery 暴露的列), 不能引用 c / 内层表达式
     const innerOrderClause = sort === 'added_time'
-      ? `has_tmdb DESC, ${dateWeight}, r.created_at DESC`
+      ? `has_tmdb DESC, ${dateWeight}, created_at DESC`
       : sort === 'import_time_asc'
-        ? `r.created_at ASC, r.id ASC`
+        ? `created_at ASC, id ASC`
         : sort === 'hot'
-          ? `has_tmdb DESC, (COALESCE(r.view_count, 0) + COALESCE(NULLIF(c.vote_count, '')::int, 0) / 100) DESC, ${dateWeight}`
+          ? `has_tmdb DESC, (COALESCE(view_count, 0) + COALESCE(vote_count_int, 0) / 100) DESC, ${dateWeight}`
           : sort === 'rating'
-            ? `has_tmdb DESC, c.vote_average DESC NULLS LAST, COALESCE(NULLIF(c.vote_count, '')::int, 0) DESC, ${dateWeight}`
+            ? `has_tmdb DESC, vote_average_num DESC NULLS LAST, COALESCE(vote_count_int, 0) DESC, ${dateWeight}`
             : sort === 'cover_first'
-              ? `has_cover DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`
-              : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`;
+              ? `has_cover DESC, ${dateWeight}, sort_date DESC NULLS LAST, created_at DESC`
+              : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, created_at DESC`;
     // 外层 (subquery 外) 只能用 subquery 暴露的列, 用 alias 替代
     const orderClause = innerOrderClause
-      .replace(/c\.vote_average/g, 'vote_average')
-      .replace(/c\.vote_count/g, 'vote_count')
-      .replace(/r\./g, '')
       .replace(new RegExp(dateWeight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 'date_weight');
     const offset = (page - 1) * pageSize;
 
@@ -247,17 +244,20 @@ export async function GET(request: NextRequest) {
     const offsetPlaceholder = `$${condVals.length + 2}`;
     const listSQL = `
       SELECT * FROM (
-        SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
+        SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.created_at,
                r.doc_sheet, r.sub_type, r.lumen_cost,
                r.pay_type, r.code_price, r.lumen_cost, r.access_level, r.access_tier,
                r.import_channel,
+               r.view_count as view_count,
+               NULLIF(c.vote_count, '')::int as vote_count_int,
+               NULLIF(c.vote_average, '')::numeric as vote_average_num,
                COALESCE(c.release_date, r.created_at::text) as sort_date,
                ${dateWeight} as date_weight,
                CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb,
                CASE WHEN EXISTS (SELECT 1 FROM xx_music_cache m WHERE m.resource_id = r.id)
                      OR EXISTS (SELECT 1 FROM xx_sports_cache s WHERE s.resource_id = r.id)
                     THEN 1 ELSE 0 END as has_cover,
-               ROW_NUMBER() OVER (PARTITION BY CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN r.tmdb_id END ORDER BY r.created_at DESC, r.id ASC) as rn
+               ROW_NUMBER() OVER (PARTITION BY CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN r.tmdb_id END ORDER BY created_at DESC, id ASC) as rn
         FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
         ${whereSQL}
       ) sub
