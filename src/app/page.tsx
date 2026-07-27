@@ -66,6 +66,9 @@ interface ResourceItem {
   accessLevel?: string;  // 2026-06-25 兼容旧 access_level 字段
   importChannel?: string;  // 2026-07-14 泽泽妈专属标识
   links?: Array<{ source: string; url: string; password: string; sort: number; accessLevel?: string; status?: string }>;  // 2026-07-17 1对N 多链接
+  // 2026-07-27: 同 tmdb_id 的所有 link (dedup 之前的所有版本, 按 source 优先级 + 新上传排序)
+  tmdbLinks?: Array<{ id: number; source: string; url: string; password: string; size: string; accessLevel: string; sort: number; status: string; createdAt: string }>;
+  tmdbLinkCount?: number;  // 总数, 卡片可显示 "+N" 徽章
 }
 
 interface SearchResponse {
@@ -656,7 +659,7 @@ export default function HomePage() {
             // 显示最新一条 + "+N 集"徽章
             const groupableCats = ['连载', '剧集', '动漫', '综艺'];
             const seen = new Set<string>();
-            const displayItems: Array<ResourceItem & { _extraCount?: number; _allIds?: number[] }> = [];
+            const displayItems: Array<ResourceItem & { _extraCount?: number; _allIds?: number[]; _displayLinks?: any[] }> = [];
             for (const item of items) {
               if (item.tmdbId && groupableCats.includes(item.category)) {
                 const key = `${item.category}:${item.tmdbId}`;
@@ -668,9 +671,15 @@ export default function HomePage() {
                 );
                 const extraCount = group.length - 1;
                 const allIds = group.map(i => i.id);
-                displayItems.push({ ...item, _extraCount: extraCount, _allIds: allIds });
+                // 2026-07-27: 同 tmdb_id 的所有 link (前 8 个 source 优先级)
+                const tmdbLinks = (item as any).tmdbLinks || [];
+                const _displayLinks = tmdbLinks.length > 0 ? tmdbLinks : (item.links || []);
+                displayItems.push({ ...item, _extraCount: extraCount, _allIds: allIds, _displayLinks });
               } else {
-                displayItems.push(item);
+                // 2026-07-27: 同 tmdb_id 兜底
+                const tmdbLinks = (item as any).tmdbLinks || [];
+                const _displayLinks = tmdbLinks.length > 0 ? tmdbLinks : (item.links || []);
+                displayItems.push({ ...item, _displayLinks });
               }
             }
             return displayItems;
@@ -791,9 +800,10 @@ export default function HomePage() {
                   {item.size && <span>📦 {item.size}</span>}
                 </div>
                 {/* 2026-07-24: 1对N 多链接 - 卡片下网盘可点击图标 (按 sort 排序, 第一个高亮) */}
-                {item.links && item.links.length > 0 && (
+                {/* 2026-07-27: 用 _displayLinks (tmdbLinks 优先, 1对N 副表兜底) */}
+                {(item as any)._displayLinks && (item as any)._displayLinks.length > 0 && (
                   <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                    {item.links.slice(0, 8).map((l, idx) => {
+                    {(item as any)._displayLinks.slice(0, 8).map((l: any, idx: number) => {
                       const isMagnetLink = l.source === 'magnet' || l.source === 'ed2k';
                       return (
                         <button
@@ -828,18 +838,18 @@ export default function HomePage() {
                         </button>
                       );
                     })}
-                    {item.links.length > 8 && (
-                      <span className="text-[10px] text-white/40">+{item.links.length - 8}</span>
+                    {(item as any)._displayLinks.length > 8 && (
+                      <span className="text-[10px] text-white/40">+{(item as any)._displayLinks.length - 8}</span>
                     )}
                     {/* 2026-07-24: 一键开全部 (>=2 个非磁力链接才显示) */}
-                    {item.links && item.links.filter(l => l.source !== 'magnet' && l.source !== 'ed2k').length >= 2 && (
+                    {(item as any)._displayLinks && (item as any)._displayLinks.filter((l: any) => l.source !== 'magnet' && l.source !== 'ed2k').length >= 2 && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           // 依次 window.open (0.5s 间隔避开浏览器拦截)
-                          (item.links || [])
-                            .filter(l => l.source !== 'magnet' && l.source !== 'ed2k')
-                            .forEach((l, i) => {
+                          ((item as any)._displayLinks || [])
+                            .filter((l: any) => l.source !== 'magnet' && l.source !== 'ed2k')
+                            .forEach((l: any, i: number) => {
                               setTimeout(() => {
                                 if (l.password) {
                                   const ok = window.confirm(

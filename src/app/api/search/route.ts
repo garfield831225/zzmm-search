@@ -352,6 +352,59 @@ export async function GET(request: NextRequest) {
       } catch { /* 未登录或无效 token */ }
     }
 
+    // 2026-07-27: 二次查同 tmdb_id 的所有 link (合并多连接到一个 item)
+    // 用户痛点: dedup by tmdb_id 后只显示 1 个 link, 实际 600+ link 全藏起来
+    // 这里按 source 优先级 + created_at 排序, 卡片用前 8 个, modal 用完整列表
+    const tmdbIds = Array.from(new Set(dbRows.map((r: any) => r.tmdb_id).filter(Boolean)));
+    let tmdbLinksMap = new Map<string, any[]>();
+    if (tmdbIds.length > 0) {
+      try {
+        const allTmdbLinkRows = await sql`
+          SELECT id, tmdb_id, source, link, link_code, access_level, size, created_at
+          FROM xx_resources
+          WHERE tmdb_id = ANY(${tmdbIds})
+            AND link IS NOT NULL AND link != ''
+            AND status = 'active'
+          ORDER BY tmdb_id, created_at DESC
+          LIMIT 500
+        ` as any[];
+        // source 优先级: 115 > 夸克 > 百度 > 阿里 > 磁力 > ed2k > 其他
+        const SOURCE_PRIORITY: Record<string, number> = {
+          '115': 1, '115网盘': 1,
+          'quark': 2, '夸克网盘': 2,
+          'baidu': 3, '百度网盘': 3,
+          'ali': 4, 'aliyun': 4, '阿里云盘': 4,
+          'magnet': 5, '磁力链接': 5,
+          'ed2k': 6, 'ed2k链接': 6,
+        };
+        const sortFn = (a: any, b: any) => {
+          const sa = SOURCE_PRIORITY[a.source] || 99;
+          const sb = SOURCE_PRIORITY[b.source] || 99;
+          if (sa !== sb) return sa - sb;
+          // 优先级相同时按 created_at DESC (新上传在前)
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        };
+        for (const r of allTmdbLinkRows) {
+          if (!tmdbLinksMap.has(r.tmdb_id)) tmdbLinksMap.set(r.tmdb_id, []);
+          tmdbLinksMap.get(r.tmdb_id)!.push({
+            id: r.id,
+            source: r.source,
+            url: r.link,
+            password: r.link_code || '',
+            size: r.size || '',
+            accessLevel: r.access_level || 'basic',
+            sort: SOURCE_PRIORITY[r.source] || 99,
+            status: 'active',
+            createdAt: r.created_at,
+          });
+        }
+        // 每个 tmdb 的 link 内部排序 (source 优先级 + 新上传优先)
+        Array.from(tmdbLinksMap.entries()).forEach(([tid, arr]) => {
+          arr.sort(sortFn);
+        });
+      } catch (e) { /* ignore */ }
+    }
+
     // ─── Map results ────────────────────────────────────────────────────────
     const TV_CATS_FILTER = new Set(['连载', '剧集', '动漫', '综艺', '少儿频道', '纪录片']);
     const MOVIE_CATS_FILTER = new Set(['电影', '华语电影', '外语电影', '动画电影', '演唱会', 'REMUX', '系列电影']);
@@ -395,6 +448,10 @@ export async function GET(request: NextRequest) {
         coverCache: !item.tmdb_id ? (coverCacheMap.get(item.id) || null) : null,
         sportsCover: item.category === '体育' ? (sportsCoverMap.get(item.id) || null) : null,
         links: hasSubLinks ? subLinks : (item.link ? [{ source: item.source, url: item.link, password: item.link_code, sort: 1, accessLevel: item.access_level, status: 'active' }] : []),
+        // 2026-07-27: 同 tmdb_id 的所有 link (前 8 个 source 优先级, modal 完整列表用)
+        // 解决 dedup by tmdb_id 后只显示 1 个 link, 实际 600+ 全藏起来的问题
+        tmdbLinks: tmdbLinksMap.get(item.tmdb_id) || [],
+        tmdbLinkCount: (tmdbLinksMap.get(item.tmdb_id) || []).length,
       };
     });
 
