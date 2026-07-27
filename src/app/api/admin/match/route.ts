@@ -247,7 +247,29 @@ function isPreferred(category: string, type: 'tv' | 'movie', status: string | un
   return getPreferredStatuses(category, type).includes(status);
 }
 
-async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, year?: string, lang = 'zh-CN', keyIndex = 0) {
+// 2026-07-27: Levenshtein 编辑距离 (中文 fuzzy 匹配)
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return dp[m][n];
+}
+
+async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, year?: string, lang = 'zh-CN', keyIndex = 0, useYear = false) {
   await tmdbLimiter.wait(keyIndex);
   const endpoint = type === 'tv' ? '/search/tv' : '/search/movie';
   const yearParam = type === 'tv' ? 'first_air_date_year' : 'year';
@@ -272,13 +294,39 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, 
     }
     if (candidates.length === 0) return null;
 
+    // 2026-07-27 用户拍板: "title 那列不能作为匹配依据么?? 剥离那么差么!!!!"
+    // 1 个候选就是它 (仅 useYear=true 时接受, useYear=false 是兜底不能 1 候选就接受)
+    // year 校验: 候选 release_date 必须跟用户 year ±2 年
+    if (candidates.length === 1 && useYear) {
+      if (year) {
+        const releaseYear = (candidates[0].result.release_date || candidates[0].result.first_air_date || '').slice(0, 4);
+        if (releaseYear && Math.abs(parseInt(releaseYear) - parseInt(year)) > 2) {
+          return null;
+        }
+      }
+      return { ...candidates[0].result, genres: candidates[0].result.genre_ids ? [] : (candidates[0].result.genres || []), tmdb_status: candidates[0].status };
+    }
+
+    // 多个候选: 如果用户给了 year, 先按 year 过滤
+    let filtered = candidates;
+    if (year) {
+      filtered = candidates.filter(c => {
+        const ry = (c.result.release_date || c.result.first_air_date || '').slice(0, 4);
+        return !ry || Math.abs(parseInt(ry) - parseInt(year)) <= 2;
+      });
+      if (filtered.length === 0) filtered = candidates;
+      if (filtered.length === 1) {
+        return { ...filtered[0].result, genres: filtered[0].result.genre_ids ? [] : (filtered[0].result.genres || []), tmdb_status: filtered[0].status };
+      }
+    }
+
     // 2026-06-03 修：必须 1:1 严格匹配（length 相等 + norm 完全相等）才返回
     // 修复「情书」被错配到「给阿嫲的情书」（子串命中但长度差 3 倍）
     // 2026-07-09 改: 1:1 匹配也去掉 isPreferred 过滤 (用户原话"宁可错配别漏配", 状态过滤导致 100% 漏配)
     const norm = (s: string) => s.toLowerCase().replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '');
     const cn = norm(name);
     // 第一优先: 1:1 匹配 (任何状态)
-    for (const c of candidates) {
+    for (const c of filtered) {
       const t = c.result.title || c.result.name || '';
       if (!t) continue;
       const tn = norm(t);
@@ -287,10 +335,7 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, 
       }
     }
     // 2026-07-09 第三优先: sub-string 匹配 (TMDB 候选名是 cleanName + 季/集/国别等后缀)
-    // 例: clean="心间错" → TMDB 候选="心间错 第一季" → 包含关系, 且 cn.length >= 2
-    // 限制: tn - cn <= 6 字符 (后缀不能太长, 避免错配"情书"→"给阿嫲的情书")
-    // 不走 isPreferred 过滤 (用户原话"匹配不上是你的问题", 宁可错配别漏配)
-    for (const c of candidates) {
+    for (const c of filtered) {
       const t = c.result.title || c.result.name || '';
       if (!t) continue;
       const tn = norm(t);
@@ -299,7 +344,7 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, 
       }
     }
     // 第四优先: 前缀匹配 (cleanName 是 tn 的开头, 防止"长名"候选)
-    for (const c of candidates) {
+    for (const c of filtered) {
       const t = c.result.title || c.result.name || '';
       if (!t) continue;
       const tn = norm(t);
@@ -308,7 +353,7 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, 
       }
     }
     // 2026-07-14 第五优先: bigram 相似度兜底 (处理 "珊瑚礁水族馆" vs "Coral Reef Aquarium" 这种同义不同形)
-    for (const c of candidates) {
+    for (const c of filtered) {
       const t = c.result.title || c.result.name || '';
       if (!t) continue;
       const tn = norm(t);
@@ -316,7 +361,24 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, 
         return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
       }
     }
-    return null;
+    // 2026-07-27: Levenshtein 模糊编辑距离 (中文同人不同字, 如 "侠盗石川" vs "大盗五右卫门")
+    if (cn.length >= 2) {
+      for (const c of filtered) {
+        const t = c.result.title || c.result.name || '';
+        if (!t) continue;
+        const tn = norm(t);
+        if (tn.length < 2) continue;
+        const d = levenshtein(cn, tn);
+        const maxLen = Math.max(cn.length, tn.length);
+        const allow = Math.max(2, Math.floor(maxLen * 0.3));
+        if (d <= allow) {
+          return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
+        }
+      }
+    }
+    // 2026-07-27: 多个候选 + 全不严格匹配 → useYear=true 才接受第 1 个, false 不接受
+    if (!useYear) return null;
+    return { ...filtered[0].result, genres: filtered[0].result.genre_ids ? [] : (filtered[0].result.genres || []), tmdb_status: filtered[0].status };
   } catch { return null; }
 }
 
@@ -353,6 +415,14 @@ function subTypeToTmdb(subType: string | null): 'movie' | 'tv' {
   return 'movie';
 }
 
+// 2026-07-27: 增强版 subTypeToTmdb - 补 动漫/动画/综艺/纪录片/少儿/演唱会/连载 → 都是 tv
+function subTypeToTmdbWithExtension(subType: string | null): 'movie' | 'tv' {
+  if (!subType) return 'movie';
+  const s = subType.toLowerCase();
+  if (['剧集', '韩剧', '欧美剧', '港台剧', '国产剧', '日剧', '动漫', '动画', '综艺', '纪录片', '少儿', '演唱会', '连载'].some(t => s.includes(t))) return 'tv';
+  return 'movie';
+}
+
 // 核心匹配函数（精简策略，3次尝试上限）
 async function matchOne(rawName: string, category: string, subType: string | null): Promise<{ id: string; tmdb_type: 'movie' | 'tv'; poster: string; title: string; vote: number; year: string } | 'GARBLED' | 'NOMATCH'> {
   if (isGarbled(rawName)) return 'GARBLED';
@@ -373,8 +443,35 @@ async function matchOne(rawName: string, category: string, subType: string | nul
     };
   }
 
-  const { cleanName, year, season } = cleanFolderName(rawName);
-  if (cleanName.length < 2) return 'NOMATCH';
+  // 2026-07-27: 用户拍板 - "title 那列不能作为匹配依据么?? 剥离那么差么!!!!"
+  // 用户的 name 字段 = 片名, 直接搜, 不瞎剥
+  // 判定"是不是文件名字符串" (含 [xxx].iso/1080p/Blu-ray/HEVC/(YYYY) 等典型特征) → 才走 cleanFolderName
+  // 干净标题直接拿 rawName 当 cleanName (再小幅剥 (YYYY) 等不影响匹配的修饰)
+  const isFileNameString = /\[[^\]]+\]|\.iso|1080p|720p|2160p|480p|4K|8K|UHD|BDMV|Blu-?ray|REMUX|HDTV|WEB-?DL|HEVC|AVC|x\.?264|x\.?265|HDR10|Dolby|TrueHD|Atmos|DTS/i.test(rawName)
+    || /[（(]\d{4}[)）]/.test(rawName)
+    || /第[一二三四五六七八九十\d]+季|S\d{1,2}/i.test(rawName);
+
+  let cleanName: string, year: string, season: number | null;
+  if (isFileNameString) {
+    const r = cleanFolderName(rawName);
+    cleanName = r.cleanName; year = r.year; season = r.season;
+  } else {
+    // 干净标题 → 只剥末尾 (YYYY) + 季号, 不瞎剥
+    cleanName = rawName
+      .replace(/\s*[（(]\s*\d{4}\s*[)）]\s*$/g, '')
+      .replace(/第[一二三四五六七八九十\d]+季.*$/g, '')
+      .replace(/\s*\{tmdb-\d+\}/g, '')
+      .trim();
+    const ym = cleanName.match(/[（(]\s*(19\d{2}|20\d{2})\s*[)）]/);
+    year = ym ? ym[1] : '';
+    if (year && ym) cleanName = cleanName.replace(ym[0], '').trim();
+    const sm = cleanName.match(/第([一二三四五六七八九十\d]+)季|S(\d{1,2})/i);
+    season = sm ? (sm[1] ? chineseToNumber(sm[1]) : parseInt(sm[2])) : null;
+    if (sm) cleanName = cleanName.replace(sm[0], '').trim();
+  }
+
+  if (!cleanName || cleanName.length < 2) return 'NOMATCH';
+  if (cleanName.length > 80) cleanName = cleanName.slice(0, 80);
 
   const isEng = isEnglishName(cleanName);
 
@@ -400,7 +497,8 @@ async function matchOne(rawName: string, category: string, subType: string | nul
       typeOrder = ['tv', 'movie'];
     } else if (subType) {
       // 有 sub_type → 直接按 sub_type 查对应类型
-      const tmdbType = subTypeToTmdb(subType);
+      // 2026-07-27: 补 动漫/动画/综艺/纪录片/少儿/演唱会/连载 → 都是 tv
+      const tmdbType = subTypeToTmdbWithExtension(subType);
       typeOrder = [tmdbType, tmdbType === 'movie' ? 'tv' : 'movie'];
     } else if (['连载', '剧集', '动漫', '综艺', '少儿频道'].includes(category)) {
       // 剧集类只搜 tv
@@ -418,7 +516,7 @@ async function matchOne(rawName: string, category: string, subType: string | nul
     let keyIdx = 0;
     for (const s of strategies) {
       for (const type of typeOrder) {
-        const result = await searchTmdb(cleanName, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length);
+        const result = await searchTmdb(cleanName, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length, s.useYear);
         keyIdx++;
         if (result) {
           return {
@@ -439,7 +537,7 @@ async function matchOne(rawName: string, category: string, subType: string | nul
     if (noTrailingNum !== cleanName && noTrailingNum.length >= 2) {
       for (const s of strategies) {
         for (const type of typeOrder) {
-          const result = await searchTmdb(noTrailingNum, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length);
+          const result = await searchTmdb(noTrailingNum, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length, s.useYear);
           keyIdx++;
           if (result) {
             return {
