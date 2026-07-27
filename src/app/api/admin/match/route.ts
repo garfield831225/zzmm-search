@@ -676,17 +676,24 @@ export async function GET(req: Request) {
     }
 
     const rows = await sql`
-      SELECT id, name, link, category, source, sub_type
+      SELECT id, name, link, category, source, sub_type, created_at
       FROM xx_resources
-      WHERE (tmdb_id IS NULL OR tmdb_id = 'NOMATCH')
+      WHERE (tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id IN ('NOMATCH', 'GARBLED'))
         AND status = 'active'
         AND name IS NOT NULL
-        AND LENGTH(name) > 5
-        AND name ~ '[\u4e00-\u9fff]'
+        AND LENGTH(TRIM(name)) > 1
         AND category NOT IN ('音乐', '体育', '合集', '学习资料', '其他', '游戏', '电子书', '精品课', '文档')
         AND id > ${fromId}
         AND (last_attempt_at IS NULL OR last_attempt_at < NOW() - INTERVAL '5 minutes')
-      ORDER BY id
+      ORDER BY
+        CASE WHEN tmdb_id IN ('NOMATCH', 'GARBLED') THEN 1 ELSE 0 END,
+        CASE
+          WHEN category IN ('电影', '剧集', '动漫', '纪录片') THEN 0
+          WHEN category IN ('演唱会', '连载') THEN 1
+          ELSE 2
+        END,
+        created_at DESC,
+        id
       LIMIT ${batchSize}
     ` as any[];
 
@@ -722,7 +729,7 @@ export async function GET(req: Request) {
           // 链接去重：同链接已被匹配过，直接复用
           if (item.link && linkMap[item.link]) {
             const reusedId = linkMap[item.link];
-            await sql`UPDATE xx_resources SET tmdb_id = ${reusedId}, last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
+            await sql`UPDATE xx_resources SET tmdb_id = ${reusedId}, matched_tmdb_at = NOW(), last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
             return { id: item.id, tmdb_id: reusedId, reused: true };
           }
           const result = await matchOne(item.name, item.category, item.sub_type || null);
@@ -735,7 +742,7 @@ export async function GET(req: Request) {
             return { id: item.id, tmdb_id: r.length ? 'NOMATCH' : null, updateFailed: !r.length };
           }
           if (result) {
-            const updResult = await sql`UPDATE xx_resources SET tmdb_id = ${result.id}, last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id} RETURNING id`;
+            const updResult = await sql`UPDATE xx_resources SET tmdb_id = ${result.id}, matched_tmdb_at = NOW(), last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id} RETURNING id`;
             if (!updResult.length) {
               // UPDATE failed - record not found or already updated
               return { id: item.id, tmdb_id: null, updateFailed: true };

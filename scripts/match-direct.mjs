@@ -609,7 +609,7 @@ async function runOneBatch(batchSize) {
           if (item.link && linkMap[item.link]) {
             const reusedId = linkMap[item.link];
             if (!DRY_RUN) {
-              await sql`UPDATE xx_resources SET tmdb_id = ${reusedId}, last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
+              await sql`UPDATE xx_resources SET tmdb_id = ${reusedId}, matched_tmdb_at = NOW(), last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
             }
             return { reused: true };
           }
@@ -628,7 +628,7 @@ async function runOneBatch(batchSize) {
           }
           if (result) {
             if (!DRY_RUN) {
-              const upd = await sql`UPDATE xx_resources SET tmdb_id = ${result.id}, last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id} RETURNING id`.catch(() => []);
+              const upd = await sql`UPDATE xx_resources SET tmdb_id = ${result.id}, matched_tmdb_at = NOW(), last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id} RETURNING id`.catch(() => []);
               if (!upd || !upd.length) return { status: 'failed' };
               await cacheIt(result);
             }
