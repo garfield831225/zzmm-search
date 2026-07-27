@@ -561,6 +561,8 @@ async function runOneBatch(batchSize) {
     //   2) `LENGTH(TRIM(name)) > 1` 而不是 `LENGTH(name) > 5` (放过短名字)
     //   3) 加 `NOT (name ~ '[\x00-\x1F]')` 排除控制字符 (虽然 Neon 不会写入)
     //   4) `category NOT IN (...)` 保持, 不匹配 音乐/体育/合集 等
+    // 2026-07-27: 优先跑易命中的 category (剧集/电影/动漫/纪录片), 原盘类重试率太低放最后
+    //   同时 NOMATCH 的重试放最后 (已经试过没匹配到的, 别反复重试浪费 API)
     const rows = await sql`
       SELECT id, name, link, category, source, sub_type
       FROM xx_resources
@@ -570,7 +572,17 @@ async function runOneBatch(batchSize) {
         AND LENGTH(TRIM(name)) > 1
         AND category NOT IN ('音乐', '体育', '合集', '学习资料', '其他', '游戏', '电子书', '精品课', '文档')
         AND (last_attempt_at IS NULL OR last_attempt_at < NOW() - INTERVAL '5 minutes')
-      ORDER BY id
+      ORDER BY
+        CASE
+          WHEN tmdb_id IN ('NOMATCH', 'GARBLED') THEN 1
+          ELSE 0
+        END,
+        CASE
+          WHEN category IN ('电影', '剧集', '动漫', '纪录片') THEN 0
+          WHEN category IN ('演唱会', '连载') THEN 1
+          ELSE 2
+        END,
+        id
       LIMIT ${batchSize}
     `;
     if (!rows.length) return { processed: 0, matched: 0, nomatch: 0, garbled: 0, reused: 0, failed: 0, done: true };
