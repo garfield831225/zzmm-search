@@ -227,26 +227,34 @@ export async function GET(request: NextRequest) {
     const offset = (page - 1) * pageSize;
 
     // ─── Count ────────────────────────────────────────────────────────────────
-    const countSQL = `SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id ${whereSQL}`;
+    // 2026-07-27: 改成 distinct count (按 tmdb_id), 跟 fetch 同步, 否则 total 跟 items 数对不上
+    const countSQL = `SELECT COUNT(DISTINCT CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN r.tmdb_id END) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id ${whereSQL}`;
     const countRows = await sql(countSQL, condVals) as any[];
     const total = parseInt(countRows?.[0]?.cnt || '0');
 
     // ─── Fetch page ─────────────────────────────────────────────────────────
+    // 2026-07-27: SQL 层 dedup by tmdb_id (用 ROW_NUMBER() PARTITION BY)
+    // 旧逻辑: 拿 30 条 + 应用层 dedup 剩 17 条, 用户每页额定 30 实际只看到十几
+    // 新逻辑: 内层 ROW_NUMBER 按 tmdb_id 分组取第一, 外层 ORDER BY + LIMIT 真拿到 30 部不同电影
     const limitPlaceholder = `$${condVals.length + 1}`;
     const offsetPlaceholder = `$${condVals.length + 2}`;
     const listSQL = `
-      SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
-             r.doc_sheet, r.sub_type, r.lumen_cost,
-             r.pay_type, r.code_price, r.lumen_cost, r.access_level, r.access_tier,
-             r.import_channel,
-             COALESCE(c.release_date, r.created_at::text) as sort_date,
-             ${dateWeight} as date_weight,
-             CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb,
-             CASE WHEN EXISTS (SELECT 1 FROM xx_music_cache m WHERE m.resource_id = r.id)
-                   OR EXISTS (SELECT 1 FROM xx_sports_cache s WHERE s.resource_id = r.id)
-                  THEN 1 ELSE 0 END as has_cover
-      FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
-      ${whereSQL}
+      SELECT * FROM (
+        SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
+               r.doc_sheet, r.sub_type, r.lumen_cost,
+               r.pay_type, r.code_price, r.lumen_cost, r.access_level, r.access_tier,
+               r.import_channel,
+               COALESCE(c.release_date, r.created_at::text) as sort_date,
+               ${dateWeight} as date_weight,
+               CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb,
+               CASE WHEN EXISTS (SELECT 1 FROM xx_music_cache m WHERE m.resource_id = r.id)
+                     OR EXISTS (SELECT 1 FROM xx_sports_cache s WHERE s.resource_id = r.id)
+                    THEN 1 ELSE 0 END as has_cover,
+               ROW_NUMBER() OVER (PARTITION BY CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN r.tmdb_id END ORDER BY ${orderClause.replace(/r\./g, 'r.')}) as rn
+        FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
+        ${whereSQL}
+      ) sub
+      WHERE rn = 1
       ORDER BY ${orderClause}
       LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}
     `;
