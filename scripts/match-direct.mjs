@@ -508,6 +508,33 @@ async function matchOne(rawName, category, subType) {
       }
     }
   }
+
+  // 2026-07-27: 降级搜不带尾部数字/符号的版本 (续集匹配系列名)
+  // "真人快打2" → "真人快打", "马达加斯加1+2" → "马达加斯加"
+  let noTrailingNum = cleanName;
+  for (let i = 0; i < 3; i++) {
+    const next = noTrailingNum.replace(/[\s:：\-_+/&]?\d{1,3}\s*$/, '').trim();
+    if (next === noTrailingNum) break;
+    noTrailingNum = next;
+  }
+  if (noTrailingNum !== cleanName && noTrailingNum.length >= 2) {
+    for (const s of strategies) {
+      for (const type of typeOrder) {
+        const result = await searchTmdb(noTrailingNum, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length, s.useYear);
+        keyIdx++;
+        if (result) {
+          return {
+            id: String(result.id), tmdb_type: type,
+            poster: result.poster_path ? `${TMDB_IMG}${result.poster_path}` : '',
+            title: result.title || result.name || cleanName,
+            vote: result.vote_average || 0,
+            year: (result.release_date || result.first_air_date || '').slice(0, 4) || year,
+          };
+        }
+      }
+    }
+  }
+
   return 'NOMATCH';
 }
 

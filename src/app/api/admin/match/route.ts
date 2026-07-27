@@ -531,9 +531,15 @@ async function matchOne(rawName: string, category: string, subType: string | nul
       }
     }
 
-    // 2026-07-09: 降级搜不带尾部数字的版本 (续集匹配系列名)
-    // "真人快打2" 搜不到时, 搜 "真人快打" 让 TMDB 返回系列第一季
-    const noTrailingNum = cleanName.replace(/[\s:：\-]?\d{1,2}\s*$/, '').trim();
+    // 2026-07-09 + 2026-07-27: 降级搜不带尾部数字/符号的版本 (续集匹配系列名)
+    // "真人快打2" → "真人快打", "马达加斯加1+2" → "马达加斯加"
+    // 剥末尾的 [\s:：\-_+/&]?\d{1,2} 或纯符号 (allow 多轮剥, "100_01" → "100" → "10" → "")
+    let noTrailingNum = cleanName;
+    for (let i = 0; i < 3; i++) {
+      const next = noTrailingNum.replace(/[\s:：\-_+/&]?\d{1,3}\s*$/, '').trim();
+      if (next === noTrailingNum) break;
+      noTrailingNum = next;
+    }
     if (noTrailingNum !== cleanName && noTrailingNum.length >= 2) {
       for (const s of strategies) {
         for (const type of typeOrder) {
@@ -544,7 +550,7 @@ async function matchOne(rawName: string, category: string, subType: string | nul
               id: String(result.id),
               tmdb_type: type,
               poster: result.poster_path ? `${TMDB_IMG}${result.poster_path}` : '',
-              title: result.title || result.name || noTrailingNum,
+              title: result.title || result.name || cleanName,
               vote: result.vote_average || 0,
               year: (result.release_date || result.first_air_date || '').slice(0, 4) || year,
             };
