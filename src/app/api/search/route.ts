@@ -229,6 +229,7 @@ export async function GET(request: NextRequest) {
     const orderClause = innerOrderClause
       .replace(/c\.vote_average/g, 'vote_average')
       .replace(/c\.vote_count/g, 'vote_count')
+      .replace(/r\./g, '')
       .replace(new RegExp(dateWeight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 'date_weight');
     const offset = (page - 1) * pageSize;
 
