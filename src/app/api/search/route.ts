@@ -213,7 +213,8 @@ export async function GET(request: NextRequest) {
       WHEN c.release_date < CURRENT_DATE::text THEN 0
       ELSE 1
     END)`;
-    const orderClause = sort === 'added_time'
+    // 2026-07-27: 外层 orderClause 改用 alias (subquery 暴露的列), 不能引用 c / 内层表达式
+    const innerOrderClause = sort === 'added_time'
       ? `has_tmdb DESC, ${dateWeight}, r.created_at DESC`
       : sort === 'import_time_asc'
         ? `r.created_at ASC, r.id ASC`
@@ -224,6 +225,11 @@ export async function GET(request: NextRequest) {
             : sort === 'cover_first'
               ? `has_cover DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`
               : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`;
+    // 外层 (subquery 外) 只能用 subquery 暴露的列, 用 alias 替代
+    const orderClause = innerOrderClause
+      .replace(/c\.vote_average/g, 'vote_average')
+      .replace(/c\.vote_count/g, 'vote_count')
+      .replace(new RegExp(dateWeight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 'date_weight');
     const offset = (page - 1) * pageSize;
 
     // ─── Count ────────────────────────────────────────────────────────────────
