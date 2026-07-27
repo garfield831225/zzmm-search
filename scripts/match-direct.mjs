@@ -563,6 +563,7 @@ async function runOneBatch(batchSize) {
     //   4) `category NOT IN (...)` 保持, 不匹配 音乐/体育/合集 等
     // 2026-07-27: 优先跑易命中的 category (剧集/电影/动漫/纪录片), 原盘类重试率太低放最后
     //   同时 NOMATCH 的重试放最后 (已经试过没匹配到的, 别反复重试浪费 API)
+    //   2026-07-27: 加上 created_at 优先 (新导入的资源立刻匹配, 不等老资源清完)
     const rows = await sql`
       SELECT id, name, link, category, source, sub_type
       FROM xx_resources
@@ -582,6 +583,8 @@ async function runOneBatch(batchSize) {
           WHEN category IN ('演唱会', '连载') THEN 1
           ELSE 2
         END,
+        -- 2026-07-27: 新插入的资源 (id 大) 优先 (用户期望新数据立刻出现)
+        created_at DESC,
         id
       LIMIT ${batchSize}
     `;
