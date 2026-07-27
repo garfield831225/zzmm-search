@@ -583,30 +583,49 @@ async function getTmdbCredits(tmdbId: string, type: 'movie' | 'tv', keyIndex = 0
 }
 
 async function cacheIt(r: { id: string; tmdb_type: 'movie' | 'tv'; poster: string; title: string; vote: number; year: string; overview?: string; tagline?: string; genres?: string[]; vote_count?: number; original_title?: string }, sqlFn: any) {
+  // 2026-07-27: 调 getTmdbDetails 拿完整字段 (overview/origin_country/genres/backdrop/original_title/vote_count/full release_date)
+  // 旧逻辑只写 title/poster/vote/year, 99% cache 字段空
+  let detail: any = null;
+  try { detail = await getTmdbDetails(r.id, r.tmdb_type); } catch {}
+  const originalTitle = detail?.original_title || detail?.original_name || r.original_title || null;
+  const overview = detail?.overview || r.overview || null;
+  const tagline = detail?.tagline || r.tagline || null;
+  const genres = (detail?.genres || []).map((g: any) => g.name);
+  const backdrop = detail?.backdrop_path || null;
+  const releaseDate = detail?.release_date || detail?.first_air_date || r.year || null;
+  const voteCount = detail?.vote_count ?? r.vote_count ?? 0;
+  const originCountry = r.tmdb_type === 'tv'
+    ? (detail?.origin_country || []).join(',') || null
+    : (detail?.production_countries?.[0]?.iso_3166_1 || null);
   try {
     await sqlFn`
-      INSERT INTO xx_tmdb_cache (tmdb_id, tmdb_type, title, original_title, overview, poster_path, vote_average, vote_count, release_date, status, tagline, genres, cached_at)
+      INSERT INTO xx_tmdb_cache (tmdb_id, tmdb_type, title, original_title, overview, poster_path, backdrop_path, vote_average, vote_count, release_date, status, tagline, genres, origin_country, cached_at)
       VALUES (
         ${r.id}, ${r.tmdb_type}, ${r.title},
-        ${r.original_title || null},
-        ${r.overview || null},
+        ${originalTitle},
+        ${overview},
         ${r.poster},
-        ${r.vote}, ${r.vote_count || 0},
-        ${r.year || null}, ${null},
-        ${r.tagline || null},
-        ${r.genres ? JSON.stringify(r.genres) : null},
+        ${backdrop},
+        ${r.vote}, ${String(voteCount)},
+        ${releaseDate}, ${detail?.status || null},
+        ${tagline},
+        ${genres.length ? genres : null},
+        ${originCountry},
         NOW()
       )
       ON CONFLICT (tmdb_id) DO UPDATE SET
         title = EXCLUDED.title,
-        poster_path = EXCLUDED.poster_path,
-        vote_average = EXCLUDED.vote_average,
-        vote_count = EXCLUDED.vote_count,
-        release_date = COALESCE(EXCLUDED.release_date, xx_tmdb_cache.release_date),
+        original_title = COALESCE(EXCLUDED.original_title, xx_tmdb_cache.original_title),
         overview = COALESCE(EXCLUDED.overview, xx_tmdb_cache.overview),
+        poster_path = EXCLUDED.poster_path,
+        backdrop_path = COALESCE(EXCLUDED.backdrop_path, xx_tmdb_cache.backdrop_path),
+        vote_average = EXCLUDED.vote_average,
+        vote_count = COALESCE(EXCLUDED.vote_count, xx_tmdb_cache.vote_count),
+        release_date = COALESCE(EXCLUDED.release_date, xx_tmdb_cache.release_date),
+        status = COALESCE(EXCLUDED.status, xx_tmdb_cache.status),
         tagline = COALESCE(EXCLUDED.tagline, xx_tmdb_cache.tagline),
         genres = COALESCE(EXCLUDED.genres, xx_tmdb_cache.genres),
-        original_title = COALESCE(EXCLUDED.original_title, xx_tmdb_cache.original_title),
+        origin_country = COALESCE(EXCLUDED.origin_country, xx_tmdb_cache.origin_country),
         cached_at = NOW()
     `;
   } catch {}

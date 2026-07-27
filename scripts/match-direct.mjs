@@ -91,6 +91,18 @@ const TMDB_KEYS = [
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
 
+// 2026-07-27: 拿完整 TMDB 详情 (overview/origin_country/genres/backdrop/original_title/vote_count/full release_date)
+// 不拿这个, cache 99% 字段空, 详情页看不到
+async function getTmdbDetails(tmdbId, type, keyIndex = 0) {
+  await tmdbLimiter.wait(keyIndex);
+  const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_KEYS[keyIndex % TMDB_KEYS.length]}&language=zh-CN`;
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
 log(`start: batch=${BATCH_SIZE} max_rounds=${MAX_ROUNDS} interval=${INTERVAL_MS}ms pid=${process.pid} proxy=${PROXY_URL}`);
 
 // ─── 速率限制 ────────────────────────────────────────────────────────────────
@@ -538,19 +550,45 @@ async function matchOne(rawName, category, subType) {
   return 'NOMATCH';
 }
 
+// 2026-07-27: 调 getTmdbDetails 拿完整字段 (overview/origin_country/genres/backdrop/original_title/vote_count/release_date 完整版)
+// 2026-07-09: 旧 cacheIt 只写 title/poster/vote/year, 99% cache 字段空, 详情页看不到
 async function cacheIt(r) {
   if (DRY_RUN) return;
+  // 拿完整 detail
+  let detail = null;
+  try { detail = await getTmdbDetails(r.id, r.tmdb_type); } catch {}
+  const originalTitle = detail?.original_title || detail?.original_name || null;
+  const overview = detail?.overview || null;
+  const tagline = detail?.tagline || null;
+  const genres = (detail?.genres || []).map(g => g.name);
+  const backdrop = detail?.backdrop_path || null;
+  const releaseDate = detail?.release_date || detail?.first_air_date || null;
+  const voteCount = detail?.vote_count ?? 0;
+  const originCountry = r.tmdb_type === 'tv'
+    ? (detail?.origin_country || []).join(',') || null
+    : (detail?.production_countries?.[0]?.iso_3166_1 || null);
   try {
     await sql`
-      INSERT INTO xx_tmdb_cache (tmdb_id, tmdb_type, title, original_title, overview, poster_path, vote_average, vote_count, release_date, status, tagline, genres, cached_at)
-      VALUES (${r.id}, ${r.tmdb_type}, ${r.title}, ${''}, ${''}, ${r.poster}, ${r.vote}, ${0}, ${r.year || null}, ${null}, ${''}, ${null}, NOW())
+      INSERT INTO xx_tmdb_cache (tmdb_id, tmdb_type, title, original_title, overview, poster_path, vote_average, vote_count, release_date, status, tagline, genres, origin_country, backdrop_path, cached_at)
+      VALUES (${r.id}, ${r.tmdb_type}, ${r.title}, ${originalTitle}, ${overview}, ${r.poster}, ${r.vote}, ${String(voteCount)}, ${releaseDate || r.year || null}, ${detail?.status || null}, ${tagline}, ${genres.length ? genres : null}, ${originCountry}, ${backdrop}, NOW())
       ON CONFLICT (tmdb_id) DO UPDATE SET
         title = EXCLUDED.title,
+        original_title = COALESCE(EXCLUDED.original_title, xx_tmdb_cache.original_title),
+        overview = COALESCE(EXCLUDED.overview, xx_tmdb_cache.overview),
         poster_path = EXCLUDED.poster_path,
         vote_average = EXCLUDED.vote_average,
+        vote_count = COALESCE(EXCLUDED.vote_count, xx_tmdb_cache.vote_count),
+        release_date = COALESCE(EXCLUDED.release_date, xx_tmdb_cache.release_date),
+        status = COALESCE(EXCLUDED.status, xx_tmdb_cache.status),
+        tagline = COALESCE(EXCLUDED.tagline, xx_tmdb_cache.tagline),
+        genres = COALESCE(EXCLUDED.genres, xx_tmdb_cache.genres),
+        origin_country = COALESCE(EXCLUDED.origin_country, xx_tmdb_cache.origin_country),
+        backdrop_path = COALESCE(EXCLUDED.backdrop_path, xx_tmdb_cache.backdrop_path),
         cached_at = NOW()
     `;
-  } catch {}
+  } catch (e) {
+    log('cacheIt err: ' + (e.message || '').slice(0, 200));
+  }
 }
 
 // ─── 一轮 batch ──────────────────────────────────────────────────────────────
