@@ -182,7 +182,7 @@ export default function RegisterPage() {
 
           <div className="mt-4 text-center">
             <Link href="/activate" className="text-sm text-pink-400 hover:underline">
-              激活会员卡 →
+              已有激活码？点此升级 VIP →
             </Link>
           </div>
         </div>

@@ -56,10 +56,13 @@ export async function POST(req: NextRequest) {
     // 加密密码
     const hashed = bcrypt.hashSync(password, 10);
 
-    // 创建用户（默认 'user' 未激活组，必须用激活码才能看泽泽妈文档）
+    // 创建用户（默认 'basic' 基础会员 - 邀请码就是 basic 凭证）
+    // 2026-07-29: 用户拍板 - 邀请码 = basic, 不用再强制激活
+    // VIP 资源锁住 = 前端展示, basic 也能看所有资源
+    // 激活码 = 可选升级 VIP 用
     const result = await sql`
       INSERT INTO xx_users (username, password_hash, user_group, status, created_at, updated_at)
-      VALUES (${username}, ${hashed}, 'user', 'active', NOW(), NOW())
+      VALUES (${username}, ${hashed}, 'basic', 'active', NOW(), NOW())
       RETURNING id, username, user_group, expire_at
     `;
 

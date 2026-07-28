@@ -109,8 +109,8 @@ export default function ActivatePage() {
               <Sparkles className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold">激活码兑换</h1>
-              <p className="text-xs text-white/40 mt-0.5">支持 VIP 会员码 / 单资源解锁码</p>
+              <h1 className="text-xl font-bold">升级 VIP 会员</h1>
+              <p className="text-xs text-white/40 mt-0.5">注册即为基础会员，VIP 资源需输入激活码升级</p>
             </div>
           </div>
 
@@ -168,9 +168,9 @@ export default function ActivatePage() {
                   className="w-full py-3.5 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl font-semibold hover:opacity-90 disabled:opacity-50 transition flex items-center justify-center gap-2 shadow-lg shadow-violet-500/20"
                 >
                   {loading ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> 激活中...</>
+                    <><Loader2 className="w-4 h-4 animate-spin" /> 升级中...</>
                   ) : (
-                    <><Sparkles className="w-4 h-4" /> 立即激活</>
+                    <><Sparkles className="w-4 h-4" /> 立即升级</>
                   )}
                 </button>
               </form>

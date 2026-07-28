@@ -94,7 +94,7 @@ export async function requireAccess(
         error: '需要基础会员',
         need: 'basic',
         current: effectiveGroup,
-        tip: '使用泽泽妈妈文档激活码开通基础会员',
+        tip: '需要有效的邀请码注册新账号（注册成功后即为 basic 基础会员）',
       },
       { status: 403 }
     );

@@ -394,6 +394,7 @@ export default function HomePage() {
       }} />
       <div className="relative z-0">
       {/* 2026-06-04: 强制激活守卫 — 已登录但未激活任何资源 */}
+      {/* 2026-07-29: 新规则 - 注册默认 basic, 不会再触发此守卫. 仅作防御保留给历史 user 账户 */}
       {mounted && mustActivate && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
           <motion.div
@@ -401,15 +402,15 @@ export default function HomePage() {
             className="w-full max-w-md bg-[#12121a] rounded-2xl p-8 border border-white/10 shadow-2xl"
           >
             <div className="text-center mb-6">
-              <div className="text-5xl mb-3">🔒</div>
-              <h2 className="text-2xl font-bold mb-2">需要激活</h2>
-              <p className="text-sm text-white/60">输入激活码后才能进入资源库</p>
+              <div className="text-5xl mb-3">💎</div>
+              <h2 className="text-2xl font-bold mb-2">升级 VIP 享受全部资源</h2>
+              <p className="text-sm text-white/60">基础资源可正常浏览，VIP 资源需升级会员后解锁</p>
             </div>
             <button
               onClick={() => router.push('/activate')}
               className="w-full py-3 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl font-semibold hover:opacity-90 transition"
             >
-              🎫 立即激活
+              💎 升级 VIP
             </button>
             <button
               onClick={() => router.push('/shop')}
