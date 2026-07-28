@@ -413,7 +413,7 @@ export default function HomePage() {
               💎 升级 VIP
             </button>
             <button
-              onClick={() => router.push('/shop')}
+              onClick={() => router.push('/upgrade')}
               className="w-full mt-3 py-3 bg-white/5 hover:bg-white/10 rounded-xl text-sm transition"
             >
               🛒 没有激活码？去购买
@@ -557,16 +557,17 @@ export default function HomePage() {
           )}
 
           {/* 2026-06-10: 新用户引导卡 - 仅未登录显示 */}
+          {/* 2026-07-29: 邀请码 = basic, 不用再"激活", 2 步上手 */}
           {mounted && !user && (
             <div className="mt-3 bg-gradient-to-r from-violet-500/10 to-pink-500/10 border border-violet-500/30 rounded-xl p-4 flex items-center gap-3 flex-wrap">
               <div className="flex-shrink-0 text-3xl">🎬</div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold mb-0.5">新人 3 步上手指南</div>
-                <div className="text-xs text-white/60">① 注册账号 → ② 闲鱼/微店买 VIP 激活码 → ③ 兑换看全站资源</div>
+                <div className="text-sm font-semibold mb-0.5">新人 2 步上手指南</div>
+                <div className="text-xs text-white/60">① 邀请码注册即为基础会员，可浏览全站资源 ② 想要 VIP 资源可去闲鱼选套餐</div>
               </div>
               <div className="flex gap-2 flex-wrap">
                 <Link href="/register" className="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs font-medium whitespace-nowrap">1️⃣ 注册</Link>
-                <Link href="/activate" className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 rounded-lg text-xs font-medium whitespace-nowrap">3️⃣ 兑换码</Link>
+                <Link href="/upgrade" className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:opacity-90 rounded-lg text-xs font-medium whitespace-nowrap">2️⃣ 闲鱼逛逛</Link>
               </div>
             </div>
           )}
@@ -574,8 +575,8 @@ export default function HomePage() {
           {mounted && user && !['vip', 'admin'].includes(user.group) && (
             <div className="mt-3 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/30 rounded-xl p-3 flex items-center gap-3 flex-wrap">
               <div className="text-2xl">⭐</div>
-              <div className="flex-1 min-w-0 text-sm">开通 VIP 解锁 <b className="text-amber-300">TMDB 8万+ 资源</b> + <b className="text-pink-300">VIP视频区6平台</b></div>
-              <Link href="/activate" className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 rounded-lg text-xs font-medium whitespace-nowrap">🎫 开通 VIP</Link>
+              <div className="flex-1 min-w-0 text-sm">升级 VIP 解锁 <b className="text-amber-300">VIP 影视资源</b> + <b className="text-pink-300">9大云盘非影视区</b></div>
+              <Link href="/upgrade" className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 rounded-lg text-xs font-medium whitespace-nowrap">🛒 闲鱼选购</Link>
             </div>
           )}
 

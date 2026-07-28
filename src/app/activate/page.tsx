@@ -181,7 +181,7 @@ export default function ActivatePage() {
             <>
               <div className="mt-6 text-center text-sm text-white/40">还没有激活码？</div>
               <button
-                onClick={() => router.push('/shop')}
+                onClick={() => router.push('/upgrade')}
                 className="mt-3 w-full py-3 bg-gradient-to-r from-orange-500 to-amber-500 rounded-xl font-semibold hover:opacity-90 transition flex items-center justify-center gap-2"
               >
                 <span>🛒</span>

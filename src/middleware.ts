@@ -14,6 +14,7 @@ const PUBLIC_PATHS = [
   '/login',
   '/register',
   '/activate',
+  '/upgrade',           // 2026-07-29 闲鱼 VIP 购买引导 (公开页, 未登录也能看)
   '/api/auth/login',
   '/api/auth/register',
   '/api/auth/me',
