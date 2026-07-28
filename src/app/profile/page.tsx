@@ -130,24 +130,50 @@ export default function ProfilePage() {
     if (!confirm('⚠️ 永久删除所有分享内容?\n\n此操作不可恢复!')) return;
     setDeleting(true);
     try {
-      // TODO: 调 /api/user/delete-shares
+      // 2026-07-28: TODO - 调 /api/user/delete-shares (目前 share 表暂无, 用空操作)
       await new Promise(r => setTimeout(r, 800));
-      showToast('success', '✅ 已清空');
+      showToast('success', '✅ 已清空 (暂无分享数据)');
     } catch (e: any) { showToast('error', e.message); }
     finally { setDeleting(false); }
   };
 
   const handleDeleteAccount = async () => {
-    const v = prompt('⚠️ 注销账号会清空所有数据, 不可恢复!\n\n输入 DELETE 确认:');
-    if (v !== 'DELETE') return;
+    if (user?.user_group === 'admin') {
+      showToast('error', '管理员账号不支持注销, 请联系超管');
+      return;
+    }
+    const v = prompt('⚠️ 注销账号会清空所有数据, 不可恢复!\n\n将清空:\n• 所有解锁记录\n• 流明余额\n• 关联激活码标记已用\n• 用户名永久占位\n\n输入 DELETE 确认:');
+    if (v !== 'DELETE') {
+      showToast('error', '已取消 (输入不匹配)');
+      return;
+    }
     setDeleting(true);
     try {
-      // TODO: 调 /api/user/delete-account
-      await new Promise(r => setTimeout(r, 800));
-      showToast('success', '✅ 已注销');
-      setTimeout(() => router.push('/'), 1500);
-    } catch (e: any) { showToast('error', e.message); }
-    finally { setDeleting(false); }
+      const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
+      const r = await fetch('/api/user/delete-account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify({ confirm: 'DELETE' }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        showToast('success', `✅ 账号已注销, 数据已清空 (${d.cleaned?.unlocks || 0} 解锁 + 流明清零)`);
+        // 2026-07-28: 清 token + 跳首页
+        setTimeout(() => {
+          localStorage.removeItem('zzmm_token');
+          localStorage.removeItem('token');
+          localStorage.removeItem('adminToken');
+          localStorage.removeItem('user');
+          router.push(d.redirect || '/');
+        }, 1800);
+      } else {
+        showToast('error', d.error || '注销失败');
+      }
+    } catch (e: any) {
+      showToast('error', '网络错误: ' + e.message);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const handleSaveProfile = async () => {
@@ -232,6 +258,28 @@ export default function ProfilePage() {
           <Link href="/" className="ml-auto text-xs text-white/40 hover:text-white/80 flex items-center gap-1">
             <Home className="w-3 h-3" /> 返回首页
           </Link>
+        </div>
+
+        {/* 2026-07-28: 头部下方快捷操作 (显眼位置放注销) */}
+        <div className="mb-6 flex items-center gap-2 flex-wrap p-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.03]">
+          <span className="text-xs text-amber-300/80">快捷操作:</span>
+          <button onClick={() => router.push('/activate')}
+            className="px-3 py-1.5 text-xs rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/30 flex items-center gap-1">
+            <Sparkles className="w-3 h-3" /> 兑换码
+          </button>
+          <Link href="/library"
+            className="px-3 py-1.5 text-xs rounded-lg bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 border border-violet-500/30 flex items-center gap-1">
+            <Crown className="w-3 h-3" /> 我的资源
+          </Link>
+          {user.user_group !== 'admin' && (
+            <button onClick={handleDeleteAccount} disabled={deleting}
+              className="ml-auto px-3 py-1.5 text-xs rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/40 flex items-center gap-1 disabled:opacity-50">
+              <LogOut className="w-3 h-3" /> 注销账号
+            </button>
+          )}
+          {user.user_group === 'admin' && (
+            <span className="ml-auto text-[10px] text-amber-400/60">管理员账号不可注销</span>
+          )}
         </div>
 
         {/* 4 个统计卡 */}

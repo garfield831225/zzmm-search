@@ -66,6 +66,7 @@ const PUBLIC_PATHS = [
   '/api/auth/sso/callback',  // SSO 回调 (免登录, 内部验 token + 签 JWT)
   '/api/internal/lumen/credit',  // 内部 API: Moviezone 调加流明 (Bearer INTERNAL_API_TOKEN 鉴权)
   '/api/user/balance',         // 查余额 (后端 Bearer 鉴权)
+  '/api/user/delete-account',  // 2026-07-28 注销账号 (后端 Bearer 鉴权)
   // v2.1.4 单条定价 + admin 补全
   '/api/user/unlocks',         // 解锁记录列表 (后端 Bearer 鉴权)
   '/api/admin/pay-config',     // pay-config CRUD (后端 adminOnly 鉴权)
