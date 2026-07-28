@@ -361,7 +361,7 @@ export async function GET(request: NextRequest) {
     if (tmdbIds.length > 0) {
       try {
         const allTmdbLinkRows = await sql`
-          SELECT id, tmdb_id, source, link, link_code, access_level, size, created_at
+          SELECT id, tmdb_id, source, link, link_code, access_level, import_channel, size, created_at
           FROM xx_resources
           WHERE tmdb_id = ANY(${tmdbIds})
             AND link IS NOT NULL AND link != ''
@@ -394,6 +394,7 @@ export async function GET(request: NextRequest) {
             password: r.link_code || '',
             size: r.size || '',
             accessLevel: r.access_level || 'basic',
+            importChannel: r.import_channel || '',
             sort: SOURCE_PRIORITY[r.source] || 99,
             status: 'active',
             createdAt: r.created_at,

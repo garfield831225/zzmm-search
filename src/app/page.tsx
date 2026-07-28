@@ -803,20 +803,31 @@ export default function HomePage() {
                 </div>
                 {/* 2026-07-24: 1对N 多链接 - 卡片下网盘可点击图标 (按 sort 排序, 第一个高亮) */}
                 {/* 2026-07-27: 用 _displayLinks (tmdbLinks 优先, 1对N 副表兜底) */}
+                {/* 2026-07-29: 加 link 级别权限 - basic 用户只能开 zezhe link, 其他 link 锁住 */}
                 {(item as any)._displayLinks && (item as any)._displayLinks.length > 0 && (
                   <div className="flex items-center gap-1 flex-wrap pt-0.5">
                     {(item as any)._displayLinks.slice(0, 8).map((l: any, idx: number) => {
                       const isMagnetLink = l.source === 'magnet' || l.source === 'ed2k';
+                      // 2026-07-29: link 级别权限 - vip/admin 全开, basic 只开 zezhe link
+                      const linkAllowed = (user?.group === 'vip' || user?.group === 'admin') ||
+                        (l.accessLevel === 'code') ||  // 单资源付费 (流明解锁)
+                        (l.importChannel === 'zezhe' || l.importChannel === 'zezemom_excel');
                       return (
                         <button
                           key={idx}
                           onClick={(e) => {
                             e.stopPropagation();
+                            if (!linkAllowed) {
+                              addCopyToast('🔒 VIP 渠道链接，basic 用户不可打开，请升级 VIP');
+                              return;
+                            }
                             if (isMagnetLink) handleCopyLink(l.url, e);
                             else handleDirectOpen(l.url, e);
                           }}
                           className={`px-1.5 py-0.5 text-[10px] rounded font-medium cursor-pointer transition-all hover:scale-105 ${
-                            idx === 0
+                            !linkAllowed
+                              ? 'bg-white/5 text-white/30 border border-white/10 opacity-50 cursor-not-allowed'
+                              : idx === 0
                               ? 'bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 text-white border border-violet-400/50 ring-1 ring-violet-300/30'
                               : isMagnetLink
                                 ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
@@ -824,9 +835,12 @@ export default function HomePage() {
                                   ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                                   : 'bg-white/5 text-white/60 border border-white/10'
                           }`}
-                          title={`${l.source}${l.password ? ` · 提取码: ${l.password}` : ''} · 点击${isMagnetLink ? '复制' : '打开'}`}
+                          title={!linkAllowed
+                            ? `🔒 ${l.source} (VIP 渠道, 需升级 VIP 才能打开)`
+                            : `${l.source}${l.password ? ` · 提取码: ${l.password}` : ''} · 点击${isMagnetLink ? '复制' : '打开'}`}
                         >
-                          {l.source === 'magnet' || l.source === 'ed2k' ? '🧲' :
+                          {!linkAllowed ? '🔒' :
+                           l.source === 'magnet' || l.source === 'ed2k' ? '🧲' :
                            l.source === '115' ? '📦' :
                            l.source === 'baidu' ? '🅱️' :
                            l.source === 'quark' ? '🍊' :
@@ -836,7 +850,7 @@ export default function HomePage() {
                            l.source === 'uc' ? '🅿️' :
                            l.source === 'tianyi' ? '☂️' :
                            l.source === 'yidong' ? '📱' : '🔗'} {l.source}
-                          {idx === 0 && <span className="ml-0.5 text-[8px]">★</span>}
+                          {linkAllowed && idx === 0 && <span className="ml-0.5 text-[8px]">★</span>}
                         </button>
                       );
                     })}
@@ -844,14 +858,19 @@ export default function HomePage() {
                       <span className="text-[10px] text-white/40">+{(item as any)._displayLinks.length - 8}</span>
                     )}
                     {/* 2026-07-24: 一键开全部 (>=2 个非磁力链接才显示) */}
-                    {(item as any)._displayLinks && (item as any)._displayLinks.filter((l: any) => l.source !== 'magnet' && l.source !== 'ed2k').length >= 2 && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          // 依次 window.open (0.5s 间隔避开浏览器拦截)
-                          ((item as any)._displayLinks || [])
-                            .filter((l: any) => l.source !== 'magnet' && l.source !== 'ed2k')
-                            .forEach((l: any, i: number) => {
+                    {/* 2026-07-29: 只 basic 看 zezhe link + vip/admin 看全部. basic "开全部" 只开 zezhe */}
+                    {(() => {
+                      const allLinks = ((item as any)._displayLinks || []).filter((l: any) => l.source !== 'magnet' && l.source !== 'ed2k');
+                      // basic 只看有权开 (zezhe), vip/admin 看全部
+                      const allowedLinks = (user?.group === 'vip' || user?.group === 'admin')
+                        ? allLinks
+                        : allLinks.filter((l: any) => l.importChannel === 'zezhe' || l.importChannel === 'zezemom_excel' || l.accessLevel === 'code');
+                      return allowedLinks.length >= 2 && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            // 依次 window.open (0.5s 间隔避开浏览器拦截)
+                            allowedLinks.forEach((l: any, i: number) => {
                               setTimeout(() => {
                                 if (l.password) {
                                   const ok = window.confirm(
@@ -863,13 +882,14 @@ export default function HomePage() {
                                 }
                               }, i * 500);
                             });
-                        }}
-                        className="px-1.5 py-0.5 text-[10px] rounded font-medium cursor-pointer transition-all hover:scale-105 bg-gradient-to-r from-violet-500/40 to-fuchsia-500/40 text-white border border-violet-400/60 ring-1 ring-violet-300/40"
-                        title="一键打开所有网盘链接"
-                      >
-                        🚀 开全部
-                      </button>
-                    )}
+                          }}
+                          className="px-1.5 py-0.5 text-[10px] rounded font-medium cursor-pointer transition-all hover:scale-105 bg-gradient-to-r from-violet-500/40 to-fuchsia-500/40 text-white border border-violet-400/60 ring-1 ring-violet-300/40"
+                          title={`一键打开所有允许的网盘链接 (${allowedLinks.length} 个)`}
+                        >
+                          🚀 开全部 ({allowedLinks.length})
+                        </button>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
