@@ -99,14 +99,16 @@ export default function ProfilePage() {
         const d1 = await r1.json();
         setUser(d1.user);
         setEditForm({ username: d1.user?.username || '' });
-        const [r2, r3, r4] = await Promise.all([
+        const [r2, r3, r4, r5] = await Promise.all([
           fetch('/api/user/activations', { headers: { Authorization: 'Bearer ' + t } }),
           fetch('/api/user/unlocks/list', { headers: { Authorization: 'Bearer ' + t } }),
           fetch('/api/user/balance', { headers: { Authorization: 'Bearer ' + t } }),
+          fetch('/api/user/weekly-credit', { headers: { Authorization: 'Bearer ' + t } }),
         ]);
         if (r2.ok) { const d2 = await r2.json(); setRecords(d2.items || []); }
         if (r3.ok) { const d3 = await r3.json(); setUnlocks(d3.items || []); }
         if (r4.ok) { const d4 = await r4.json(); if (typeof d4.lumen_balance === 'number') setLumenBalance(d4.lumen_balance); }
+        if (r5.ok) { const d5 = await r5.json(); if (d5 && typeof d5.used === 'number') setWeeklyCredit({ used: d5.used, total: d5.total, weekStart: d5.week_start }); }
       } catch (e: any) { setError(e.message); }
       finally { setLoading(false); }
     };
@@ -120,10 +122,11 @@ export default function ProfilePage() {
   const daysLeft = user?.expire_at ? Math.max(0, Math.ceil((new Date(user.expire_at).getTime() - Date.now()) / 86400000)) : (isVip ? 9999 : 0);
   const daysSinceReg = user?.created_at ? Math.floor((Date.now() - new Date(user.created_at).getTime()) / 86400000) : 0;
   const daysSinceLogin = user?.last_login ? Math.floor((Date.now() - new Date(user.last_login).getTime()) / 86400000) : 0;
-  // 每周免费额度: VIP 每周 0 起步, 每周日 0 点重置; 当前简单用 lumenBalance 推算 (占位)
-  // TODO: 加 xx_user_weekly_credit 表
-  const weeklyUsed = 0;
-  const weeklyTotal = isVip ? 0 : 0;  // VIP 当前没设, 后续可加
+  // 2026-07-28: 每周免费额度 - 真实读 xx_user_weekly_credit
+  // VIP 每周 1 个免费解锁额度, 周日 0 点重置 (cron)
+  const [weeklyCredit, setWeeklyCredit] = useState<{ used: number; total: number; weekStart: string | null }>({ used: 0, total: 0, weekStart: null });
+  const weeklyUsed = weeklyCredit.used;
+  const weeklyTotal = isVip ? weeklyCredit.total : 0;  // 只 VIP/admin 有额度
 
   // 危险操作
   const handleDeleteShares = async () => {
