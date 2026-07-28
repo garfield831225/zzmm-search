@@ -188,6 +188,47 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  // 2026-07-29: 单点登录 - 校验 token iat vs user.last_login
+  // 新登录会 UPDATE last_login=NOW(), 比 token.iat 新 → 旧 token 失效 → 跳登录 + Toast
+  // admin 不挤 (怕自己误踢)
+  try {
+    const secret = new TextEncoder().encode(process.env.JWT_SECRET || '');
+    const { payload } = await jwtVerify(token, secret);
+    if ((payload as any)?.group !== 'admin') {
+      const { neon } = await import('@neondatabase/serverless');
+      const sql = neon(process.env.DATABASE_URL || '');
+      const r = await sql`SELECT last_login, status FROM xx_users WHERE id = ${payload.id} LIMIT 1` as any[];
+      const u = r[0];
+      if (!u || u.status !== 'active') {
+        // 账号禁用/不存在 → 跳登录
+        const r2 = new URL('/login', request.url);
+        r2.searchParams.set('redirect', pathname);
+        r2.searchParams.set('error', 'account_disabled');
+        const res = NextResponse.redirect(r2);
+        res.cookies.delete('zzmm_token');
+        res.cookies.delete('token');
+        return res;
+      }
+      const lastLoginMs = new Date(u.last_login).getTime();
+      const tokenIatMs = ((payload as any).iat || 0) * 1000;
+      if (tokenIatMs < lastLoginMs) {
+        // 被挤下线
+        const r3 = new URL('/login', request.url);
+        r3.searchParams.set('redirect', pathname);
+        r3.searchParams.set('kicked', '1');
+        const res = NextResponse.redirect(r3);
+        res.cookies.delete('zzmm_token');
+        res.cookies.delete('token');
+        return res;
+      }
+    }
+  } catch (e) {
+    // verify 失败 / DB 失败 → 跳登录 (按未登录处理)
+    const r4 = new URL('/login', request.url);
+    r4.searchParams.set('redirect', pathname);
+    return NextResponse.redirect(r4);
+  }
+
   return NextResponse.next();
 }
 

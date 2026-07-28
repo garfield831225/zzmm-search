@@ -71,6 +71,9 @@ export async function POST(req: NextRequest) {
     // 标记邀请码已用
     await sql`UPDATE xx_invite_codes SET is_used = true, used_by = ${user.id}, used_at = NOW() WHERE id = ${inv[0].id}`;
 
+    // 2026-07-29: 同步初始化 last_login (新用户立刻有 last_login 记录, 单点登录校验)
+    await sql`UPDATE xx_users SET last_login = NOW() WHERE id = ${user.id}`;
+
     const token = jwt.sign(
       { id: user.id, username: user.username, group: user.user_group },
       JWT_SECRET,

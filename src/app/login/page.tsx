@@ -16,6 +16,18 @@ export default function LoginPage() {
   const imgRef = useRef<HTMLImageElement>(null);
   const router = useRouter();
 
+  // 2026-07-29: 监听 kicked / account_disabled query param
+  // middleware 单点登录检测到旧 token 失效时, 跳 /login?kicked=1
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('kicked') === '1') {
+      setError('您的账号已在另一设备登录，已自动登出。如非本人操作，请尽快修改密码。');
+    } else if (params.get('error') === 'account_disabled') {
+      setError('账号已被禁用，请联系客服。');
+    }
+  }, []);
+
   // 2026-07-17: 只查"是否已登录"用于顶部提示，**绝不自动跳转**
   // 之前自动跳转导致换帐号不可能，必须让用户能重新填表
   useEffect(() => {

@@ -41,8 +41,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
     }
 
-    // 更新最后登录时间
-    await sql`UPDATE xx_users SET last_login = NOW(), updated_at = NOW() WHERE id = ${user.id}`.catch(() => {});
+    // 更新最后登录时间 (同步, 单点登录挤下线依赖此时间戳)
+    // 2026-07-29: 同步更新, 失败抛错, 不静默吞错 (last_login 没更新 = 旧 token 立刻失效)
+    await sql`UPDATE xx_users SET last_login = NOW(), updated_at = NOW() WHERE id = ${user.id}`;
 
     const token = jwt.sign(
       { id: user.id, username: user.username, group: user.user_group },
