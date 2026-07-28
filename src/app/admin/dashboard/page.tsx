@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import {
   BarChart3, Users, Key, FileText, Target, Upload, DollarSign, MessageSquareWarning,
   ShieldOff, Code2, Settings, ListChecks, Database, Network, Activity,
-  Zap, Server, AlertCircle, Tv, ExternalLink, RefreshCw, CheckCircle2, XCircle,
+  Zap, Server, AlertCircle, Tv, ExternalLink, RefreshCw, CheckCircle2, XCircle, ShieldAlert,
 } from 'lucide-react';
 
 interface Card {
@@ -35,6 +35,7 @@ const CARDS: Card[] = [
   // ===== 用户管理 =====
   { id: 'invites', title: '邀请码', desc: '生成/列表/复制/清理', icon: Key, href: '/admin/invites', category: '用户管理', color: 'text-rose-700', bg: 'bg-rose-50 hover:bg-rose-100' },
   { id: 'blacklist', title: '黑名单', desc: '用户/IP/设备拉黑', icon: ShieldOff, href: '/admin/blacklist', category: '用户管理', color: 'text-red-700', bg: 'bg-red-50 hover:bg-red-100' },
+  { id: 'login-risk', title: '登录 IP 风险', desc: '一天两城市标风险 + 禁用', icon: ShieldAlert, href: '/admin/login-risk', category: '用户管理', color: 'text-amber-700', bg: 'bg-amber-50 hover:bg-amber-100' },
   { id: 'codes', title: '激活码', desc: '4 模板 + 流明码', icon: Code2, href: '/admin/codes', category: '用户管理', color: 'text-pink-700', bg: 'bg-pink-50 hover:bg-pink-100' },
   { id: 'users', title: '用户列表', desc: '查/改用户状态', icon: Users, href: '/admin/users', category: '用户管理', color: 'text-fuchsia-700', bg: 'bg-fuchsia-50 hover:bg-fuchsia-100' },
 

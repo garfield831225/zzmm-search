@@ -3,10 +3,49 @@ import { neon } from '@neondatabase/serverless';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { cookies } from 'next/headers';
+import { getClientIp } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
+
+// 2026-07-29: 记录登录 IP + 城市识别 (用于后台 IP 风险监测)
+// 异步调用, 失败不影响登录流程
+async function recordLoginHistory(userId: number, req: NextRequest) {
+  const ip = getClientIp(req.headers, 'unknown');
+  const userAgent = req.headers.get('user-agent') || '';
+  // ip-api.com 免费 (每分钟 45 次, 失败降级只存 IP)
+  let city: string | null = null;
+  let region: string | null = null;
+  let country: string | null = null;
+  let isp: string | null = null;
+  try {
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 3000);  // 3s 超时
+    const r = await fetch(`http://ip-api.com/json/${ip}?lang=zh-CN&fields=status,country,regionName,city,isp,query`, {
+      signal: ctrl.signal,
+    });
+    clearTimeout(timeout);
+    if (r.ok) {
+      const d: any = await r.json();
+      if (d.status === 'success') {
+        city = d.city || null;
+        region = d.regionName || null;
+        country = d.country || null;
+        isp = d.isp || null;
+      }
+    }
+  } catch { /* 失败降级, IP 已知, 城市为 null */ }
+
+  const sql = neon(process.env.DATABASE_URL || '');
+  // 1) 写历史表
+  await sql`
+    INSERT INTO xx_login_history (user_id, ip, city, region, country, isp, user_agent, login_at)
+    VALUES (${userId}, ${ip}, ${city}, ${region}, ${country}, ${isp}, ${userAgent}, NOW())
+  `;
+  // 2) 更新 user 最近登录 IP (后台列表查询快)
+  await sql`UPDATE xx_users SET last_login_ip = ${ip}, last_login_city = ${city} WHERE id = ${userId}`;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -44,6 +83,10 @@ export async function POST(req: NextRequest) {
     // 更新最后登录时间 (同步, 单点登录挤下线依赖此时间戳)
     // 2026-07-29: 同步更新, 失败抛错, 不静默吞错 (last_login 没更新 = 旧 token 立刻失效)
     await sql`UPDATE xx_users SET last_login = NOW(), updated_at = NOW() WHERE id = ${user.id}`;
+
+    // 2026-07-29: 记录登录 IP + 城市识别 (异步, 失败不影响登录)
+    // ip-api.com 免费 45 req/min, 失败降级只存 IP
+    recordLoginHistory(user.id, req).catch((e) => console.error('[login-history]', e.message));
 
     const token = jwt.sign(
       { id: user.id, username: user.username, group: user.user_group },
