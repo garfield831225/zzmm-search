@@ -1,13 +1,13 @@
 // 2026-07-28: pay-config sheet 列表
 // 返 21-sheet 库的 sheet 名 + 每个 sheet 的 code 资源数
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import { authAdmin } from '@/lib/admin-auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  const auth = authAdmin(new Request('http://x/'));
+export async function GET(req: NextRequest) {
+  const auth = authAdmin(req);
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const sql = neon(process.env.DATABASE_URL || '');

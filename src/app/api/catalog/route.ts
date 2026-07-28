@@ -115,7 +115,7 @@ export async function GET(request: NextRequest) {
     const offsetPlaceholder = `$${condVals.length + 2}`;
 
     const listSQL = `
-      SELECT r.id, r.name, r.category, r.tags, r.tmdb_id,
+      SELECT r.id, r.name, r.category, r.tags, r.tmdb_id, r.lumen_cost, r.code_price, r.pay_type,
              r.doc_sheet, r.sub_type, r.size, r.type, r.created_at, r.access_level, r.import_channel, r.source,
              r.link, r.link_code, r.is_multi_link,
              COALESCE(c.title, r.name) as display_title,
@@ -178,6 +178,8 @@ export async function GET(request: NextRequest) {
         base.link = row.link || '';
         base.linkCode = row.link_code || '';
         base.lumenCost = row.lumen_cost || 1;
+        base.codePrice = row.code_price ? Number(row.code_price) : 0;
+        base.payType = row.pay_type || 'free';
       }
       if (subLinks && subLinks.length > 0) {
         base.links = subLinks;
