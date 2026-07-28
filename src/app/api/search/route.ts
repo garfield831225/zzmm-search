@@ -232,7 +232,8 @@ export async function GET(request: NextRequest) {
 
     // ─── Count ────────────────────────────────────────────────────────────────
     // 2026-07-27: 改成 distinct count (按 tmdb_id), 跟 fetch 同步, 否则 total 跟 items 数对不上
-    const countSQL = `SELECT COUNT(DISTINCT CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN r.tmdb_id END) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id ${whereSQL}`;
+    // 2026-07-29: 改用 COALESCE(tmdb_id, 'id_'||id) - 没 tmdb_id 的资源按 id 独立, 否则 1 万条非影视资源被合并成 1 条
+    const countSQL = `SELECT COUNT(DISTINCT COALESCE(NULLIF(r.tmdb_id, ''), 'id_' || r.id::text)) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id ${whereSQL}`;
     const countRows = await sql(countSQL, condVals) as any[];
     const total = parseInt(countRows?.[0]?.cnt || '0');
 
@@ -257,7 +258,7 @@ export async function GET(request: NextRequest) {
                CASE WHEN EXISTS (SELECT 1 FROM xx_music_cache m WHERE m.resource_id = r.id)
                      OR EXISTS (SELECT 1 FROM xx_sports_cache s WHERE s.resource_id = r.id)
                     THEN 1 ELSE 0 END as has_cover,
-               ROW_NUMBER() OVER (PARTITION BY CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN r.tmdb_id END ORDER BY created_at DESC, id ASC) as rn
+               ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(r.tmdb_id, ''), 'id_' || r.id::text) ORDER BY created_at DESC, id ASC) as rn
         FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
         ${whereSQL}
       ) sub
