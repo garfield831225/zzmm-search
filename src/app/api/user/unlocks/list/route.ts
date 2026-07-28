@@ -18,6 +18,7 @@ export async function GET(req: NextRequest) {
     const sql = neon(process.env.DATABASE_URL || '');
 
     // 2026-07-16: ids 参数 → 只返 unlockedIds (轻量查询, 给 library 用)
+    // 2026-07-29: 修 neon 0.10 driver 不支持 sql.query() bug, 改用模板字符串
     const idsParam = req.nextUrl.searchParams.get('ids');
     if (idsParam) {
       const idList = idsParam.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n > 0);
@@ -25,10 +26,12 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ ok: true, unlockedIds: [] });
       }
       try {
-        const rows = await (sql as any).query(
-          `SELECT resource_id FROM xx_user_unlocks WHERE user_id = $1 AND resource_id = ANY($2::int[])`,
-          [userId, idList]
-        ) as any[];
+        // Neon 0.10 模板字符串传数组: ${idList} 自动转成 PG int array
+        const rows = await sql`
+          SELECT resource_id FROM xx_user_unlocks
+          WHERE user_id = ${userId}
+            AND resource_id = ANY(${idList}::int[])
+        ` as any[];
         const unlockedIds = (rows || []).map((r: any) => r.resource_id);
         return NextResponse.json({ ok: true, unlockedIds });
       } catch (e: any) {
