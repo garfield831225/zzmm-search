@@ -90,6 +90,8 @@ export default function LibraryPage() {
   const [loading, setLoading] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [unlocking, setUnlocking] = useState<Set<number>>(new Set());
+  const [lumenBalance, setLumenBalance] = useState(0);
+  const [lumenModal, setLumenModal] = useState<{ cost: number; balance: number; resourceName: string } | null>(null);
   let toastCnt = 0;
 
   // 读 user 组
@@ -216,6 +218,17 @@ export default function LibraryPage() {
     fetchCategories();
   }, [section, subCategory, sort]);
 
+  // 2026-07-28: 切到 code 区时, 拉用户流明余额 (解锁预检用)
+  useEffect(() => {
+    if (section !== 'code' || !userId) return;
+    const t = getToken();
+    if (!t) return;
+    fetch('/api/user/balance', { headers: { Authorization: 'Bearer ' + t } })
+      .then(r => r.json())
+      .then(d => { if (typeof d.lumen_balance === 'number') setLumenBalance(d.lumen_balance); })
+      .catch(() => {});
+  }, [section, userId, getToken]);
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setItems([]);
@@ -234,6 +247,11 @@ export default function LibraryPage() {
       addToast('error', '请先登录');
       return;
     }
+    // 2026-07-28: 流明不足预检 (跟服务端 402 错对应, 直接弹购买提示)
+    if (userGroup !== 'admin' && lumenBalance < (item.lumenCost || 1)) {
+      setLumenModal({ cost: item.lumenCost || 1, balance: lumenBalance, resourceName: item.name });
+      return;
+    }
     if (!confirm(`确认消耗 ${item.lumenCost || 1} 流明解锁此资源？`)) return;
     setUnlocking(prev => new Set(prev).add(item.id));
     try {
@@ -246,7 +264,12 @@ export default function LibraryPage() {
       if (d.success) {
         addToast('unlock', d.is_admin_bypass ? '👑 admin 免流明打开' : `✅ 解锁成功！扣 ${d.cost || item.lumenCost || 1} 流明`);
         setItems(prev => prev.map(i => i.id === item.id ? { ...i, unlocked: true } : i));
+        // 2026-07-28: 刷新余额
+        if (typeof d.lumen_balance_after === 'number') setLumenBalance(d.lumen_balance_after);
         setTimeout(() => window.open(item.link, '_blank'), 500);
+      } else if (d.need === 'lumen') {
+        // 2026-07-28: 服务端检测流明不足 (并发场景), 弹购买提示
+        setLumenModal({ cost: d.cost || item.lumenCost || 1, balance: d.balance ?? 0, resourceName: item.name });
       } else {
         addToast('error', d.error || '解锁失败');
       }
@@ -737,6 +760,54 @@ export default function LibraryPage() {
           ))}
         </AnimatePresence>
       </div>
+
+      {/* 2026-07-28: 流明不足购买提示弹窗 */}
+      <AnimatePresence>
+        {lumenModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50" onClick={() => setLumenModal(null)}>
+            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
+              className="bg-[#12121a] rounded-2xl p-6 w-full max-w-md border border-fuchsia-500/30 shadow-2xl" onClick={e => e.stopPropagation()}>
+              <div className="text-center mb-5">
+                <div className="text-5xl mb-3">💎</div>
+                <h3 className="text-xl font-bold text-fuchsia-300">流明不足</h3>
+                <p className="text-sm text-white/60 mt-2">解锁需要消耗流明, 当前余额不足</p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-4 mb-5 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-white/60">资源</span>
+                  <span className="text-white truncate ml-2 max-w-[60%]" title={lumenModal.resourceName}>{lumenModal.resourceName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-white/60">所需流明</span>
+                  <span className="text-fuchsia-300 font-bold">💎 {lumenModal.cost}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-white/60">当前余额</span>
+                  <span className="text-amber-300 font-bold">💎 {lumenModal.balance}</span>
+                </div>
+                <div className="border-t border-white/10 pt-2 flex justify-between">
+                  <span className="text-white/60">还差</span>
+                  <span className="text-red-300 font-bold">💎 {Math.max(0, lumenModal.cost - lumenModal.balance)}</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <a href="/activate" onClick={() => setLumenModal(null)}
+                  className="block w-full text-center px-4 py-3 bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:opacity-90 rounded-xl text-base font-semibold text-white">
+                  🎫 立即兑换流明码
+                </a>
+                <a href="/profile" onClick={() => setLumenModal(null)}
+                  className="block w-full text-center px-4 py-2.5 bg-white/10 hover:bg-white/20 rounded-xl text-sm text-white/80">
+                  查看我的流明余额 →
+                </a>
+                <button onClick={() => setLumenModal(null)} className="block w-full text-center px-4 py-2 text-sm text-white/40 hover:text-white/60">
+                  取消
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

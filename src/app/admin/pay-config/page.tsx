@@ -2,42 +2,47 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
-import { Search, Settings, Lock, Unlock, Copy, X, Plus, ChevronRight, Film, Tv, Music, Disc, Sparkles } from 'lucide-react';
+import { Search, Settings, Lock, Unlock, Copy, X, Sparkles, Coins, FileText } from 'lucide-react';
 
 interface Item {
   id: number;
   name: string;
   category: string;
+  doc_sheet: string | null;
   pay_type: string;
   code_price: number;
-  tmdb_id: string;
+  lumen_cost: number;
+  access_level: string;
+  import_channel: string;
   source: string;
+  tmdb_id: string;
+  size: string;
+  sub_type: string;
+  created_at: string;
   poster_path: string;
 }
 
-interface CategoryStat {
-  category: string;
+interface SheetStat {
+  name: string;
+  key: string;
   total: number;
-  code_count: number;
+  codeCount: number;
 }
-
-const CAT_ICONS: Record<string, string> = {
-  '电影': '🎬', '剧集': '📺', '动漫': '🎨', '综艺': '🎉', '纪录片': '📚',
-  '演唱会': '🎤', '音乐': '🎵', '体育': '⚽', '原盘': '💿', 'REMUX': '🔰',
-  '系列电影': '📀', '合集': '📦', '连载': '⏳', '少儿频道': '🧒',
-};
 
 export default function PayConfigPage() {
   const router = useRouter();
   const [token, setToken] = useState('');
   const [items, setItems] = useState<Item[]>([]);
+  const [sheets, setSheets] = useState<SheetStat[]>([]);
+  const [unclassified, setUnclassified] = useState<{ total: number; codeCount: number }>({ total: 0, codeCount: 0 });
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [payType, setPayType] = useState('');  // '' = 全部, 'free', 'code'
-  const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [selectedSheet, setSelectedSheet] = useState<string>('');  // '' = 全部, '__unclassified__' = 未分类
   const [editing, setEditing] = useState<Item | null>(null);
   const [newPayType, setNewPayType] = useState('free');
   const [newPrice, setNewPrice] = useState(0);
+  const [newLumen, setNewLumen] = useState(1);
   const [generating, setGenerating] = useState<Item | null>(null);
   const [genCount, setGenCount] = useState(1);
   const [genPrice, setGenPrice] = useState(0);
@@ -54,14 +59,29 @@ export default function PayConfigPage() {
     setTimeout(() => setToast(null), 2200);
   };
 
-  // 加载当前类别 + 搜索条件的资源
+  // 加载 sheet 列表
+  const loadSheets = useCallback(async () => {
+    if (!token) return;
+    try {
+      const r = await fetch('/api/admin/pay-config/sheets', { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      if (!d.error) {
+        setSheets(d.sheets || []);
+        setUnclassified(d.unclassified || { total: 0, codeCount: 0 });
+      }
+    } catch {}
+  }, [token]);
+
+  // 加载资源列表
   const load = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     try {
-      const params = new URLSearchParams({ pageSize: '500' });
+      const params = new URLSearchParams({ pageSize: '200' });
       if (search.trim()) params.set('q', search.trim());
       if (payType) params.set('pay_type', payType);
+      if (selectedSheet === '__unclassified__') params.set('doc_sheet', '__null__');
+      else if (selectedSheet) params.set('doc_sheet', selectedSheet);
       const r = await fetch(`/api/admin/pay-config?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -70,48 +90,28 @@ export default function PayConfigPage() {
       else setItems(data.items || []);
     } catch (e: any) { showToast('error', e.message); }
     finally { setLoading(false); }
-  }, [token, search, payType]);
+  }, [token, search, payType, selectedSheet]);
+
+  useEffect(() => {
+    if (token) loadSheets();
+  }, [token, loadSheets]);
 
   useEffect(() => {
     if (token) load();
   }, [token, load]);
 
-  // 按 category 分组
-  const grouped = useMemo(() => {
-    const g: Record<string, Item[]> = {};
-    for (const it of items) {
-      if (!g[it.category]) g[it.category] = [];
-      g[it.category].push(it);
-    }
-    return g;
-  }, [items]);
+  // 当前选 sheet 的统计
+  const currentSheetStat = useMemo(() => {
+    if (!selectedSheet) return { total: items.length, codeCount: items.filter(i => i.pay_type === 'code').length };
+    if (selectedSheet === '__unclassified__') return unclassified;
+    return sheets.find(s => s.key === selectedSheet) || { total: 0, codeCount: 0 };
+  }, [selectedSheet, items, sheets, unclassified]);
 
-  // 类别统计（基于当前搜索结果 + pay_type 过滤，但忽略类别选择）
-  const categoryStats = useMemo<CategoryStat[]>(() => {
-    const stats: Record<string, CategoryStat> = {};
-    for (const it of items) {
-      if (!stats[it.category]) stats[it.category] = { category: it.category, total: 0, code_count: 0 };
-      stats[it.category].total++;
-      if (it.pay_type === 'code') stats[it.category].code_count++;
-    }
-    return Object.values(stats).sort((a, b) => b.total - a.total);
-  }, [items]);
-
-  // 总计
-  const totalStats = useMemo(() => {
-    let total = 0, codeCount = 0;
-    for (const it of items) {
-      total++;
-      if (it.pay_type === 'code') codeCount++;
-    }
-    return { total, codeCount };
-  }, [items]);
-
-  // 当前显示的资源列表
+  // 当前显示
   const displayItems = useMemo(() => {
-    if (!selectedCategory) return items.slice(0, 50);  // 选 "全部" 显示前 50
-    return grouped[selectedCategory] || [];
-  }, [items, grouped, selectedCategory]);
+    if (!selectedSheet) return items.slice(0, 100);
+    return items;
+  }, [items, selectedSheet]);
 
   const handleSave = async () => {
     if (!editing || !token) return;
@@ -119,35 +119,41 @@ export default function PayConfigPage() {
       const r = await fetch('/api/admin/pay-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ id: editing.id, pay_type: newPayType, code_price: newPrice }),
+        body: JSON.stringify({
+          id: editing.id,
+          pay_type: newPayType,
+          code_price: newPrice,
+          lumen_cost: newLumen,
+        }),
       });
       const data = await r.json();
       if (data.success) {
         showToast('success', '✅ 已保存');
         setEditing(null);
         load();
+        loadSheets();
       } else {
         showToast('error', data.error || '失败');
       }
     } catch (e: any) { showToast('error', e.message); }
   };
 
-  const handleBatchSet = async (ids: number[], pay_type: string, price: number) => {
+  const handleBatchSet = async (ids: number[], pay_type: string, price: number, lumen: number) => {
     if (!ids.length || !token) return;
-    if (!confirm(`确认将 ${ids.length} 个资源设置为 ${pay_type === 'code' ? `付费 ¥${price}` : '免费'}？`)) return;
+    if (!confirm(`确认将 ${ids.length} 个资源设置为 ${pay_type === 'code' ? `付费 ¥${price} (${lumen} 流明)` : '免费'}？`)) return;
     try {
-      // 并行调 API
       const promises = ids.map(id =>
         fetch('/api/admin/pay-config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ id, pay_type, code_price: price }),
+          body: JSON.stringify({ id, pay_type, code_price: price, lumen_cost: lumen }),
         }).then(r => r.json())
       );
       const results = await Promise.all(promises);
       const okCount = results.filter(r => r.success).length;
       showToast('success', `✅ 批量设置 ${okCount}/${ids.length} 个`);
       load();
+      loadSheets();
     } catch (e: any) { showToast('error', e.message); }
   };
 
@@ -180,8 +186,9 @@ export default function PayConfigPage() {
     showToast('success', `✅ 已复制 ${genResult.codes.length} 个码`);
   };
 
-  // 类别批量操作 state
+  // 批量操作 state
   const [batchPrice, setBatchPrice] = useState(5);
+  const [batchLumen, setBatchLumen] = useState(1);
   const [batchPayType, setBatchPayType] = useState<'code' | 'free'>('code');
 
   return (
@@ -190,7 +197,7 @@ export default function PayConfigPage() {
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
           <button onClick={() => router.push('/admin')} className="p-2 hover:bg-white/10 rounded-lg">←</button>
-          <h1 className="text-2xl font-bold">💰 单资源付费配置</h1>
+          <h1 className="text-2xl font-bold">💎 单资源付费配置</h1>
           <a href="/admin/codes" className="ml-auto text-sm text-violet-400 hover:underline">查看激活码 →</a>
         </div>
 
@@ -202,7 +209,7 @@ export default function PayConfigPage() {
               value={search}
               onChange={e => setSearch(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && load()}
-              placeholder="按名称搜索资源（输入后回车）..."
+              placeholder="按名称/ID 搜索资源（输入后回车）..."
               className="w-full bg-black/40 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-white placeholder-white/40 focus:outline-none focus:border-violet-500/50"
             />
           </div>
@@ -215,87 +222,123 @@ export default function PayConfigPage() {
           <button onClick={load} className="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm flex items-center gap-1">
             <Search className="w-3 h-3" /> 搜索
           </button>
-          <button onClick={() => { setSearch(''); setPayType(''); setSelectedCategory(''); }} className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm">
+          <button onClick={() => { setSearch(''); setPayType(''); setSelectedSheet(''); }} className="px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm">
             <X className="w-3 h-3" /> 清空
           </button>
         </div>
 
         {/* 总览统计 */}
-        <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
           <div className="bg-[#12121a] rounded-xl p-3 border border-white/5">
-            <div className="text-xs text-white/40">当前查询总数</div>
-            <div className="text-xl font-bold mt-0.5">{totalStats.total.toLocaleString()}</div>
+            <div className="text-xs text-white/40">当前 sheet 总数</div>
+            <div className="text-xl font-bold mt-0.5">{currentSheetStat.total.toLocaleString()}</div>
           </div>
           <div className="bg-[#12121a] rounded-xl p-3 border border-yellow-500/20">
             <div className="text-xs text-yellow-300/80">已设置付费</div>
-            <div className="text-xl font-bold mt-0.5 text-yellow-300">{totalStats.codeCount}</div>
+            <div className="text-xl font-bold mt-0.5 text-yellow-300">{currentSheetStat.codeCount}</div>
+          </div>
+          <div className="bg-[#12121a] rounded-xl p-3 border border-fuchsia-500/20">
+            <div className="text-xs text-fuchsia-300/80">总消耗流明</div>
+            <div className="text-xl font-bold mt-0.5 text-fuchsia-300">
+              💎 {displayItems.filter(i => i.pay_type === 'code').reduce((s, i) => s + (i.lumen_cost || 1), 0)}
+            </div>
           </div>
           <div className="bg-[#12121a] rounded-xl p-3 border border-emerald-500/20">
             <div className="text-xs text-emerald-300/80">免费资源</div>
-            <div className="text-xl font-bold mt-0.5 text-emerald-300">{(totalStats.total - totalStats.codeCount).toLocaleString()}</div>
+            <div className="text-xl font-bold mt-0.5 text-emerald-300">
+              {currentSheetStat.total - currentSheetStat.codeCount}
+            </div>
           </div>
         </div>
 
-        {/* 主体: 左类别 + 右列表 */}
-        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
-          {/* 左侧: 类别卡片 */}
+        {/* 主体: 左 sheet 列表 + 右资源列表 */}
+        <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
+          {/* 左侧: sheet 列表 */}
           <div className="bg-[#12121a] rounded-2xl p-3 border border-white/5 max-h-[70vh] overflow-y-auto">
             <div className="text-xs text-white/40 mb-2 px-2 sticky top-0 bg-[#12121a] py-2">
-              📁 类别 ({categoryStats.length})
+              📑 文档 sheet ({sheets.length})
             </div>
             <button
-              onClick={() => setSelectedCategory('')}
-              className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between mb-1 ${!selectedCategory ? 'bg-violet-600/30 border border-violet-500/40' : 'hover:bg-white/5 border border-transparent'}`}
+              onClick={() => setSelectedSheet('')}
+              className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between mb-1 ${!selectedSheet ? 'bg-violet-600/30 border border-violet-500/40' : 'hover:bg-white/5 border border-transparent'}`}
             >
-              <span className="flex items-center gap-2">
-                <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+              <span className="flex items-center gap-2 min-w-0">
+                <Sparkles className="w-3.5 h-3.5 text-violet-400 shrink-0" />
                 <span className="font-medium">全部</span>
               </span>
-              <span className="text-xs text-white/40">{totalStats.total}</span>
+              <span className="text-xs text-white/40 shrink-0">
+                {sheets.reduce((s, sh) => s + sh.total, 0) + unclassified.total}
+              </span>
             </button>
-            {categoryStats.map(stat => (
+            {sheets.map(sh => (
               <button
-                key={stat.category}
-                onClick={() => setSelectedCategory(stat.category)}
-                className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between mb-1 ${selectedCategory === stat.category ? 'bg-violet-600/30 border border-violet-500/40' : 'hover:bg-white/5 border border-transparent'}`}
+                key={sh.key}
+                onClick={() => setSelectedSheet(sh.key)}
+                className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between mb-1 ${selectedSheet === sh.key ? 'bg-violet-600/30 border border-violet-500/40' : 'hover:bg-white/5 border border-transparent'}`}
               >
                 <span className="flex items-center gap-2 min-w-0">
-                  <span className="text-base">{CAT_ICONS[stat.category] || '📁'}</span>
-                  <span className="truncate">{stat.category}</span>
+                  <FileText className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span className="truncate">{sh.name}</span>
                 </span>
                 <span className="text-xs text-white/40 shrink-0">
-                  {stat.code_count > 0 && <span className="text-yellow-300">{stat.code_count}</span>}
-                  {stat.code_count > 0 && ' / '}
-                  <span>{stat.total}</span>
+                  {sh.codeCount > 0 && <span className="text-yellow-300">{sh.codeCount}</span>}
+                  {sh.codeCount > 0 && ' / '}
+                  <span>{sh.total}</span>
                 </span>
               </button>
             ))}
+            {unclassified.total > 0 && (
+              <button
+                onClick={() => setSelectedSheet('__unclassified__')}
+                className={`w-full text-left px-3 py-2 rounded-lg text-sm flex items-center justify-between mb-1 mt-2 border-t border-white/5 pt-2 ${selectedSheet === '__unclassified__' ? 'bg-violet-600/30 border border-violet-500/40' : 'hover:bg-white/5 border border-transparent'}`}
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  <span>📦</span>
+                  <span className="truncate">未分类 (原盘等)</span>
+                </span>
+                <span className="text-xs text-white/40 shrink-0">
+                  {unclassified.codeCount > 0 && <span className="text-yellow-300">{unclassified.codeCount}</span>}
+                  {unclassified.codeCount > 0 && ' / '}
+                  <span>{unclassified.total}</span>
+                </span>
+              </button>
+            )}
           </div>
 
           {/* 右侧: 资源列表 */}
           <div className="bg-[#12121a] rounded-2xl p-4 border border-white/5">
             <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
               <h2 className="text-lg font-semibold">
-                {selectedCategory ? `${CAT_ICONS[selectedCategory] || '📁'} ${selectedCategory}` : '📋 全部资源'}
-                <span className="text-sm text-white/40 font-normal ml-2">({displayItems.length} 条)</span>
+                {selectedSheet === '__unclassified__' ? '📦 未分类' :
+                 selectedSheet ? `📑 ${selectedSheet}` : '📋 全部资源'}
+                <span className="text-sm text-white/40 font-normal ml-2">({displayItems.length} 条{!selectedSheet && displayItems.length >= 100 ? '+' : ''})</span>
               </h2>
-              {selectedCategory && (
-                <div className="flex items-center gap-2 text-xs">
+              {selectedSheet && displayItems.length > 0 && (
+                <div className="flex items-center gap-2 text-xs flex-wrap">
                   <span className="text-white/40">批量:</span>
                   <select value={batchPayType} onChange={e => setBatchPayType(e.target.value as any)} className="bg-black/40 border border-white/10 rounded px-2 py-1 text-white">
                     <option value="code">付费</option>
                     <option value="free">免费</option>
                   </select>
                   {batchPayType === 'code' && (
-                    <input type="number" min="0" max="9999" step="0.5" value={batchPrice}
-                      onChange={e => setBatchPrice(parseFloat(e.target.value) || 0)}
-                      className="bg-black/40 border border-white/10 rounded px-2 py-1 w-16 text-white" />
+                    <>
+                      <input type="number" min="0" max="9999" step="0.5" value={batchPrice}
+                        onChange={e => setBatchPrice(parseFloat(e.target.value) || 0)}
+                        className="bg-black/40 border border-white/10 rounded px-2 py-1 w-16 text-white"
+                        title="起步价" />
+                      <span className="text-white/40">¥</span>
+                      <input type="number" min="1" max="999" value={batchLumen}
+                        onChange={e => setBatchLumen(parseInt(e.target.value) || 1)}
+                        className="bg-black/40 border border-white/10 rounded px-2 py-1 w-14 text-white"
+                        title="消耗流明" />
+                      <span className="text-white/40">流明</span>
+                    </>
                   )}
                   <button
-                    onClick={() => handleBatchSet(displayItems.map(i => i.id), batchPayType, batchPayType === 'code' ? batchPrice : 0)}
+                    onClick={() => handleBatchSet(displayItems.map(i => i.id), batchPayType, batchPayType === 'code' ? batchPrice : 0, batchPayType === 'code' ? batchLumen : 0)}
                     className="px-2 py-1 bg-violet-600 hover:bg-violet-500 rounded text-white text-xs"
                   >
-                    全部设为{batchPayType === 'code' ? `¥${batchPrice}` : '免费'}
+                    全部设为{batchPayType === 'code' ? `¥${batchPrice} / ${batchLumen}💎` : '免费'}
                   </button>
                 </div>
               )}
@@ -305,19 +348,24 @@ export default function PayConfigPage() {
               <div className="text-center py-12 text-white/40">加载中...</div>
             ) : displayItems.length === 0 ? (
               <div className="text-center py-12 text-white/40 text-sm">
-                {selectedCategory ? `${selectedCategory} 暂无符合条件的资源` : '暂无数据'}
+                {selectedSheet ? `${selectedSheet === '__unclassified__' ? '未分类' : selectedSheet} 暂无符合条件的资源` : '暂无数据'}
               </div>
             ) : (
               <div className="space-y-2 max-h-[65vh] overflow-y-auto pr-2">
                 {displayItems.map(item => (
                   <div key={item.id} className="flex items-center gap-3 p-2.5 bg-white/5 rounded-lg hover:bg-white/10 group">
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate flex items-center gap-2">
-                        {item.name}
+                      <div className="text-sm font-medium truncate flex items-center gap-2 flex-wrap">
+                        <span className="truncate max-w-[40ch]">{item.name}</span>
                         {item.pay_type === 'code' ? (
-                          <span className="px-1.5 py-0.5 bg-yellow-500/20 text-yellow-300 rounded text-xs shrink-0 flex items-center gap-1">
-                            <Lock className="w-2.5 h-2.5" /> ¥{item.code_price}
-                          </span>
+                          <>
+                            <span className="px-1.5 py-0.5 bg-yellow-500/20 text-yellow-300 rounded text-xs shrink-0 flex items-center gap-1">
+                              <Lock className="w-2.5 h-2.5" /> ¥{item.code_price}
+                            </span>
+                            <span className="px-1.5 py-0.5 bg-fuchsia-500/20 text-fuchsia-300 rounded text-xs shrink-0 flex items-center gap-1">
+                              <Coins className="w-2.5 h-2.5" /> {item.lumen_cost} 流明
+                            </span>
+                          </>
                         ) : (
                           <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 rounded text-xs shrink-0 flex items-center gap-1">
                             <Unlock className="w-2.5 h-2.5" /> 免费
@@ -325,14 +373,19 @@ export default function PayConfigPage() {
                         )}
                       </div>
                       <div className="text-xs text-white/40 mt-0.5">
-                        #{item.id} · {item.source || '?'} · {item.category}
+                        #{item.id} · {item.source || '?'} · {item.doc_sheet || item.category || '?'}
                         {item.tmdb_id && !['NOMATCH', 'GARBLED'].includes(item.tmdb_id) && (
                           <span className="ml-2">TMDB: {item.tmdb_id}</span>
                         )}
                       </div>
                     </div>
                     <div className="flex gap-1 shrink-0">
-                      <button onClick={() => { setEditing(item); setNewPayType(item.pay_type); setNewPrice(item.code_price); }}
+                      <button onClick={() => {
+                        setEditing(item);
+                        setNewPayType(item.pay_type);
+                        setNewPrice(item.code_price);
+                        setNewLumen(item.lumen_cost || 1);
+                      }}
                         className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-xs">
                         <Settings className="w-3 h-3" />
                       </button>
@@ -363,6 +416,11 @@ export default function PayConfigPage() {
                 <button onClick={() => setEditing(null)} className="p-1 hover:bg-white/10 rounded"><X className="w-4 h-4" /></button>
               </div>
               <div className="text-sm text-white/60 mb-4 truncate">#{editing.id} · {editing.name}</div>
+              {editing.doc_sheet && (
+                <div className="text-xs text-cyan-300 mb-3 flex items-center gap-1">
+                  <FileText className="w-3 h-3" /> 所属 sheet: <b>{editing.doc_sheet}</b>
+                </div>
+              )}
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm text-white/60 mb-2">付费类型</label>
@@ -378,13 +436,24 @@ export default function PayConfigPage() {
                   </div>
                 </div>
                 {newPayType === 'code' && (
-                  <div>
-                    <label className="block text-sm text-white/60 mb-2">起步价 (¥)</label>
-                    <input type="number" min="0" max="9999" step="0.5" value={newPrice}
-                      onChange={e => setNewPrice(parseFloat(e.target.value) || 0)}
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white" />
-                    <div className="text-xs text-white/40 mt-1">建议: 5-10 (单资源)</div>
-                  </div>
+                  <>
+                    <div>
+                      <label className="block text-sm text-white/60 mb-2">起步价 (¥)</label>
+                      <input type="number" min="0" max="9999" step="0.5" value={newPrice}
+                        onChange={e => setNewPrice(parseFloat(e.target.value) || 0)}
+                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white" />
+                      <div className="text-xs text-white/40 mt-1">建议: 5-10 (单资源起步价)</div>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-white/60 mb-2 flex items-center gap-1">
+                        <Coins className="w-3.5 h-3.5 text-fuchsia-400" /> 所需流明 (1-999)
+                      </label>
+                      <input type="number" min="1" max="999" value={newLumen}
+                        onChange={e => setNewLumen(parseInt(e.target.value) || 1)}
+                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white" />
+                      <div className="text-xs text-white/40 mt-1">用户解锁时消耗的流明数 (流明通过兑换码充值)</div>
+                    </div>
+                  </>
                 )}
               </div>
               <div className="flex gap-2 mt-6 justify-end">
