@@ -91,7 +91,7 @@ export default function LibraryPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [unlocking, setUnlocking] = useState<Set<number>>(new Set());
   const [lumenBalance, setLumenBalance] = useState(0);
-  const [lumenModal, setLumenModal] = useState<{ cost: number; balance: number; resourceName: string } | null>(null);
+  const [lumenModal, setLumenModal] = useState<{ cost: number; balance: number; resourceName: string; creditAvailable?: number; resourceId?: number } | null>(null);
   let toastCnt = 0;
 
   // 读 user 组
@@ -249,7 +249,17 @@ export default function LibraryPage() {
     }
     // 2026-07-28: 流明不足预检 (跟服务端 402 错对应, 直接弹购买提示)
     if (userGroup !== 'admin' && lumenBalance < (item.lumenCost || 1)) {
-      setLumenModal({ cost: item.lumenCost || 1, balance: lumenBalance, resourceName: item.name });
+      // 2026-07-29: 拉 weekly credit 看能不能用周额度
+      let creditAvailable = 0;
+      try {
+        const tk = localStorage.getItem('token');
+        const r = await fetch('/api/user/weekly-credit', { headers: { Authorization: 'Bearer ' + (tk || '') } });
+        if (r.ok) {
+          const d = await r.json();
+          creditAvailable = d.left || 0;
+        }
+      } catch {}
+      setLumenModal({ cost: item.lumenCost || 1, balance: lumenBalance, resourceName: item.name, creditAvailable });
       return;
     }
     if (!confirm(`确认消耗 ${item.lumenCost || 1} 流明解锁此资源？`)) return;
@@ -269,7 +279,7 @@ export default function LibraryPage() {
         setTimeout(() => window.open(item.link, '_blank'), 500);
       } else if (d.need === 'lumen') {
         // 2026-07-28: 服务端检测流明不足 (并发场景), 弹购买提示
-        setLumenModal({ cost: d.cost || item.lumenCost || 1, balance: d.balance ?? 0, resourceName: item.name });
+        setLumenModal({ cost: d.cost || item.lumenCost || 1, balance: d.balance ?? 0, resourceName: item.name, creditAvailable: d.credit_available || 0 });
       } else {
         addToast('error', d.error || '解锁失败');
       }
@@ -792,6 +802,32 @@ export default function LibraryPage() {
                 </div>
               </div>
               <div className="space-y-2">
+                {/* 2026-07-29: 周免费额度手动触发 (VIP + credit_available > 0) */}
+                {(lumenModal as any).creditAvailable > 0 && (
+                  <button
+                    onClick={async () => {
+                      const item = lumenModal;
+                      setLumenModal(null);
+                      const token = localStorage.getItem('token');
+                      const r = await fetch('/api/resources/unlock', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ resourceId: item.resourceId, use_credit: true }),
+                      });
+                      const data = await r.json();
+                      if (data.success) {
+                        addToast('success', data.message || '✅ 周免费额度解锁');
+                        setItems(prev => prev.map(it => it.id === item.resourceId ? { ...it, unlocked: true } : it));
+                        if (data.lumen_balance !== undefined) setLumenBalance(data.lumen_balance);
+                      } else {
+                        addToast('error', data.error || '解锁失败');
+                      }
+                    }}
+                    className="block w-full text-center px-4 py-3 bg-gradient-to-r from-cyan-500 to-blue-500 hover:opacity-90 rounded-xl text-base font-semibold text-white"
+                  >
+                    🎁 用周免费额度 (还剩 {(lumenModal as any).creditAvailable} 次)
+                  </button>
+                )}
                 <a href="/activate" onClick={() => setLumenModal(null)}
                   className="block w-full text-center px-4 py-3 bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:opacity-90 rounded-xl text-base font-semibold text-white">
                   🎫 立即兑换流明码

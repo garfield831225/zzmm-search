@@ -19,16 +19,18 @@ function getUserId(authHeader: string | null): { userId?: string; email?: string
   }
 }
 
-// v2.0 资源解锁: VIP 每周免费额度 + 流明消耗 (2026-07-28 加 credit 优先)
+// v2.1 资源解锁: 流明消耗 + 周免费额度手动用 (2026-07-29 改)
+// 2026-07-29: 周免费额度不再自动用, 需 use_credit=true 显式触发
 // 解锁优先级:
 //   1. admin → 免流明免额度
-//   2. VIP/admin → 优先用周免费额度 (xx_user_weekly_credit.used < total) → status='credit'
+//   2. use_credit=true (VIP 显式) + 周额度还有 → 0 流明 + status='credit'
 //   3. 否则 → 用流明 (lumen_balance >= lumen_cost) → status='lumen'
-//   4. 流明不足 → 返 402, need='lumen'
+//   4. 流明不足 → 返 402, need='lumen', 附带 credit_left 让前端弹"用周额度"按钮
 // 业务规则:
 //   - VIP 每周 1 个免费解锁 (week_start=周日, 周日 0 点重置)
 //   - basic/user 没周额度, 只能用流明
-async function unlockWithLumen(sql: any, userId: string, resourceId: number) {
+//   - 周额度只能手动 use_credit=true 才用, 不自动扣
+async function unlockWithLumen(sql: any, userId: string, resourceId: number, useCredit: boolean = false) {
   // 1. 查资源 + lumen_cost
   const resources = await sql`SELECT id, name, lumen_cost, access_level FROM xx_resources WHERE id = ${resourceId} AND status = 'active' LIMIT 1` as any[];
   if (!resources[0]) return { error: '资源不存在', status: 404 };
@@ -49,7 +51,7 @@ async function unlockWithLumen(sql: any, userId: string, resourceId: number) {
   const existing = await sql`SELECT id FROM xx_user_unlocks WHERE user_id = ${userId} AND resource_id = ${resourceId} LIMIT 1` as any[];
   if (existing[0]) return { error: '您已解锁过此资源', status: 409 };
 
-  // 4. 2026-07-28: 算本周周日 (按中国时区 UTC+8, 避免 Neon serverless UTC 跨日错乱)
+  // 4. 算本周周日 (按中国时区 UTC+8)
   const nowMs = Date.now();
   const chinaMs = nowMs + 8 * 3600 * 1000;
   const chinaDate = new Date(chinaMs);
@@ -60,11 +62,9 @@ async function unlockWithLumen(sql: any, userId: string, resourceId: number) {
   const weekStartChina = new Date(Date.UTC(cy, cm, cd - dow));
   const weekStartDate = weekStartChina.toISOString().slice(0, 10);
 
-  // 5. VIP 优先扣周免费额度
-  let usedCredit = false;
-  let creditLeft = 0;
+  // 5. 查周免费额度 (admin 跳过; VIP 看周额度; basic/user 没额度)
+  let creditAvailable = 0;
   if (isVip && !isAdmin) {
-    // UPSERT 拿/创建本周额度记录
     const creditRow = await sql`
       INSERT INTO xx_user_weekly_credit (user_id, week_start, used, total, last_reset_at)
       VALUES (${userId}, ${weekStartDate}, 0, 1, NOW())
@@ -85,31 +85,37 @@ async function unlockWithLumen(sql: any, userId: string, resourceId: number) {
     ` as any[];
     const used = creditRow[0]?.used ?? 0;
     const total = creditRow[0]?.total ?? 1;
-    creditLeft = Math.max(0, total - used);
-    if (used < total) {
-      usedCredit = true;
-    }
+    creditAvailable = Math.max(0, total - used);
   }
 
-  // 6. 检查流明余额 (admin 跳过; credit 模式不扣流明, 仍需检查够不够 — 实际不检查, credit 模式)
-  if (!isAdmin && !usedCredit && (u.lumen_balance || 0) < lumenCost) {
+  // 6. 决定用 credit 还是 lumen
+  let useCreditNow = false;
+  if (isAdmin) {
+    useCreditNow = false;  // admin 走特殊分支
+  } else if (useCredit && isVip && creditAvailable > 0) {
+    // 用户显式要求用 credit, 且 VIP 还有额度
+    useCreditNow = true;
+  }
+  // 其他情况: 默认走流明
+
+  // 7. 检查流明余额 (admin 跳过; useCreditNow=true 跳过)
+  if (!isAdmin && !useCreditNow && (u.lumen_balance || 0) < lumenCost) {
     return {
       error: `流明不足, 需要 ${lumenCost} 个, 当前 ${u.lumen_balance || 0}`,
       need: 'lumen', cost: lumenCost, balance: u.lumen_balance || 0, status: 402,
-      credit_left: creditLeft,  // 告诉前端本周还能用几次免费额度
+      credit_available: creditAvailable,  // 告诉前端本周还能用几次免费额度
     };
   }
 
-  // 7. 扣额度/流明 + 写 unlock 记录
+  // 8. 扣额度/流明 + 写 unlock 记录
   try {
     let balanceAfter = u.lumen_balance || 0;
     let unlockSource: 'admin' | 'credit' | 'lumen' = 'lumen';
     if (isAdmin) {
-      // admin: 写 unlock 记录 (lumen_cost=0), 不扣流明不扣 credit
       await sql`INSERT INTO xx_user_unlocks (user_id, resource_id, lumen_cost, unlocked_at) VALUES (${userId}, ${resourceId}, 0, NOW())`;
       unlockSource = 'admin';
-    } else if (usedCredit) {
-      // VIP 用周免费额度: 写 lumen_cost=0 标记是 credit 解锁, 扣 credit.used+1
+    } else if (useCreditNow) {
+      // VIP 显式用周免费额度
       await sql`INSERT INTO xx_user_unlocks (user_id, resource_id, lumen_cost, unlocked_at) VALUES (${userId}, ${resourceId}, 0, NOW())`;
       await sql`UPDATE xx_user_weekly_credit SET used = used + 1, last_used_at = NOW() WHERE user_id = ${userId}`;
       unlockSource = 'credit';
@@ -121,22 +127,17 @@ async function unlockWithLumen(sql: any, userId: string, resourceId: number) {
       await sql`INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description)
                 VALUES (${userId}, ${-lumenCost}, ${balanceAfter}, 'debit', null, ${'resource_unlock:' + resourceId})`.catch(() => {});
     }
-    // 写流水: 记录 credit 解锁
-    if (usedCredit) {
-      await sql`INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description)
-                VALUES (${userId}, 0, ${u.lumen_balance || 0}, 'credit', null, ${'weekly_credit_unlock:' + resourceId})`.catch(() => {});
-    }
     return {
       success: true,
       message:
         unlockSource === 'admin' ? '👑 admin 免流明打开' :
-        unlockSource === 'credit' ? `✅ 周免费额度解锁! 本周还剩 ${Math.max(0, creditLeft - 1)} 次` :
+        unlockSource === 'credit' ? `✅ 周免费额度解锁! 本周还剩 ${creditAvailable - 1} 次` :
         `✅ 解锁成功! 扣 ${lumenCost} 流明`,
       resource: { id: r.id, name: r.name },
       unlock_source: unlockSource,
-      lumen_cost: isAdmin || usedCredit ? 0 : lumenCost,
+      lumen_cost: (isAdmin || useCreditNow) ? 0 : lumenCost,
       lumen_balance_after: balanceAfter,
-      credit_left: usedCredit ? Math.max(0, creditLeft - 1) : creditLeft,
+      credit_available: isVip ? Math.max(0, creditAvailable - (useCreditNow ? 1 : 0)) : 0,
       is_admin_bypass: isAdmin,
     };
   } catch (e: any) {
@@ -149,7 +150,7 @@ export async function POST(req: NextRequest) {
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   const body = await req.json().catch(() => ({}));
-  const { code, resource_id, resourceId, use_lumen } = body;
+  const { code, resource_id, resourceId, use_lumen, use_credit } = body;
   const finalResourceId = resource_id || resourceId;
 
   if (!finalResourceId || !Number.isInteger(Number(finalResourceId))) {
@@ -158,10 +159,10 @@ export async function POST(req: NextRequest) {
 
   const sql = neon(process.env.DATABASE_URL || '');
 
-  // v1.2 模式 1: VIP + 流明消耗 (use_lumen=true 或没传 code)
-  if (!code || use_lumen === true) {
-    const result = await unlockWithLumen(sql, auth.userId!, Number(finalResourceId));
-    if (result.error) return NextResponse.json({ error: result.error, need: result.need, cost: result.cost, balance: result.balance }, { status: result.status });
+  // v2.1 模式 1: 流明消耗 / 周额度 (use_lumen=true / use_credit=true / 没传 code)
+  if (!code || use_lumen === true || use_credit === true) {
+    const result = await unlockWithLumen(sql, auth.userId!, Number(finalResourceId), use_credit === true);
+    if (result.error) return NextResponse.json({ error: result.error, need: result.need, cost: result.cost, balance: result.balance, credit_available: (result as any).credit_available }, { status: result.status });
     return NextResponse.json(result);
   }
 
