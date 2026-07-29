@@ -36,6 +36,7 @@ interface BatchStat {
 }
 
 const VIP_TEMPLATES = [
+  { plan: 'vip_trial',   label: '试用 1 天', emoji: '⏰', price: 0,   color: 'from-stone-500 to-slate-600' },
   { plan: 'vip_30d',     label: '30 天',   emoji: '🎫', price: 12,  color: 'from-sky-500 to-blue-600' },
   { plan: 'vip_180d',    label: '半年',    emoji: '🎟️', price: 58,  color: 'from-violet-500 to-purple-600' },
   { plan: 'vip_365d',    label: '年卡',    emoji: '🎁', price: 98,  color: 'from-pink-500 to-rose-600' },

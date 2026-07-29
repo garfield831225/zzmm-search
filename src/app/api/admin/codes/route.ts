@@ -22,6 +22,7 @@ const VIP_PLANS: Record<string, { plan_id: string; duration: number; label: stri
   vip_180d:    { plan_id: 'VIP-180D',    duration: 180,  label: 'VIP 半年',   default_price: 58 },
   vip_365d:    { plan_id: 'VIP-365D',    duration: 365,  label: 'VIP 年卡',   default_price: 98 },
   vip_forever: { plan_id: 'VIP-FOREVER', duration: 0,    label: 'VIP 永久',   default_price: 198 },
+  vip_trial:   { plan_id: 'VIP-TRIAL-1D', duration: 1,   label: 'VIP 试用 1 天', default_price: 0 },
 };
 
 function genCodeFull(channel: string): string {
