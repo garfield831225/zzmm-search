@@ -1,5 +1,6 @@
 // 2026-07-24 zzmm-vip 影视区 - 列表 API
-// 鉴权: 必须 basic/vip/admin (走 JWT payload.group, 跟 middleware 一致)
+// 鉴权: 必须 vip/admin (走 JWT payload.group, 跟 middleware 一致)
+// 2026-07-29: 收紧到 vip/admin (basic 看到 /vip 升级提示页, 不再返数据)
 // 排序: 有播放链接的优先, 再按 popularity desc
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
@@ -9,7 +10,7 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
-const ALLOWED = new Set(['basic', 'vip', 'admin']);
+const ALLOWED = new Set(['vip', 'admin']);
 
 function getGroup(req: NextRequest): string | null {
   const auth = req.headers.get('authorization');

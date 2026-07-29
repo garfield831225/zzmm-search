@@ -62,6 +62,7 @@ const SORT_TABS: { key: SortKey; label: string; tip: string }[] = [
 export default function VipPage() {
   const router = useRouter();
   const [authChecked, setAuthChecked] = useState(false);
+  const [userGroup, setUserGroup] = useState<string>('');  // 2026-07-29: basic 看到升级提示
   const [mediaType, setMediaType] = useState<MediaTab>('');
   const [sort, setSort] = useState<SortKey>('smart');
   const [query, setQuery] = useState('');  // 2026-07-26: 搜索关键词
@@ -77,12 +78,18 @@ export default function VipPage() {
   const latestReq = useRef(0);
 
   // 鉴权 - localStorage 检查
+  // 2026-07-29: basic 也允许进入 (navbar 入口可见), 但 basic 看到升级提示页, vip/admin 看到资源列表
   useEffect(() => {
     const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token');
     if (!t) {
       router.replace('/login?redirect=/vip');
       return;
     }
+    // 解析 user_group
+    try {
+      const u = JSON.parse(localStorage.getItem('user') || '{}');
+      setUserGroup(String(u.group || '').toLowerCase());
+    } catch {}
     setAuthChecked(true);
   }, [router]);
 
@@ -146,6 +153,42 @@ export default function VipPage() {
     if (loading || !hasMore) return;
     fetchPage(page + 1, true);
   };
+
+  // 2026-07-29: basic 用户看到升级提示页 (不是资源列表)
+  if (authChecked && userGroup === 'basic') {
+    return (
+      <div className="min-h-screen bg-[#0a0a0f] text-white relative flex items-center justify-center p-4">
+        <div className="bg-[#12121a] rounded-2xl p-8 md:p-10 max-w-md w-full border border-amber-500/20 text-center">
+          <div className="text-5xl mb-4">👑</div>
+          <h1 className="text-2xl font-bold mb-2 bg-gradient-to-r from-amber-300 via-pink-300 to-violet-300 bg-clip-text text-transparent">
+            VIP 影视区
+          </h1>
+          <p className="text-sm text-white/60 mb-6 leading-relaxed">
+            基础会员可正常浏览主站影视资源<br />
+            <span className="text-amber-300">VIP 影视区</span> 需升级会员后解锁
+          </p>
+          <div className="bg-white/5 rounded-xl p-4 mb-6 text-left text-sm space-y-1.5">
+            <div className="flex justify-between text-white/60"><span>月度</span><span className="text-amber-300 font-medium">¥15</span></div>
+            <div className="flex justify-between text-white/60"><span>季度</span><span className="text-amber-300 font-medium">¥40</span></div>
+            <div className="flex justify-between text-white/60"><span>年度 (热销)</span><span className="text-amber-300 font-medium">¥150</span></div>
+            <div className="flex justify-between text-white/60"><span>永久 (至尊)</span><span className="text-amber-300 font-medium">¥388</span></div>
+          </div>
+          <a
+            href="/upgrade"
+            className="block w-full py-3 bg-gradient-to-r from-amber-500 to-pink-500 hover:opacity-90 rounded-xl font-semibold transition mb-3"
+          >
+            🛒 前往闲鱼选购
+          </a>
+          <button
+            onClick={() => router.push('/')}
+            className="block w-full py-2.5 bg-white/5 hover:bg-white/10 rounded-xl text-sm text-white/70 transition"
+          >
+            ← 返回首页
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white relative">

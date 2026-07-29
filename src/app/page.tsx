@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv, Shield, Crown } from 'lucide-react';
+import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv, Shield, Crown, User } from 'lucide-react';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
@@ -447,8 +447,13 @@ export default function HomePage() {
               {user ? (
                 <div className="flex items-center gap-2">
                   <span className="px-3 py-1.5 bg-violet-600/30 rounded-lg text-sm text-violet-300">{user.username}</span>
-                  {/* 2026-07-25 重新启用: VIP 影视区入口 (只 vip + admin 看到, basic 看不到) */}
-                  {(user?.group === 'vip' || user?.group === 'admin') && (
+                  {/* 2026-07-29: 个人中心入口 (所有已登录用户) */}
+                  <Link href="/profile" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-cyan-500/20 to-blue-500/20 hover:from-cyan-500/40 hover:to-blue-500/40 rounded-lg text-sm transition-all duration-200 text-cyan-200 hover:shadow-[0_0_12px_rgba(34,211,238,0.4)] hover:scale-105 border border-cyan-400/30">
+                    <User size={14} className="transition-transform group-hover:scale-110" />
+                    <span>个人中心</span>
+                  </Link>
+                  {/* 2026-07-29: VIP 影视区入口 (basic/vip/admin 都能看见, basic 点进去看升级提示) */}
+                  {['basic', 'vip', 'admin'].includes(user?.group || '') && (
                     <Link href="/vip" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-pink-500/20 hover:from-amber-500/40 hover:to-pink-500/40 rounded-lg text-sm transition-all duration-200 text-amber-200 hover:shadow-[0_0_12px_rgba(245,158,11,0.4)] hover:scale-105 border border-amber-400/30">
                       <Crown size={14} className="transition-transform group-hover:scale-110" />
                       <span>VIP 影视区</span>
