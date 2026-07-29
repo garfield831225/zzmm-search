@@ -796,6 +796,11 @@ export default function LibraryPage() {
                   className="block w-full text-center px-4 py-3 bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:opacity-90 rounded-xl text-base font-semibold text-white">
                   🎫 立即兑换流明码
                 </a>
+                {/* 2026-07-29: 闲鱼买流明入口 (2元/10流明) */}
+                <a href="/upgrade#lumen" target="_blank" rel="noopener noreferrer" onClick={() => setLumenModal(null)}
+                  className="block w-full text-center px-4 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:opacity-90 rounded-xl text-sm font-semibold text-black">
+                  🐟 闲鱼买流明 (¥2/10流明) →
+                </a>
                 <a href="/profile" onClick={() => setLumenModal(null)}
                   className="block w-full text-center px-4 py-2.5 bg-white/10 hover:bg-white/20 rounded-xl text-sm text-white/80">
                   查看我的流明余额 →

@@ -290,6 +290,10 @@ export default function ProfilePage() {
           {/* 积分 / 流明 */}
           <div className="rounded-2xl p-4 md:p-5 border border-amber-500/20 bg-gradient-to-br from-amber-500/5 to-yellow-500/5 relative overflow-hidden">
             <div className="absolute top-2 right-2 w-12 h-12 rounded-full bg-amber-500/10 blur-xl" />
+            {/* 2026-07-29: 加"充值"按钮 (跳 /upgrade 买流明) */}
+            <Link href="/upgrade#lumen" className="absolute top-2 right-2 z-10 px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-md text-[10px] text-amber-200 font-medium transition">
+              ➕ 充值
+            </Link>
             <div className="text-xs text-amber-300/80 mb-1">积 分</div>
             <div className="text-2xl md:text-3xl font-bold text-amber-300">{lumenBalance}</div>
             <div className="text-[10px] text-white/40 mt-1">可用流明</div>

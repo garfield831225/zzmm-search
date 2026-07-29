@@ -139,6 +139,59 @@ export default function UpgradePage() {
           ))}
         </div>
 
+        {/* 2026-07-29: 流明套餐 (单资源付费 - 用 lumen 解锁 code 资源) */}
+        <div id="lumen" className="bg-gradient-to-br from-amber-500/10 via-yellow-500/10 to-amber-500/5 border border-amber-500/20 rounded-2xl p-5 md:p-6 mb-6 scroll-mt-20">
+          <div className="flex items-start gap-3 mb-3">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-yellow-500 flex items-center justify-center text-2xl">
+              💰
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="font-bold text-lg">流明套餐</h2>
+                <span className="px-2 py-0.5 bg-amber-500/20 text-amber-200 text-[10px] rounded-full">单资源付费</span>
+              </div>
+              <p className="text-xs text-white/50">解锁单条付费资源（资源详情页带 💰 徽章的）</p>
+            </div>
+          </div>
+
+          <div className="bg-black/30 rounded-xl p-4 mb-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <div className="text-2xl font-bold text-amber-300">¥2 = 10 流明</div>
+                <div className="text-[10px] text-white/40 mt-0.5">每个流明 ≈ 0.2 元 · 单资源 1-10 流明解锁</div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-white/60">举例</div>
+                <div className="text-[10px] text-white/40 mt-0.5">5 流明解锁 1 条资源 = 1 元</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 mb-4 text-xs">
+            <div className="bg-white/5 rounded-lg p-2.5 text-center">
+              <div className="text-white/40 mb-0.5">什么资源</div>
+              <div className="font-medium text-amber-200">💰 单条付费</div>
+            </div>
+            <div className="bg-white/5 rounded-lg p-2.5 text-center">
+              <div className="text-white/40 mb-0.5">怎么用</div>
+              <div className="font-medium">解锁扣流明</div>
+            </div>
+            <div className="bg-white/5 rounded-lg p-2.5 text-center">
+              <div className="text-white/40 mb-0.5">有效期</div>
+              <div className="font-medium">1 年</div>
+            </div>
+          </div>
+
+          <a
+            href={SHOP_PRODUCT_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full block text-center py-3 bg-gradient-to-r from-amber-500 to-yellow-500 text-black font-bold rounded-xl hover:opacity-90 transition"
+          >
+            🐟 前往闲鱼买流明
+          </a>
+        </div>
+
         {/* 主操作卡 */}
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
