@@ -69,19 +69,20 @@ export async function GET(req: NextRequest) {
     let orderBy = '';
     switch (sort) {
       case 'popular':
-        orderBy = 'r.popularity DESC NULLS LAST';
+        // 2026-07-30: xingfan 资源在没 link 的里面排前, 然后按 popularity
+        orderBy = `EXISTS(SELECT 1 FROM xx_vip_links l WHERE l.resource_id = r.id AND l.status = 'ok') DESC, CASE WHEN r.source = 'xingfan' THEN 0 ELSE 1 END, r.popularity DESC NULLS LAST`;
         break;
       case 'rating':
-        orderBy = 'r.vote_score DESC NULLS LAST, r.vote_count DESC';
+        orderBy = `EXISTS(SELECT 1 FROM xx_vip_links l WHERE l.resource_id = r.id AND l.status = 'ok') DESC, CASE WHEN r.source = 'xingfan' THEN 0 ELSE 1 END, r.vote_score DESC NULLS LAST, r.vote_count DESC`;
         break;
       case 'newest':
-        orderBy = 'COALESCE(r.release_date, r.first_air_date) DESC NULLS LAST';
+        // 2026-07-30: link 资源排前, xingfan 资源在没 link 里用 id DESC
+        orderBy = `EXISTS(SELECT 1 FROM xx_vip_links l WHERE l.resource_id = r.id AND l.status = 'ok') DESC, CASE WHEN r.source = 'xingfan' THEN 0 ELSE 1 END, r.id DESC`;
         break;
       case 'smart':
       default:
-        // 2026-07-26: 整体排序 (有 link 全放一起, 再放没 link), 不能分页错位
-        // 用 EXISTS 子查询, 避免 LEFT JOIN 影响 sort 性能
-        orderBy = `EXISTS(SELECT 1 FROM xx_vip_links l WHERE l.resource_id = r.id AND l.status = 'ok') DESC, r.popularity DESC NULLS LAST`;
+        // 2026-07-30: link 资源排前 (不管 source), 然后 xingfan 在没 link 里按 id desc
+        orderBy = `EXISTS(SELECT 1 FROM xx_vip_links l WHERE l.resource_id = r.id AND l.status = 'ok') DESC, CASE WHEN r.source = 'xingfan' THEN 0 ELSE 1 END, r.id DESC`;
     }
 
     // 2026-07-25: 拆 count + list + links 三段查询, 避免 LEFT JOIN 子查询每行跑一次
@@ -96,7 +97,7 @@ export async function GET(req: NextRequest) {
         r.id, r.tmdb_id, r.media_type, r.title, r.original_title,
         r.poster_path, r.backdrop_path, r.vote_average, r.vote_count,
         r.release_date, r.first_air_date, r.popularity, r.genre_ids,
-        r.season_count, r.episode_count, r.status, r.updated_at
+        r.season_count, r.episode_count, r.status, r.updated_at, r.source
       FROM xx_vip_resources r
       ${countWhere}
       ORDER BY ${orderBy}
@@ -162,8 +163,14 @@ export async function GET(req: NextRequest) {
         mediaType: r.media_type,
         title: r.title,
         originalTitle: r.original_title,
-        posterUrl: r.poster_path ? `${TMDB_IMG}/w500${r.poster_path}` : null,
-        backdropUrl: r.backdrop_path ? `${TMDB_IMG}/w1280${r.backdrop_path}` : null,
+        source: r.source,  // 2026-07-30: 区分来源 (xingfan/tmdb)
+        // 2026-07-30: xingfan poster_path 是完整 URL, tmdb 是 path, 区分处理
+        posterUrl: r.poster_path
+          ? (r.poster_path.startsWith('http') ? r.poster_path : `${TMDB_IMG}/w500${r.poster_path}`)
+          : null,
+        backdropUrl: r.backdrop_path
+          ? (r.backdrop_path.startsWith('http') ? r.backdrop_path : `${TMDB_IMG}/w1280${r.backdrop_path}`)
+          : null,
         voteAverage: r.vote_average ? Number(r.vote_average) : null,
         voteCount: r.vote_count ? Number(r.vote_count) : 0,
         releaseDate: r.release_date || r.first_air_date || null,
