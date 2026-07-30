@@ -370,16 +370,37 @@ export default function HomePage() {
     if (item.tmdbId) {
       setDetailLoading(true);
       try {
-        const [relRes, credRes] = await Promise.all([
+        const tmdbTypeGuess = item.category === '连载' || item.category === '剧集' || item.category === '动漫' || item.category === '综艺' ? 'tv' : 'movie';
+        // 2026-07-31: 加 /api/resource/links-by-tmdb 拿同剧所有 link (按源优先级 + 最新置顶)
+        const [relRes, credRes, linksRes] = await Promise.all([
           fetch(`/api/resource/${item.id}/related`),
-          fetch(`/api/admin/tmdb-credits?tmdbId=${item.tmdbId}&type=${item.category === '连载' || item.category === '剧集' || item.category === '动漫' || item.category === '综艺' ? 'tv' : 'movie'}`),
+          fetch(`/api/admin/tmdb-credits?tmdbId=${item.tmdbId}&type=${tmdbTypeGuess}`),
+          fetch(`/api/resource/links-by-tmdb?tmdb_id=${encodeURIComponent(item.tmdbId)}`),
         ]);
         const relData = await relRes.json();
         const credData = await credRes.json();
+        const linksData = await linksRes.json();
         setRelatedItems(relData.items || []);
         setTmdbType(relData.tmdbType || 'movie');
         if (credData.director || credData.cast) {
           setTmdbCredits(credData);
+        }
+        // 2026-07-31: 用 links-by-tmdb API 覆盖 selectedItem.tmdbLinks (按源优先级 + 最新置顶)
+        if (linksData.links && Array.isArray(linksData.links) && linksData.links.length > 0) {
+          setSelectedItem(prev => prev ? {
+            ...prev,
+            tmdbLinks: linksData.links.map((l: any) => ({
+              id: l.id,
+              source: l.source,
+              url: l.url,
+              password: l.password,
+              size: l.size,
+              accessLevel: l.accessLevel,
+              importChannel: l.importChannel,
+              resourceName: l.name,
+              createdAt: l.createdAt,
+            }))
+          } : prev);
         }
       } catch {}
       setDetailLoading(false);
@@ -993,108 +1014,8 @@ export default function HomePage() {
                       <button onClick={() => setSelectedItem(null)} className="p-1.5 hover:bg-white/10 rounded-lg transition text-white/40 hover:text-white">✕</button>
                     </div>
                   </div>
-                  {/* 2026-07-26: admin 显眼操作条 - 顶部 banner, 红色实心, 比角落小按钮明显 */}
-                  {isAdmin && (
-                    <div className="mb-5 p-3 bg-gradient-to-r from-red-500/15 to-orange-500/15 border-2 border-red-500/40 rounded-xl">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="px-2 py-0.5 bg-red-500 text-white text-[10px] rounded font-bold uppercase tracking-wider">🛠️ admin</span>
-                        <span className="text-xs text-white/70">资源 ID: {selectedItem.id} · 来源: {selectedItem.source} · 链接: {selectedItem.links?.length || 0} 条</span>
-                        <div className="flex gap-2 ml-auto">
-                          <button
-                            onClick={async (e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              if (!confirm(`🗑️ 软删整个资源 (含所有链接)?\n\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}\n来源: ${selectedItem.source}\n链接: ${selectedItem.links?.length || 0} 条\n\n软删 = status='deleted', 可恢复\n不影响其他同名资源\n\nhome / library / titles 三个页面会立即同步消失`)) return;
-                              const token = getToken();
-                              if (!token) {
-                                addToast('error', '❌ 未登录或 token 失效');
-                                return;
-                              }
-                              const r = await fetch(`/api/admin/resources/${selectedItem.id}`, {
-                                method: 'DELETE',
-                                headers: { Authorization: 'Bearer ' + token },
-                              });
-                              const d = await r.json();
-                              if (d.ok) {
-                                addToast('success', `🗑️ 已软删 (${d.subLinks} 条链接, 资源可恢复)`);
-                                setSelectedItem(null);
-                                // 2026-07-26 修 read replica lag: 立即从 items 移除 (不等 search 重拉)
-                                setItems(prev => prev.filter(i => i.id !== selectedItem.id));
-                                setTotal(prev => Math.max(0, prev - 1));
-                                setTimeout(() => fetchItems(1), 500);
-                              } else if (r.status === 401) {
-                                addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
-                              } else if (r.status === 403) {
-                                addToast('error', `❌ 403 需要 admin 权限`);
-                              } else if (r.status === 404) {
-                                // 2026-07-26 修: 404 = 主端已删但 replica 还在返 (read replica lag)
-                                // 用户视角: 资源已不存在, 立即从 UI 移除
-                                addToast('warning', `⚠️ 主端已删 (replica 滞后), 立即移除`);
-                                setSelectedItem(null);
-                                setItems(prev => prev.filter(i => i.id !== selectedItem.id));
-                                setTotal(prev => Math.max(0, prev - 1));
-                                setTimeout(() => fetchItems(1), 500);
-                              } else {
-                                addToast('error', `❌ ${r.status} ${d.error || '删除失败'}`);
-                              }
-                            }}
-                            className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-black rounded-lg text-sm font-bold transition shadow-lg shadow-amber-500/20"
-                            title="软删: status='deleted', search/catalog 看不见, 可恢复">
-                            🗑️ 软删
-                          </button>
-                          <button
-                            onClick={async (e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              // 三级确认, 防止误操作
-                              if (!confirm(`🔥 硬删整个资源?\n\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}\n\n⚠️ 物理删除: 数据从数据库清空, 不可恢复\n⚠️ 同时级联删除 xx_resource_links / xx_link_feedback / xx_publish_log 全部关联行\n⚠️ home / library / titles 三个页面会立即同步消失`)) return;
-                              if (!confirm(`🔥 真的要硬删?\n\n最后一次确认: 删除后无法恢复!\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}`)) return;
-                              const hardConfirm = prompt(`输入资源 ID ${selectedItem.id} 确认硬删:`);
-                              if (hardConfirm !== String(selectedItem.id)) {
-                                addToast('error', '❌ 硬删已取消 (ID 不匹配)');
-                                return;
-                              }
-                              const token = getToken();
-                              if (!token) {
-                                addToast('error', '❌ 未登录或 token 失效');
-                                return;
-                              }
-                              const r = await fetch(`/api/admin/resources/${selectedItem.id}?hard=true`, {
-                                method: 'DELETE',
-                                headers: { Authorization: 'Bearer ' + token },
-                              });
-                              const d = await r.json();
-                              if (d.ok) {
-                                const cascaded = d.cascaded ? ` (副表 ${d.cascaded.xx_resource_links} 链接, ${d.cascaded.xx_link_feedback} 反馈)` : '';
-                                addToast('success', `🔥 已硬删, 不可恢复${cascaded}`);
-                                setSelectedItem(null);
-                                // 2026-07-26 修 read replica lag: 立即从 items 移除
-                                setItems(prev => prev.filter(i => i.id !== selectedItem.id));
-                                setTotal(prev => Math.max(0, prev - 1));
-                                setTimeout(() => fetchItems(1), 500);
-                              } else if (r.status === 401) {
-                                addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
-                              } else if (r.status === 403) {
-                                addToast('error', `❌ 403 需要 admin 权限`);
-                              } else if (r.status === 404) {
-                                // 2026-07-26 修: 404 = 主端已删, replica 滞后显示老数据
-                                addToast('warning', `⚠️ 主端已删 (replica 滞后), 立即移除`);
-                                setSelectedItem(null);
-                                setItems(prev => prev.filter(i => i.id !== selectedItem.id));
-                                setTotal(prev => Math.max(0, prev - 1));
-                                setTimeout(() => fetchItems(1), 500);
-                              } else {
-                                addToast('error', `❌ ${r.status} ${d.error || '硬删失败'}`);
-                              }
-                            }}
-                            className="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-bold transition shadow-lg shadow-red-500/30 border border-red-400/50"
-                            title="硬删: 物理删除, 不可恢复">
-                            🔥 硬删
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                  {/* 2026-07-31: admin 顶部 banner 已移除 (用户选 3 = 折叠到右上"管理员选项"), 整资源操作移到下方折叠区 */}
+
                   {/* ── TMDB Info Section ── */}
                   {selectedItem.tmdb && (
                     <div className="mb-5 space-y-4">
@@ -1188,172 +1109,203 @@ export default function HomePage() {
                   )}
 
                   <div className="space-y-4">
-                    <h3 className="font-semibold text-base text-white/80">📎 资源链接</h3>
-                    <div className="space-y-2">
-                      <div className="text-xs text-white/40 mb-1">📌 当前版本</div>
-                      {/* 2026-07-17: 1对N 多链接 — 副表读, 按 sort 排 (1=115 优先) */}
-                      {selectedItem.links && selectedItem.links.length > 0 ? (
-                        selectedItem.links.map((l, idx) => {
-                          const isMagnet = l.source === 'magnet' || l.source === 'ed2k';
-                          return (
-                            <div key={idx}>
-                              {isMagnet ? (
-                                <button onClick={(e) => { e.preventDefault(); handleCopyLink(l.url, e); }}
-                                  className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left">
-                                  <div className="flex items-center gap-3">
-                                    <span className="text-xl">🧲</span>
-                                    <div>
-                                      <div className="font-medium">{l.source === 'magnet' ? '磁力链接' : 'ED2K链接'}</div>
-                                      <div className="text-sm text-cyan-400 truncate max-w-[200px]">{(l.url || '').slice(0, 40)}...</div>
-                                    </div>
-                                  </div>
-                                  <span className="px-3 py-1 bg-cyan-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">📋 复制</span>
-                                </button>
-                              ) : (
-                                <button onClick={(e) => { e.preventDefault(); handleDirectOpen(l.url, e); }}
-                                  className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left">
-                                  <div className="flex items-center gap-3">
-                                    <span className="text-xl">
-                                      {l.source === '115' ? '📦' :
-                                       l.source === 'baidu' ? '🅱️' :
-                                       l.source === 'quark' ? '🍊' :
-                                       l.source === 'aliyun' ? '☁️' :
-                                       l.source === 'xunlei' ? '⚡' :
-                                       l.source === '123' ? '1️⃣' :
-                                       l.source === 'uc' ? '🅿️' :
-                                       l.source === 'tianyi' ? '☂️' :
-                                       l.source === 'yidong' ? '📱' : '🔗'}
-                                    </span>
-                                    <div>
-                                      <div className="font-medium">{l.source}</div>
-                                      <div className="text-sm text-white/50">{l.password ? `提取码：${l.password}` : '无需提取码'}</div>
-                                    </div>
-                                  </div>
-                                  <span className="px-3 py-1 bg-violet-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">🔗 打开</span>
-                                </button>
-                              )}
-                              {/* 2026-07-17 admin 改/删 + 用户失效反馈按钮 (每个链接旁) */}
-                              {isAdmin && (
-                                <div className="flex gap-1 mt-1">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold text-base text-white/80">
+                        📎 资源链接{(() => {
+                          const count = selectedItem.tmdbLinks?.length || selectedItem.links?.length || 0;
+                          return count > 0 ? <span className="ml-2 text-xs text-white/40">({count})</span> : null;
+                        })()}
+                      </h3>
+                      {isAdmin && (selectedItem.tmdbLinks?.length || 0) > 0 && (
+                        <details className="relative text-xs">
+                          <summary className="px-2 py-1 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-400/30 rounded text-violet-200 cursor-pointer list-none">⚙️ 管理员选项 ({selectedItem.tmdbLinks?.length})</summary>
+                          <div className="absolute right-0 top-full mt-1 bg-[#12121a] border border-white/10 rounded-lg p-2 z-20 min-w-[280px] max-h-[60vh] overflow-y-auto shadow-xl">
+                            <button onClick={async () => {
+                              if (!confirm(`确认把当前资源所有 link 标记为软删?\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}`)) return;
+                              const token = getToken();
+                              if (!token) { addToast('error', '❌ 未登录或 token 失效'); return; }
+                              const r = await fetch(`/api/admin/resources/${selectedItem.id}?hard=false`, {
+                                method: 'DELETE',
+                                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }
+                              });
+                              const d = await r.json();
+                              if (d.ok) { addToast('success', '🗑️ 资源已软删'); setSelectedItem(null); fetchItems(1); }
+                              else addToast('error', `❌ ${d.error || '失败'}`);
+                            }} className="w-full text-left text-xs px-2 py-1 hover:bg-white/10 rounded text-amber-300">🗑️ 软删整个资源</button>
+                            <button onClick={async () => {
+                              if (!confirm(`硬删? 这个会真的从 DB 删!\n资源 ID: ${selectedItem.id}`)) return;
+                              if (!confirm(`🔥 真的硬删? 不可恢复!`)) return;
+                              const hardConfirm = prompt(`输入资源 ID ${selectedItem.id} 确认硬删:`);
+                              if (hardConfirm !== String(selectedItem.id)) { addToast('error', '❌ 已取消'); return; }
+                              const token = getToken();
+                              if (!token) { addToast('error', '❌ 未登录或 token 失效'); return; }
+                              const r = await fetch(`/api/admin/resources/${selectedItem.id}?hard=true`, {
+                                method: 'DELETE',
+                                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }
+                              });
+                              const d = await r.json();
+                              if (d.ok) { addToast('success', '💀 硬删成功'); setSelectedItem(null); fetchItems(1); }
+                              else addToast('error', `❌ ${d.error || '失败'}`);
+                            }} className="w-full text-left text-xs px-2 py-1 hover:bg-white/10 rounded text-red-300">💀 硬删资源 (不可恢复)</button>
+                            <div className="text-xs text-white/40 mt-2 mb-1 px-1 border-t border-white/10 pt-2">📎 按 link 改/删 ({selectedItem.tmdbLinks?.length})</div>
+                            <div className="space-y-0.5">
+                              {(selectedItem.tmdbLinks || []).map((l: any) => (
+                                <div key={`admin-${l.id}-${l.source}`} className="flex items-center gap-1 px-1 py-0.5 hover:bg-white/5 rounded text-[10px]">
+                                  <span className="truncate flex-1 min-w-0" title={l.resourceName || l.url || ''}>
+                                    {l.source} #{l.id} {l.size ? `· ${l.size}` : ''}
+                                  </span>
                                   <button onClick={async (e) => {
                                     e.preventDefault();
-                                    const newUrl = prompt(`改 ${l.source} 链接 URL:\n(资源 ID: ${selectedItem.id})`, l.url);
+                                    e.stopPropagation();
+                                    const newUrl = prompt(`改 URL:\n(${l.source} #${l.id})`, l.url);
                                     if (!newUrl || newUrl === l.url) return;
                                     const token = getToken();
-                                    if (!token) {
-                                      addToast('error', '❌ 未登录或 token 失效, 请重新登录');
-                                      return;
-                                    }
-                                    console.log('[PATCH link] sending', { resourceId: selectedItem.id, source: l.source, url: newUrl?.slice(0, 50) });
+                                    if (!token) { addToast('error', '❌ 未登录'); return; }
                                     const r = await fetch('/api/admin/links', {
                                       method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-                                      body: JSON.stringify({ resourceId: selectedItem.id, source: l.source, url: newUrl, password: l.password })
+                                      body: JSON.stringify({ resourceId: l.id, source: l.source, url: newUrl, password: l.password })
                                     });
                                     const d = await r.json();
-                                    console.log('[PATCH link] response', r.status, d);
                                     if (d.ok) {
                                       addToast('success', '✅ 已更新');
-                                      // 本地更新链接
-                                      setSelectedItem(prev => prev ? { ...prev, links: prev.links?.map(x => x.source === l.source ? { ...x, url: newUrl } : x) } : prev);
-                                      // 2026-07-20: 改完触发首页重新拉数据, 跟 library/titles 同步
+                                      setSelectedItem(prev => prev ? { ...prev, tmdbLinks: prev.tmdbLinks?.map(x => x.id === l.id && x.source === l.source ? { ...x, url: newUrl } : x) } : prev);
                                       setTimeout(() => fetchItems(1), 500);
-                                    } else if (r.status === 401) {
-                                      addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
-                                    } else if (r.status === 403) {
-                                      addToast('error', `❌ 403 需要 admin 权限`);
-                                    } else if (r.status === 404) {
-                                      addToast('error', `❌ 404 ${d.error} — 这条链接可能已经被删`);
-                                    } else {
-                                      addToast('error', `❌ ${r.status} ${d.error || '更新失败'}`);
-                                    }
-                                  }} className="text-xs px-2 py-0.5 bg-white/5 hover:bg-white/10 rounded text-white/60">✏️ 改</button>
+                                    } else addToast('error', `❌ ${r.status} ${d.error || '更新失败'}`);
+                                  }} className="px-1 hover:bg-white/10 rounded text-white/60 hover:text-white shrink-0" title="改 URL">✏️</button>
                                   <button onClick={async (e) => {
                                     e.preventDefault();
-                                    if (!confirm(`删除 ${l.source} 链接?\n资源 ID: ${selectedItem.id}\n来源: ${l.source}\nURL: ${l.url?.slice(0, 50)}...`)) return;
+                                    e.stopPropagation();
+                                    if (!confirm(`删除 ${l.source} link?\n资源 ID: ${l.id}`)) return;
                                     const token = getToken();
-                                    if (!token) {
-                                      addToast('error', '❌ 未登录或 token 失效, 请重新登录');
-                                      return;
-                                    }
-                                    try {
-                                      console.log('[DELETE link] sending', { resourceId: selectedItem.id, source: l.source, url: l.url?.slice(0, 50) });
-                                      const r = await fetch('/api/admin/links', {
-                                        method: 'DELETE',
-                                        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-                                        body: JSON.stringify({ resourceId: selectedItem.id, source: l.source })
-                                      });
-                                      const d = await r.json();
-                                      console.log('[DELETE link] response', r.status, d);
-                                      if (d.ok) {
-                                        addToast('success', d.resourceDeleted ? '🗑️ 已删除 (资源无链接, 已软删)' : '🗑️ 已删除');
-                                        setSelectedItem(prev => prev ? { ...prev, links: prev.links?.filter(x => x.source !== l.source) } : prev);
-                                        // 2026-07-26 修 read replica lag: 同时从 items 移除 (如果资源也被自动软删)
-                                        if (d.resourceDeleted) {
-                                          setItems(prev => prev.filter(i => i.id !== selectedItem.id));
-                                          setTotal(prev => Math.max(0, prev - 1));
-                                        }
-                                        setTimeout(() => fetchItems(1), 500);
-                                      } else if (r.status === 401) {
-                                        addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
-                                      } else if (r.status === 403) {
-                                        addToast('error', `❌ 403 需要 admin 权限`);
-                                      } else if (r.status === 404) {
-                                        // 2026-07-26 修: 404 = 主端已删, replica 滞后. 立即从 UI 移除
-                                        addToast('warning', `⚠️ 主端已删 (replica 滞后), 立即移除`);
-                                        setSelectedItem(prev => prev ? { ...prev, links: prev.links?.filter(x => x.source !== l.source) } : prev);
-                                        setItems(prev => prev.filter(i => i.id !== selectedItem.id));
-                                        setTotal(prev => Math.max(0, prev - 1));
-                                        setTimeout(() => fetchItems(1), 500);
-                                      } else {
-                                        addToast('error', `❌ ${r.status} ${d.error || '删除失败'}`);
-                                      }
-                                    } catch (err: any) {
-                                      console.error('[DELETE link] err', err);
-                                      addToast('error', '❌ 网络错误: ' + err.message);
-                                    }
-                                  }} className="text-xs px-2 py-0.5 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded">🗑️ 删</button>
+                                    if (!token) { addToast('error', '❌ 未登录'); return; }
+                                    const r = await fetch('/api/admin/links', {
+                                      method: 'DELETE', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+                                      body: JSON.stringify({ resourceId: l.id, source: l.source })
+                                    });
+                                    const d = await r.json();
+                                    if (d.ok) {
+                                      addToast('success', '🗑️ 已删除');
+                                      setSelectedItem(prev => prev ? { ...prev, tmdbLinks: prev.tmdbLinks?.filter(x => !(x.id === l.id && x.source === l.source)) } : prev);
+                                      setTimeout(() => fetchItems(1), 500);
+                                    } else addToast('error', `❌ ${r.status} ${d.error || '删除失败'}`);
+                                  }} className="px-1 hover:bg-red-500/20 rounded text-red-300 hover:text-red-200 shrink-0" title="删 link">🗑️</button>
                                 </div>
-                              )}
-                              {!isAdmin && user && (
-                                <button onClick={async (e) => {
-                                  e.preventDefault();
-                                  const reason = prompt('反馈原因 (失效/限速/密码错/内容错/其他):', '失效');
-                                  if (!reason) return;
-                                  const comment = prompt('备注 (可选):') || '';
-                                  const r = await fetch('/api/feedback', {
-                                    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
-                                    body: JSON.stringify({ resourceId: selectedItem.id, source: l.source, reason, comment })
-                                  });
-                                  const d = await r.json();
-                                  if (d.ok) addToast('success', '✅ 反馈已提交');
-                                  else addToast('error', '❌ ' + (d.error || '提交失败'));
-                                }} className="text-xs mt-1 px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 rounded">⚠️ 失效反馈</button>
-                              )}
+                              ))}
                             </div>
-                          );
-                        })
-                      ) : (
-                        // fallback 老字段
-                        isMagnetOrEd2k(selectedItem.link) ? (
-                          <button onClick={(e) => { e.preventDefault(); handleCopyLink(selectedItem.link, e); }}
-                            className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left">
-                            <div className="flex items-center gap-3"><span className="text-xl">🔗</span>
-                              <div><div className="font-medium">{selectedItem.source}</div><div className="text-sm text-cyan-400">磁力/ED2K链接，点击复制</div></div>
-                            </div>
-                            <span className="px-3 py-1 bg-cyan-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">📋 复制</span>
-                          </button>
-                        ) : (
-                          <button onClick={(e) => { e.preventDefault(); handleDirectOpen(selectedItem.link, e); }}
-                            className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left">
-                            <div className="flex items-center gap-3"><span className="text-xl">🔗</span>
-                              <div><div className="font-medium">{selectedItem.source}</div>
-                                <div className="text-sm text-white/50">{extractCodeFromUrl(selectedItem.link) ? `提取码：${extractCodeFromUrl(selectedItem.link)}` : '无需提取码'}</div>
-                              </div>
-                            </div>
-                            <span className="px-3 py-1 bg-violet-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">🔗 打开</span>
-                          </button>
-                        )
+                          </div>
+                        </details>
                       )}
+                    </div>
+                    {(() => {
+                      // 2026-07-31: 用 tmdbLinks (同剧所有 link) 替代 links (单资源)
+                      const allLinks: any[] = (selectedItem.tmdbLinks && selectedItem.tmdbLinks.length > 0)
+                        ? selectedItem.tmdbLinks
+                        : (selectedItem.links || []).map((l: any) => ({ ...l, resourceName: selectedItem.name, size: selectedItem.size, createdAt: '' }));
+                      if (allLinks.length === 0) {
+                        return (
+                          <div className="px-4 py-6 rounded-xl bg-white/5 text-white/40 text-center text-sm">
+                            暂无播放链接, 等待匹配脚本
+                          </div>
+                        );
+                      }
+                      const SOURCE_DISPLAY: Record<string, string> = {
+                        '115': '115网盘', 'baidu': '百度网盘', 'quark': '夸克网盘',
+                        'aliyun': '阿里云盘', 'xunlei': '迅雷网盘', '123': '123网盘',
+                        'uc': 'UC网盘', 'tianyi': '天翼云盘', 'yidong': '移动云盘',
+                      };
+                      const SOURCE_ICON: Record<string, string> = {
+                        '115': '📦', 'baidu': '🅱️', 'quark': '🍊', 'aliyun': '☁️',
+                        'xunlei': '⚡', '123': '1️⃣', 'uc': '🅿️', 'tianyi': '☂️', 'yidong': '📱',
+                      };
+                      // 按 source 分组
+                      const netdiskGroups = new Map<string, any[]>();
+                      const magnetLinks: any[] = [];
+                      const ed2kLinks: any[] = [];
+                      for (const l of allLinks) {
+                        const src = l.source;
+                        if (src === 'magnet' || src === '磁力链接') magnetLinks.push(l);
+                        else if (src === 'ed2k' || src === 'ed2k链接') ed2kLinks.push(l);
+                        else {
+                          if (!netdiskGroups.has(src)) netdiskGroups.set(src, []);
+                          netdiskGroups.get(src)!.push(l);
+                        }
+                      }
+                      // 渲染一个 link 卡片 (admin 改/删根据用户选择, 折叠到右上"管理员选项"下, 这里不放)
+                      const renderLinkCard = (l: any, isMagnet: boolean) => {
+                        const src = l.source;
+                        const icon = isMagnet ? (src === 'ed2k' || src === 'ed2k链接' ? '📎' : '🧲') : (SOURCE_ICON[src] || '🔗');
+                        const sourceName = isMagnet ? (src === 'ed2k' || src === 'ed2k链接' ? 'ED2K 链接' : '磁力链接') : (SOURCE_DISPLAY[src] || src);
+                        // 提取 resource 名字 [xxx] 标签
+                        let nameLabel = '';
+                        if (l.resourceName) {
+                          const m = l.resourceName.match(/\[([^\]]+)\]/g);
+                          if (m) nameLabel = m.join(' ').replace(/\[/g, '').replace(/\]/g, '');
+                        }
+                        return (
+                          <div key={`${src}-${l.id}-${(l.url || '').slice(0, 30)}`}>
+                            <button
+                              onClick={(e) => { e.preventDefault(); isMagnet ? handleCopyLink(l.url, e) : handleDirectOpen(l.url, e); }}
+                              className="w-full flex items-center justify-between p-3 sm:p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left"
+                            >
+                              <span className="flex items-center gap-3 min-w-0 flex-1">
+                                <span className="text-xl shrink-0">{icon}</span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="font-medium flex items-center gap-2 flex-wrap">
+                                    <span>{sourceName}</span>
+                                    {nameLabel && <span className="text-xs px-1.5 py-0.5 bg-violet-500/20 text-violet-200 rounded">{nameLabel}</span>}
+                                    {l.size && <span className="text-xs text-white/40">📦 {l.size}</span>}
+                                  </span>
+                                  <span className="block text-xs text-white/50 truncate mt-0.5">
+                                    {isMagnet
+                                      ? <span className="text-cyan-400">{(l.url || '').slice(0, 60)}...</span>
+                                      : (l.password ? `提取码：${l.password}` : '无需提取码')}
+                                  </span>
+                                </span>
+                              </span>
+                              <span className={`px-2.5 py-1 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0 ${isMagnet ? 'bg-cyan-600' : 'bg-violet-600'}`}>
+                                {isMagnet ? '📋 复制' : '🔗 打开'}
+                              </span>
+                            </button>
+                            {/* 2026-07-31: admin 改/删按钮已合并到右上"管理员选项"折叠区, 这里不再 inline */}
+                            {!isAdmin && user && (
+                              <button onClick={async (e) => {
+                                e.preventDefault();
+                                const reason = prompt('反馈原因 (失效/限速/密码错/内容错/其他):', '失效');
+                                if (!reason) return;
+                                const r = await fetch('/api/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() }, body: JSON.stringify({ resourceId: l.id, source: src, reason }) });
+                                const d = await r.json();
+                                if (d.ok) addToast('success', '✅ 反馈已提交');
+                              }} className="text-xs ml-11 mt-1 px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 rounded">⚠️ 失效反馈</button>
+                            )}
+                          </div>
+                        );
+                      };
+                      // 渲染分组
+                      return (
+                        <div className="space-y-4">
+                          {Array.from(netdiskGroups.entries()).map(([src, links]) => (
+                            <div key={src} className="space-y-2">
+                              <div className="text-xs text-white/60 font-medium px-1">
+                                {SOURCE_ICON[src] || '🔗'} {SOURCE_DISPLAY[src] || src} <span className="text-white/30">({links.length})</span>
+                              </div>
+                              {links.map((l) => renderLinkCard(l, false))}
+                            </div>
+                          ))}
+                          {magnetLinks.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="text-xs text-white/60 font-medium px-1">🧲 磁力链接 <span className="text-white/30">({magnetLinks.length})</span></div>
+                              {magnetLinks.map((l) => renderLinkCard(l, true))}
+                            </div>
+                          )}
+                          {ed2kLinks.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="text-xs text-white/60 font-medium px-1">📎 ED2K 链接 <span className="text-white/30">({ed2kLinks.length})</span></div>
+                              {ed2kLinks.map((l) => renderLinkCard(l, true))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                       {/* 2026-06-03 单资源付费 - 解锁按钮 */}
                       {selectedItem.payType === 'code' && !selectedItem.unlocked && (
@@ -1376,7 +1328,6 @@ export default function HomePage() {
                           ✓ 您已解锁此资源
                         </div>
                       )}
-                    </div>
 
                     {relatedItems.length > 0 && tmdbType === 'tv' ? (
                       <div className="space-y-2">
