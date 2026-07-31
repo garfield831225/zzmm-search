@@ -358,6 +358,15 @@ export async function GET(request: NextRequest) {
     // 这里按 source 优先级 + created_at 排序, 卡片用前 8 个, modal 用完整列表
     const tmdbIds = Array.from(new Set(dbRows.map((r: any) => r.tmdb_id).filter(Boolean)));
     let tmdbLinksMap = new Map<string, any[]>();
+    // source 优先级: 115 > 夸克 > 百度 > 阿里 > 磁力 > ed2k > 其他 (2026-07-31 提到外层供副表 push 用)
+    const SOURCE_PRIORITY: Record<string, number> = {
+      '115': 1, '115网盘': 1,
+      'quark': 2, '夸克网盘': 2,
+      'baidu': 3, '百度网盘': 3,
+      'ali': 4, 'aliyun': 4, '阿里云盘': 4,
+      'magnet': 5, '磁力链接': 5,
+      'ed2k': 6, 'ed2k链接': 6,
+    };
     if (tmdbIds.length > 0) {
       try {
         const allTmdbLinkRows = await sql`
@@ -370,19 +379,15 @@ export async function GET(request: NextRequest) {
           ORDER BY tmdb_id, created_at DESC
           LIMIT 500
         ` as any[];
-        // source 优先级: 115 > 夸克 > 百度 > 阿里 > 磁力 > ed2k > 其他
-        const SOURCE_PRIORITY: Record<string, number> = {
-          '115': 1, '115网盘': 1,
-          'quark': 2, '夸克网盘': 2,
-          'baidu': 3, '百度网盘': 3,
-          'ali': 4, 'aliyun': 4, '阿里云盘': 4,
-          'magnet': 5, '磁力链接': 5,
-          'ed2k': 6, 'ed2k链接': 6,
-        };
         const sortFn = (a: any, b: any) => {
           const sa = SOURCE_PRIORITY[a.source] || 99;
           const sb = SOURCE_PRIORITY[b.source] || 99;
           if (sa !== sb) return sa - sb;
+          // 剧集 link 按 season/episode 升序 (2026-07-31 副表支持)
+          if (a.fromSubTable && b.fromSubTable) {
+            if (a.season !== b.season) return a.season - b.season;
+            if (a.episode !== b.episode) return a.episode - b.episode;
+          }
           // 优先级相同时按 created_at DESC (新上传在前)
           return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
         };
@@ -407,6 +412,42 @@ export async function GET(request: NextRequest) {
         Array.from(tmdbLinksMap.entries()).forEach(([tid, arr]) => {
           arr.sort(sortFn);
         });
+      } catch (e) { /* ignore */ }
+
+      // 2026-07-31: 补查副表 xx_resource_links (剧集多集 link 在副表, 主表 link='')
+      try {
+        const subLinkRows = await sql`
+          SELECT l.id, l.resource_id, l.source, l.url, l.password, l.season, l.episode, l.access_level, l.status,
+                 r.tmdb_id, r.name as resource_name, r.import_channel, r.size
+          FROM xx_resource_links l
+          JOIN xx_resources r ON l.resource_id = r.id
+          WHERE r.tmdb_id = ANY(${tmdbIds})
+            AND l.status = 'active'
+            AND l.url IS NOT NULL AND l.url != ''
+            AND r.status = 'active'
+          ORDER BY r.tmdb_id, l.season ASC, l.episode ASC, l.id ASC
+          LIMIT 1000
+        ` as any[];
+        for (const r of subLinkRows) {
+          if (!tmdbLinksMap.has(r.tmdb_id)) tmdbLinksMap.set(r.tmdb_id, []);
+          tmdbLinksMap.get(r.tmdb_id)!.push({
+            id: r.id,
+            source: r.source,
+            url: r.url,
+            password: r.password || '',
+            size: r.size || '',
+            accessLevel: r.access_level || 'basic',
+            importChannel: r.import_channel || '',
+            resourceName: r.resource_name || '',
+            sort: SOURCE_PRIORITY[r.source] || 99,
+            status: 'active',
+            createdAt: new Date().toISOString(),
+            // 2026-07-31: 剧集标记
+            season: r.season || 0,
+            episode: r.episode || 0,
+            fromSubTable: true,
+          });
+        }
       } catch (e) { /* ignore */ }
     }
 

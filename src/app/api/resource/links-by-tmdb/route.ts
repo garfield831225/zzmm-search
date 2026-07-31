@@ -97,7 +97,7 @@ export async function GET(request: NextRequest) {
     });
 
     // 4) 格式化输出
-    const links = sorted.map((r: any) => ({
+    let links: any[] = sorted.map((r: any) => ({
       id: r.id,
       name: r.name || '',
       source: r.source || '',
@@ -110,7 +110,59 @@ export async function GET(request: NextRequest) {
       payType: r.pay_type || 'free',
       lumenCost: r.lumen_cost ?? 1,
       createdAt: r.created_at,
+      season: 0,
+      episode: 0,
+      fromSubTable: false,
     }));
+
+    // 2026-07-31: 补查副表 xx_resource_links (剧集多集 link)
+    try {
+      const subRows = await sql`
+        SELECT l.id, l.resource_id, l.source, l.url, l.password, l.season, l.episode, l.access_level,
+               r.name as resource_name, r.import_channel, r.size, r.pay_type, r.lumen_cost
+        FROM xx_resource_links l
+        JOIN xx_resources r ON l.resource_id = r.id
+        WHERE r.tmdb_id = ${tmdbId}
+          AND l.status = 'active'
+          AND l.url IS NOT NULL AND l.url != ''
+          AND r.status = 'active'
+          AND l.source NOT LIKE '% [deleted]'
+        ORDER BY l.season ASC, l.episode ASC, l.id ASC
+        LIMIT 500
+      ` as any[];
+      for (const r of subRows) {
+        // 鉴权: basic 看 zezhe 渠道
+        if (!isVipPlus) {
+          const ch = String(r.import_channel || '').toLowerCase();
+          if (ch !== 'zezhe' && ch !== 'zezemom_excel') continue;
+        }
+        links.push({
+          id: r.id,
+          name: r.resource_name || '',
+          source: r.source || '',
+          sourceDisplay: SOURCE_DISPLAY[r.source] || r.source || '',
+          url: r.url,
+          password: r.password || '',
+          size: r.size || '',
+          accessLevel: r.access_level || 'basic',
+          importChannel: r.import_channel || '',
+          payType: r.pay_type || 'free',
+          lumenCost: r.lumen_cost ?? 1,
+          createdAt: new Date().toISOString(),
+          season: r.season || 0,
+          episode: r.episode || 0,
+          fromSubTable: true,
+        });
+      }
+      // 重排序: 剧集 season/episode ASC
+      links.sort((a, b) => {
+        if (a.fromSubTable && b.fromSubTable) {
+          if (a.season !== b.season) return a.season - b.season;
+          if (a.episode !== b.episode) return a.episode - b.episode;
+        }
+        return 0;
+      });
+    } catch (e) { /* ignore */ }
 
     return NextResponse.json({
       tmdbId,
