@@ -366,6 +366,7 @@ export async function GET(request: NextRequest) {
           WHERE tmdb_id = ANY(${tmdbIds})
             AND link IS NOT NULL AND link != ''
             AND status = 'active'
+            AND source NOT LIKE '% [deleted]'  -- 2026-07-31 修: 排除软删 link (DELETE 端点 source 加 [deleted] 后缀但 link 保留)
           ORDER BY tmdb_id, created_at DESC
           LIMIT 500
         ` as any[];
