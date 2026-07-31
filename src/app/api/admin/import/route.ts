@@ -89,11 +89,12 @@ async function fetchFeishuDoc(docUrl: string): Promise<any[]> {
 
 /**
  * 泽泽妈妈专属增量同步（mode='zezhe-sync'）
- * - 拉取 DB 中 import_channel='zezhe' AND status='active' 的所有 link
- * - 与本次 items 做 diff：
- *     新增：本次有、DB 没有 → INSERT（标 channel='zezhe'）
- *     删除：DB 有、本次没有 → 软删（status='deleted'，只动 zezhe 通道）
- *     不变：本次有、DB 也有 → 不动（link/link_code 视为唯一键）
+ * - 拉取 DB 中 import_channel='zezhe' AND status='active' 的所有 (id, name, link)
+ * - 按 name 分组跟本次 items 比对：
+ *     同名 + 同 link  → 不动
+ *     同名 + 不同 link → 软删旧 link（按 DB 中同 name 的所有 link）+ 插新 link
+ *     同名 + 本次没   → 软删（按 name 找 DB 中的所有 link）— 追更里去掉的就删
+ *     DB 没 + 本次有   → 插入
  * - 全程只动 import_channel='zezhe' 的行，其他资源完全不动
  */
 async function handleZezheSync(
@@ -104,40 +105,63 @@ async function handleZezheSync(
 ) {
   const BATCH = 200;
 
-  // 1) 拉取 DB 中 zezhe 的所有 (id, link)
+  // 1) 拉取 DB 中 zezhe 的所有 (id, name, link)
   const existing = await sql`
-    SELECT id, link FROM xx_resources
+    SELECT id, name, link FROM xx_resources
     WHERE import_channel = 'zezhe' AND status = 'active' AND link IS NOT NULL AND link != ''
-  `;
-  const existingLinkToId = new Map<string, number>();
-  for (const r of existing as any[]) {
-    existingLinkToId.set(r.link, r.id);
+  ` as any[];
+  // 按 name 分组 (一个剧多集 → 不同 name "小芳 S01E01" / "S01E02")
+  const existingByName = new Map<string, Array<{ id: number; link: string }>>();
+  for (const r of existing) {
+    if (!existingByName.has(r.name)) existingByName.set(r.name, []);
+    existingByName.get(r.name)!.push({ id: r.id, link: r.link });
   }
 
-  // 2) diff
-  const toInsert: any[] = [];
-  const seenLinks = new Set<string>();
-  let unchanged = 0;
+  // 2) 本次 items 按 name 分组
+  const inputByName = new Map<string, Array<any>>();
   for (const item of items) {
-    if (!item.link) continue;
-    if (seenLinks.has(item.link)) continue;  // 本次去重
-    seenLinks.add(item.link);
-    if (existingLinkToId.has(item.link)) {
-      unchanged++;
-    } else {
-      toInsert.push(item);
+    if (!item.link || !item.name) continue;
+    if (!inputByName.has(item.name)) inputByName.set(item.name, []);
+    inputByName.get(item.name)!.push(item);
+  }
+
+  // 3) diff
+  const toInsert: any[] = [];
+  const toDeleteIds = new Set<number>();
+  let unchanged = 0;
+  let replaced = 0;  // 同名新版本替换
+  for (const [name, inputItems] of Array.from(inputByName.entries())) {
+    const dbLinks = existingByName.get(name) || [];
+    const dbLinkSet = new Set(dbLinks.map((d: any) => d.link));
+    const inputLinkSet = new Set(inputItems.map((i: any) => i.link));
+    // DB 中 link 不在 input → 软删 (追更去掉或同剧换新版本)
+    for (const dbLink of dbLinks) {
+      if (!inputLinkSet.has(dbLink.link)) {
+        toDeleteIds.add(dbLink.id);
+      }
+    }
+    // input 中 link 不在 DB → 插入 (新版本或全新剧集)
+    for (const inputItem of inputItems) {
+      if (!dbLinkSet.has(inputItem.link)) {
+        toInsert.push(inputItem);
+        if (dbLinks.length > 0) replaced++;  // 已有同名, 算作"替换"统计
+      } else {
+        unchanged++;
+      }
     }
   }
-  const toDeleteIds: number[] = [];
-  for (const entry of Array.from(existingLinkToId.entries())) {
-    const [link, id] = entry;
-    if (!seenLinks.has(link)) toDeleteIds.push(id);
+  // 4) 本次没的 name → DB 中该 name 全部软删
+  for (const [name, dbLinks] of Array.from(existingByName.entries())) {
+    if (!inputByName.has(name)) {
+      for (const dbLink of dbLinks) toDeleteIds.add(dbLink.id);
+    }
   }
+  const toDeleteIdsArr = Array.from(toDeleteIds);
 
-  // 3) 软删（分批，限定 zezhe 防误伤）
+  // 5) 软删（分批，限定 zezhe 防误伤）
   let deleted = 0;
-  for (let i = 0; i < toDeleteIds.length; i += BATCH) {
-    const batchIds = toDeleteIds.slice(i, i + BATCH);
+  for (let i = 0; i < toDeleteIdsArr.length; i += BATCH) {
+    const batchIds = toDeleteIdsArr.slice(i, i + BATCH);
     try {
       await sql`
         UPDATE xx_resources
@@ -150,7 +174,7 @@ async function handleZezheSync(
     }
   }
 
-  // 4) 新增（分批，标 channel='zezhe'）
+  // 6) 新增（分批，标 channel='zezhe'）
   let inserted = 0;
   let failed = 0;
   for (let i = 0; i < toInsert.length; i += BATCH) {
@@ -186,6 +210,7 @@ async function handleZezheSync(
     import_channel: 'zezhe',
     total: items.length,
     inserted,
+    replaced,        // 2026-07-31: 同名新版本替换的 link 数
     failed,
     deleted,
     unchanged,
