@@ -89,13 +89,16 @@ async function fetchFeishuDoc(docUrl: string): Promise<any[]> {
 
 /**
  * 泽泽妈妈专属增量同步（mode='zezhe-sync'）
- * - 拉取 DB 中 import_channel='zezhe' AND status='active' 的所有 (id, name, link)
- * - 按 name 分组跟本次 items 比对：
+ * - 2026-07-31 用户拍板: 只在 doc_sheet IN ('每日更新', '追更区') 范围内 diff
+ *   - 追更 = 每日更新 (sheet-mapping 已合并 追更区 → 每日更新)
+ *   - 其他 sheet (外语电影/华语电影/国产剧/欧美剧/...) 的同名资源完全不动
+ * - 拉取 DB 中 import_channel='zezhe' AND status='active' AND doc_sheet IN 白名单 的 (id, name, link)
+ * - 按 name 分组跟本次 items 比对 (items 也按白名单过滤):
  *     同名 + 同 link  → 不动
  *     同名 + 不同 link → 软删旧 link（按 DB 中同 name 的所有 link）+ 插新 link
  *     同名 + 本次没   → 软删（按 name 找 DB 中的所有 link）— 追更里去掉的就删
  *     DB 没 + 本次有   → 插入
- * - 全程只动 import_channel='zezhe' 的行，其他资源完全不动
+ * - 全程只动 import_channel='zezhe' AND doc_sheet IN 白名单 的行，其他完全不动
  */
 async function handleZezheSync(
   sql: any,
@@ -105,10 +108,24 @@ async function handleZezheSync(
 ) {
   const BATCH = 200;
 
-  // 1) 拉取 DB 中 zezhe 的所有 (id, name, link)
+  // 2026-07-31: 追更专属 sheet 白名单 (用户拍板)
+  //   - 追更 = 每日更新 (sheet-mapping 已合并 追更区 → 每日更新)
+  //   - 只在这两个 sheet 范围内 diff / 软删 / 插入
+  //   - 其他 sheet (外语电影/华语电影/国产剧/...) 的同名资源完全不动
+  const SYNC_SHEET_WHITELIST = new Set(['每日更新', '追更区']);
+
+  // 0) 本次 items 过滤 - 只保留 sheet 在白名单的行 (防用户误传错 Excel)
+  const filteredItems = items.filter(item => {
+    const sheet = item.doc_sheet || inferDocSheetFromCategory(item.category || '');
+    return SYNC_SHEET_WHITELIST.has(sheet);
+  });
+  const skippedNonWhitelist = items.length - filteredItems.length;
+
+  // 1) 拉取 DB 中 zezhe 通道的 (id, name, link) - 只看白名单 sheet
   const existing = await sql`
-    SELECT id, name, link FROM xx_resources
+    SELECT id, name, link, doc_sheet FROM xx_resources
     WHERE import_channel = 'zezhe' AND status = 'active' AND link IS NOT NULL AND link != ''
+      AND doc_sheet = ANY(${Array.from(SYNC_SHEET_WHITELIST)})
   ` as any[];
   // 按 name 分组 (一个剧多集 → 不同 name "小芳 S01E01" / "S01E02")
   const existingByName = new Map<string, Array<{ id: number; link: string }>>();
@@ -117,9 +134,9 @@ async function handleZezheSync(
     existingByName.get(r.name)!.push({ id: r.id, link: r.link });
   }
 
-  // 2) 本次 items 按 name 分组
+  // 2) 本次 items 按 name 分组 (已经过滤过白名单)
   const inputByName = new Map<string, Array<any>>();
-  for (const item of items) {
+  for (const item of filteredItems) {
     if (!item.link || !item.name) continue;
     if (!inputByName.has(item.name)) inputByName.set(item.name, []);
     inputByName.get(item.name)!.push(item);
@@ -158,7 +175,7 @@ async function handleZezheSync(
   }
   const toDeleteIdsArr = Array.from(toDeleteIds);
 
-  // 5) 软删（分批，限定 zezhe 防误伤）
+  // 5) 软删（分批，限定 zezhe + 白名单 sheet 防误伤）
   let deleted = 0;
   for (let i = 0; i < toDeleteIdsArr.length; i += BATCH) {
     const batchIds = toDeleteIdsArr.slice(i, i + BATCH);
@@ -167,6 +184,7 @@ async function handleZezheSync(
         UPDATE xx_resources
         SET status = 'deleted', updated_at = NOW()
         WHERE id = ANY(${batchIds}) AND import_channel = 'zezhe' AND status = 'active'
+          AND doc_sheet = ANY(${Array.from(SYNC_SHEET_WHITELIST)})
       `;
       deleted += batchIds.length;
     } catch (err: any) {
@@ -208,7 +226,10 @@ async function handleZezheSync(
     success: true,
     mode: 'zezhe-sync',
     import_channel: 'zezhe',
+    sheetWhitelist: Array.from(SYNC_SHEET_WHITELIST),  // 2026-07-31: 白名单
     total: items.length,
+    totalFiltered: filteredItems.length,              // 过滤后实际处理数
+    skippedNonWhitelist,                              // 2026-07-31: 不在白名单 sheet 的行
     inserted,
     replaced,        // 2026-07-31: 同名新版本替换的 link 数
     failed,

@@ -32,3 +32,12 @@ zzmm-zzmm*.mjs
 .prepull-*.ps1
 .prepull-*.b64
 .deploy-*.ps1
+
+# 2026-07-31 事故防护: 防止 .env.production 被误 commit (含 DATABASE_URL/JWT_SECRET/TMDB_API_KEY)
+.env.production
+.env.local
+.env.*.local
+.next-static-export/
+.next/
+.vercel/
+node_modules/
