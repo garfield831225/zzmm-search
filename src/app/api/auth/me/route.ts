@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
+import { neon, neonConfig } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
 
 export const dynamic = 'force-dynamic';
+
+// 2026-08-01: 修 Neon HTTP endpoint 5 分钟 stale cache (跟 catalog 同一根因, 见 memory #9)
+//   /api/auth/me 返 stale expire_at → 前端 user.expire_at 是 7/29 (已过期 1 天) → 看着像 vip 失效
+//   fetchConnectionCache = false + fetchOptions: { cache: 'no-store' } 真正 bypass Neon endpoint cache
+neonConfig.fetchConnectionCache = false;
+const sql = neon(process.env.DATABASE_URL || '', {
+  fetchOptions: { cache: 'no-store' },
+});
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
@@ -25,7 +33,7 @@ export async function GET(req: NextRequest) {
 
     const payload = jwt.verify(token, JWT_SECRET) as any;
 
-    const sql = neon(process.env.DATABASE_URL || '');
+    // sql 已 module-level 用 neon() + fetchOptions: { cache: 'no-store' } (修 stale)
     const rows = await sql`SELECT id, username, user_group, expire_at, status, created_at, last_login FROM xx_users WHERE id = ${payload.id}`;
     const users = rows as any[];
 
