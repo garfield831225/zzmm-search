@@ -172,7 +172,8 @@ ${'magnet:?'}xt=urn:btih:ABCDEF1234567890
         }
         const size = sizeColIdx >= 0 ? String(row[sizeColIdx] || '').trim() : '';
 
-        if (!name && !link) return;
+        // 2026-07-31 修: 跟 ZzmmImportPanel 同步 - name 和 link 任何一个空都跳过 (旧逻辑 `!name && !link` 错误允许空 name 入库)
+        if (!name || !link) return;
         // 2026-07-27: 把 sheet 名原样带入 doc_sheet (不再合并, 21-sheet 库每个 sheet 都是独立分类)
         // catalog 显示时按 doc_sheet 分组 (用户能看到"国产剧"/"欧美剧"/"外语电影"等具体按钮)
         // ZZMM_SHEET_MAP 只用于推 category, 不动 doc_sheet
@@ -210,7 +211,8 @@ ${'magnet:?'}xt=urn:btih:ABCDEF1234567890
         size: sizeCol ? (row[sizeCol] || '').toString() : '',
         doc_sheet: sheetName,  // 2026-07-27: 原样带入
       };
-    }).filter(item => item.name || item.link);
+    // 2026-07-31 修: 跟 ZzmmImportPanel 同步 - name 和 link 都得有 (旧 `name || link` 错误允许空 name 入库)
+    }).filter(item => item.name && item.link);
   };
 
   const startImport = async () => {
