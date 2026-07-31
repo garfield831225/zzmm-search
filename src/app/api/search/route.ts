@@ -279,7 +279,8 @@ export async function GET(request: NextRequest) {
     let tmdbMap = new Map<string, any>();
     const missingTmdbIds: string[] = [];
     if (allTmdbIds.length > 0) {
-      const ids = await sql`SELECT * FROM xx_tmdb_cache WHERE tmdb_id = ANY(${allTmdbIds})`;
+      // 2026-07-31: 加 expires_at 过滤 - 35 天过期的 cache 视为失效, 走 /search 兜底
+      const ids = await sql`SELECT * FROM xx_tmdb_cache WHERE tmdb_id = ANY(${allTmdbIds}) AND expires_at > NOW()`;
       tmdbMap = new Map((ids || []).map((info: any) => [info?.tmdb_id, info]));
       allTmdbIds.forEach(id => { if (!tmdbMap.has(id)) missingTmdbIds.push(id); });
     }

@@ -99,6 +99,7 @@ const PUBLIC_PATHS = [
   '/api/admin/diag-replica',     // 2026-07-21 临时: 看 read replica 状态 + replication lag
   '/api/admin/check-by-id',       // 2026-07-21 临时: 查指定 id 真实状态 (主 endpoint 走 sync-now)
   '/api/resource/links-by-tmdb',  // 2026-07-31 详情页 modal 拿同剧所有 link (路由内自鉴权 userGroup)
+  '/api/cron/prepull-tmdb',      // 2026-07-31 凌晨 3 点 NAS cron 调 (路由内 CRON_SECRET 鉴权)
   // 2026-07-24 zzmm-vip 影视区: API 层鉴权, 走 page 层 JWT 解码
   '/api/vip',                       // 列表/详情 API (由路由内自己校验 group)
   // 2026-07-24 zzmm-vip 影视区 (页面层鉴权在 middleware 里, API 自己读 JWT 二次验证)
