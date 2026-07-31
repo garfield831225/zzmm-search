@@ -1235,6 +1235,11 @@ export default function HomePage() {
                         const src = l.source;
                         const icon = isMagnet ? (src === 'ed2k' || src === 'ed2k链接' ? '📎' : '🧲') : (SOURCE_ICON[src] || '🔗');
                         const sourceName = isMagnet ? (src === 'ed2k' || src === 'ed2k链接' ? 'ED2K 链接' : '磁力链接') : (SOURCE_DISPLAY[src] || src);
+                        // 2026-07-31: link 级别鉴权 - 跟卡片版一致 (basic 用户只看 zezhe 渠道 link)
+                        const linkAllowed = isAdmin
+                          || user?.group === 'vip'
+                          || l.accessLevel === 'code'  // 单资源付费 (流明解锁)
+                          || isZezheChannel(l.importChannel);
                         // 提取 resource 名字 [xxx] 标签
                         let nameLabel = '';
                         if (l.resourceName) {
@@ -1244,16 +1249,26 @@ export default function HomePage() {
                         return (
                           <div key={`${src}-${l.id}-${(l.url || '').slice(0, 30)}`}>
                             <button
-                              onClick={(e) => { e.preventDefault(); isMagnet ? handleCopyLink(l.url, e) : handleDirectOpen(l.url, e); }}
-                              className="w-full flex items-center justify-between p-3 sm:p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                if (!linkAllowed) {
+                                  addCopyToast('🔒 VIP 渠道链接，basic 用户不可打开，请升级 VIP');
+                                  return;
+                                }
+                                isMagnet ? handleCopyLink(l.url, e) : handleDirectOpen(l.url, e);
+                              }}
+                              className={`w-full flex items-center justify-between p-3 sm:p-4 rounded-xl transition group text-left ${
+                                linkAllowed ? 'bg-white/5 hover:bg-white/10' : 'bg-white/[0.02] opacity-60 cursor-not-allowed'
+                              }`}
                             >
                               <span className="flex items-center gap-3 min-w-0 flex-1">
-                                <span className="text-xl shrink-0">{icon}</span>
+                                <span className="text-xl shrink-0">{linkAllowed ? icon : '🔒'}</span>
                                 <span className="min-w-0 flex-1">
                                   <span className="font-medium flex items-center gap-2 flex-wrap">
                                     <span>{sourceName}</span>
                                     {nameLabel && <span className="text-xs px-1.5 py-0.5 bg-violet-500/20 text-violet-200 rounded">{nameLabel}</span>}
                                     {l.size && <span className="text-xs text-white/40">📦 {l.size}</span>}
+                                    {!linkAllowed && <span className="text-xs px-1.5 py-0.5 bg-amber-500/30 text-amber-200 rounded">VIP</span>}
                                   </span>
                                   <span className="block text-xs text-white/50 truncate mt-0.5">
                                     {isMagnet
@@ -1262,12 +1277,12 @@ export default function HomePage() {
                                   </span>
                                 </span>
                               </span>
-                              <span className={`px-2.5 py-1 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0 ${isMagnet ? 'bg-cyan-600' : 'bg-violet-600'}`}>
-                                {isMagnet ? '📋 复制' : '🔗 打开'}
+                              <span className={`px-2.5 py-1 rounded-lg text-sm shrink-0 ${linkAllowed ? 'opacity-0 group-hover:opacity-100 ' : ''}${isMagnet ? 'bg-cyan-600' : 'bg-violet-600'}`}>
+                                {linkAllowed ? (isMagnet ? '📋 复制' : '🔗 打开') : '🔒 VIP'}
                               </span>
                             </button>
                             {/* 2026-07-31: admin 改/删按钮已合并到右上"管理员选项"折叠区, 这里不再 inline */}
-                            {!isAdmin && user && (
+                            {!isAdmin && user && linkAllowed && (
                               <button onClick={async (e) => {
                                 e.preventDefault();
                                 const reason = prompt('反馈原因 (失效/限速/密码错/内容错/其他):', '失效');
