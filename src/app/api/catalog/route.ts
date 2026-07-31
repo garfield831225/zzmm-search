@@ -21,7 +21,16 @@
 //   之前 sheet IS NULL 的资源 (~18868 条, 原盘类) 在 sheet 分类按钮里看不到
 //   修法: sheet 分类列表加一个 "未分类 (sheet=NULL)" 按钮, 显示 sheet=NULL 的资源数
 import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
+import { neon, neonConfig } from '@neondatabase/serverless';
+
+// 2026-08-01: 修 Neon HTTP endpoint 偶发返 stale data bug
+//   (catalog 看到 7/31 11:00 那 13 条外语电影 link 没插入前的 7516, 但 DB 实际 7529)
+//   - neonConfig.fetchConnectionCache = false 强制每次新 connection
+//   - fetchOptions: { cache: 'no-store' } 强制 fetch 不走 Next.js cache
+neonConfig.fetchConnectionCache = false;
+const sql = neon(process.env.DATABASE_URL || '', {
+  fetchOptions: { cache: 'no-store' },
+});
 
 // 2026-07-27: 改 nodejs runtime — 修 Edge runtime 下副表查询返空 bug
 export const runtime = 'nodejs';
@@ -44,7 +53,7 @@ const SOURCE_KEY_MAP: Record<string, string> = {
 };
 
 export async function GET(request: NextRequest) {
-  const sql = neon(process.env.DATABASE_URL || '');
+  // sql 已用 module-level Pool API (走 WebSocket + read-write, 修 HTTP endpoint stale bug)
   const { searchParams } = new URL(request.url);
 
   const q = (searchParams.get('q') || '').trim();
@@ -212,6 +221,9 @@ export async function GET(request: NextRequest) {
         GROUP BY doc_sheet
         ORDER BY cnt DESC, doc_sheet ASC
       `;
+      // 2026-08-01 DEBUG: 已删除, 改用 Pool API 走 WebSocket 解决 stale
+      // (catalog HTTP endpoint 看到 stale 7/31 11:00 那 13 条外语电影 link 不存在, 但 DB 实际 7529)
+      // (Pool 走 WebSocket + TCP, 强制 read-write, 不走 HTTP read replica)
       categories = (sheetRows || []).map((r: any) => ({ name: r.doc_sheet, key: r.doc_sheet, count: parseInt(r.cnt) }));
       // 7b. 追加 "未分类" (sheet=NULL 的, 大多是原盘类, 18868 条)
       const unclassifiedRow = await sql`
