@@ -68,8 +68,11 @@ export async function GET(request: NextRequest) {
 
     // 1) 拿资源元信息 (不卡 access_level, 详情页要让 basic 也能看 VIP 资源列表, 只是不能点开)
     //    跟 search 路由对齐: 后端不卡 access_level, 前端按 userGroup 显示 VIP 锁
+    // 2026-07-31: DISTINCT ON (source, link) 去重 - 同 source + 同 link 只保留 MIN(id) (最早入库)
+    //    之前按 created_at DESC 拉 500 条会出现同 link 多次 (TG 重复抓取/老 import 重复)
     const metaRows = await sql`
-      SELECT id, name, link, link_code, source, category, size, type, tags, tmdb_id, created_at,
+      SELECT DISTINCT ON (source, link)
+             id, name, link, link_code, source, category, size, type, tags, tmdb_id, created_at,
              doc_sheet, sub_type, lumen_cost, pay_type, code_price, lumen_cost,
              access_level, access_tier, import_channel, view_count
       FROM xx_resources
@@ -77,7 +80,7 @@ export async function GET(request: NextRequest) {
         AND link IS NOT NULL AND link != ''
         AND status = 'active'
         AND source NOT LIKE '% [deleted]'  -- 2026-07-31 修: 排除软删 link (跟 search 路由一致)
-      ORDER BY created_at DESC
+      ORDER BY source, link, id ASC
       LIMIT 500
     ` as any[];
 
@@ -116,9 +119,11 @@ export async function GET(request: NextRequest) {
     }));
 
     // 2026-07-31: 补查副表 xx_resource_links (剧集多集 link)
+    // 2026-07-31: DISTINCT ON (source, url) 去重 - 同 source + 同 url 只保留 MIN(id)
     try {
       const subRows = await sql`
-        SELECT l.id, l.resource_id, l.source, l.url, l.password, l.season, l.episode, l.access_level,
+        SELECT DISTINCT ON (l.source, l.url)
+               l.id, l.resource_id, l.source, l.url, l.password, l.season, l.episode, l.access_level,
                r.name as resource_name, r.import_channel, r.size, r.pay_type, r.lumen_cost
         FROM xx_resource_links l
         JOIN xx_resources r ON l.resource_id = r.id
@@ -127,7 +132,7 @@ export async function GET(request: NextRequest) {
           AND l.url IS NOT NULL AND l.url != ''
           AND r.status = 'active'
           AND l.source NOT LIKE '% [deleted]'
-        ORDER BY l.season ASC, l.episode ASC, l.id ASC
+        ORDER BY l.source, l.url, l.id ASC
         LIMIT 500
       ` as any[];
       for (const r of subRows) {
@@ -163,6 +168,33 @@ export async function GET(request: NextRequest) {
         return 0;
       });
     } catch (e) { /* ignore */ }
+
+    // 2026-07-31: 跨主副表最终去重 - 同 (source, url) 只保留 id 最小 (最早入库)
+    //   SQL DISTINCT ON 已经分别去重主表和副表, 但主表的 link 跟副表的 url 可能同值
+    //   用户报"很多 115 链接相同都放上去了" - 这步彻底解决
+    {
+      const linkMap = new Map<string, any>();
+      for (const l of links) {
+        const key = `${l.source || ''}|${l.url || ''}`;
+        if (!key.includes('|') || !l.url) continue;  // 防空 url
+        const existing = linkMap.get(key);
+        if (!existing || l.id < existing.id) {
+          linkMap.set(key, l);
+        }
+      }
+      links = Array.from(linkMap.values());
+      // 重排序: 副表按 season/episode, 主表按 source priority (副表优先因为是剧集单集)
+      links.sort((a, b) => {
+        if (a.fromSubTable && b.fromSubTable) {
+          if (a.season !== b.season) return a.season - b.season;
+          if (a.episode !== b.episode) return a.episode - b.episode;
+        }
+        const sa = SOURCE_PRIORITY[a.source] || 99;
+        const sb = SOURCE_PRIORITY[b.source] || 99;
+        if (sa !== sb) return sa - sb;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+    }
 
     return NextResponse.json({
       tmdbId,
