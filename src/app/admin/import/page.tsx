@@ -40,7 +40,11 @@ const ZZMM_SHEET_MAP: Record<string, string | null> = {
 
 export default function ImportPage() {
   const [mode, setMode] = useState<ImportMode>('zzmm');
-  const [syncMode, setSyncMode] = useState(false);  // 泽泽妈妈专属：二次导入软删差异
+  // 2026-07-31: syncMode 三态 - off / incremental / full
+  //   - off: 普通完整导入, 不软删老的 (zzmm 模式默认)
+  //   - incremental: 按 name 增量同步, 只动 [每日更新/追更区] sheet (mode=zezhe-sync)
+  //   - full: 按 link 完整覆盖, 21-sheet 全部, 老的全清 (mode=zezhe-full-sync)
+  const [syncMode, setSyncMode] = useState<'off' | 'incremental' | 'full'>('off');
   const [file, setFile] = useState<File | null>(null);
   const [docUrl, setDocUrl] = useState('');
   const [progress, setProgress] = useState(0);
@@ -260,9 +264,12 @@ ${'magnet:?'}xt=urn:btih:ABCDEF1234567890
       if (mode === 'zzmm') {
         items = parseZZMM(wb);
         addLog(`📋 泽泽妈妈模式：解析到 ${items.length} 条数据`);
-        if (syncMode) {
+        if (syncMode === 'incremental') {
           actualMode = 'zezhe-sync';
-          addLog('🔄 已启用增量同步：本次 Excel 中未出现的旧链接将被软删除（status=deleted）');
+          addLog('🔄 增量同步 (按 name)：本次 Excel 中未出现的旧链接将被软删除（仅 [每日更新/追更区] sheet）');
+        } else if (syncMode === 'full') {
+          actualMode = 'zezhe-full-sync';
+          addLog('🔥 全 sheet 完整覆盖 (按 link)：21-sheet 全部，老的资源会被软删，新版本替换');
         }
       } else {
         items = parseStandard(wb);
@@ -275,25 +282,29 @@ ${'magnet:?'}xt=urn:btih:ABCDEF1234567890
         return;
       }
 
-      addLog(`📊 开始${syncMode ? '增量同步' : '分批导入'} ${items.length} 条...`);
+      addLog(`📊 开始${syncMode === 'full' ? '完整覆盖' : syncMode === 'incremental' ? '增量同步' : '分批导入'} ${items.length} 条...`);
       setStatus('importing');
       setProgress(50);
 
-      // 增量同步模式：必须一次性发完（分批会导致 diff 算错，把每批外的全删了）
-      if (syncMode) {
+      // 同步模式 (incremental / full)：必须一次性发完（分批会导致 diff 算错，把每批外的全删了）
+      if (syncMode === 'incremental' || syncMode === 'full') {
+        const apiMode = syncMode === 'incremental' ? 'zezhe-sync' : 'zezhe-full-sync';
         try {
           const res = await fetch('/api/admin/import', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminKey}` },
-            body: JSON.stringify({ items, mode: 'zezhe-sync' }),
+            body: JSON.stringify({ items, mode: apiMode }),
           });
           const result = await res.json();
           if (result.success) {
             setProgress(100);
             setStatus('done');
-            addLog(`\n🎉 增量同步完成！`);
+            addLog(`\n🎉 ${syncMode === 'full' ? '完整覆盖' : '增量同步'}完成！`);
             addLog(`📥 本次 Excel 共: ${result.total} 条`);
             addLog(`✅ 新增: ${result.inserted} 条`);
+            if (syncMode === 'full' && result.updated !== undefined) {
+              addLog(`🔄 更新: ${result.updated} 条 (同 link 但 name/sheet/size 改了)`);
+            }
             addLog(`🗑️ 软删除: ${result.deleted} 条（不再出现的旧链接）`);
             addLog(`⏸️ 不变: ${result.unchanged} 条`);
             if (result.failed > 0) addLog(`⚠️ 失败: ${result.failed} 条`);
@@ -383,7 +394,7 @@ ${'magnet:?'}xt=urn:btih:ABCDEF1234567890
           {MODES.map(m => (
             <button
               key={m.key}
-              onClick={() => { setMode(m.key); setFile(null); setLog([]); setResults([]); setProgress(0); setStatus('idle'); setSyncMode(false); }}
+              onClick={() => { setMode(m.key); setFile(null); setLog([]); setResults([]); setProgress(0); setStatus('idle'); setSyncMode('off'); }}
               className={`flex-1 py-3 px-4 rounded-xl border transition text-left ${
                 mode === m.key
                   ? 'border-violet-500 bg-violet-500/10 text-white'
@@ -397,24 +408,60 @@ ${'magnet:?'}xt=urn:btih:ABCDEF1234567890
           ))}
         </div>
 
-        {/* 泽泽妈妈模式：二次导入同步开关 */}
+        {/* 泽泽妈妈模式：同步方式选择 (2026-07-31 加 full 模式) */}
         {mode === 'zzmm' && !file && (
           <div className="mb-6 bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={syncMode}
-                onChange={e => setSyncMode(e.target.checked)}
-                className="mt-1 w-5 h-5 accent-amber-500"
-              />
-              <div className="flex-1">
-                <div className="font-medium text-amber-200">🔄 启用增量同步（二次导入）</div>
-                <div className="text-xs text-white/60 mt-1">
-                  开启后，本次 Excel 中<strong className="text-amber-300">不再出现的旧链接会被软删除</strong>（status=deleted，数据保留可恢复）。
-                  第一次导入时<strong className="text-amber-300">不要勾选</strong>，避免误删历史数据。
+            <div className="font-medium text-amber-200 mb-3">⚙️ 同步方式（默认普通导入不会软删）</div>
+            <div className="space-y-3">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="radio"
+                  name="syncMode"
+                  checked={syncMode === 'off'}
+                  onChange={() => setSyncMode('off')}
+                  className="mt-1 w-4 h-4 accent-amber-500"
+                />
+                <div className="flex-1">
+                  <div className="text-white font-medium">📥 普通导入（不软删）</div>
+                  <div className="text-xs text-white/60 mt-1">只插入新链接，老的资源完全不动。第一次导入必选。</div>
                 </div>
-              </div>
-            </label>
+              </label>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="radio"
+                  name="syncMode"
+                  checked={syncMode === 'incremental'}
+                  onChange={() => setSyncMode('incremental')}
+                  className="mt-1 w-4 h-4 accent-amber-500"
+                />
+                <div className="flex-1">
+                  <div className="text-white font-medium">🔄 增量同步（按 name 软删）</div>
+                  <div className="text-xs text-white/60 mt-1">
+                    只在 <strong className="text-amber-300">[每日更新 / 追更区]</strong> sheet 范围。
+                    本次 Excel 中<strong className="text-amber-300">不再出现的旧链接会被软删除</strong>。
+                    其他 sheet（外语电影/华语电影/...）完全不动。
+                  </div>
+                </div>
+              </label>
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="radio"
+                  name="syncMode"
+                  checked={syncMode === 'full'}
+                  onChange={() => setSyncMode('full')}
+                  className="mt-1 w-4 h-4 accent-rose-500"
+                />
+                <div className="flex-1">
+                  <div className="text-white font-medium">🔥 全 sheet 完整覆盖（按 link 软删）</div>
+                  <div className="text-xs text-white/60 mt-1">
+                    <strong className="text-rose-300">21-sheet 全部</strong>。按 link 严格 dedup：
+                    本次 Excel 中<strong className="text-rose-300">不存在的 zezhe 通道旧资源全部软删</strong>。
+                    适合"上传完整文档一次性刷成最新版本"。
+                    <span className="text-rose-300 font-bold">⚠️ 危险操作，老的空 name 资源也会被清</span>
+                  </div>
+                </div>
+              </label>
+            </div>
           </div>
         )}
 

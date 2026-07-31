@@ -240,6 +240,156 @@ async function handleZezheSync(
   });
 }
 
+/**
+ * 泽泽妈妈全 sheet 完整覆盖同步（mode='zezhe-full-sync'）
+ * 2026-07-31 用户拍板: 比 ze zemom-sync 更彻底
+ * - 按 link 严格 dedup (跟 ze zemom-sync 的按 name 不同)
+ * - 21-sheet 全部覆盖 (不限 [每日更新/追更区] 白名单)
+ * - DB 中 zezhe 通道老的资源, link 不在新 Excel → 软删
+ * - 新 Excel 中 link 不在 DB → 插入
+ * - 同 link 不同 name/doc_sheet/size → UPDATE (新版可能更准)
+ * - 全程只动 import_channel='zezhe' 的行
+ * - 用法: 用户上传完整 21-sheet 文档, 一次性把 ze zemom 通道全部刷成最新版本
+ */
+async function handleZezheFullSync(
+  sql: any,
+  items: any[],
+  totalInput: number,
+  skippedCodes: Set<string>
+) {
+  const BATCH = 200;
+
+  // 1) 拉 DB 中 zezhe 全部 (id, name, link, doc_sheet, size)
+  const existing = await sql`
+    SELECT id, name, link, doc_sheet, size FROM xx_resources
+    WHERE import_channel = 'zezhe' AND status = 'active' AND link IS NOT NULL AND link != ''
+  ` as any[];
+  // 按 link 分组 (一个资源只对应 1 个 link)
+  const existingByLink = new Map<string, { id: number; name: string; doc_sheet: string; size: string }>();
+  for (const r of existing) {
+    existingByLink.set(r.link, { id: r.id, name: r.name, doc_sheet: r.doc_sheet, size: r.size });
+  }
+
+  // 2) 本次 items 按 link 分组
+  const inputByLink = new Map<string, any>();
+  let skippedEmptyName = 0;
+  for (const item of items) {
+    if (!item.link) { skippedEmptyName++; continue; }
+    if (!item.name) { skippedEmptyName++; continue; }  // 防空 name 入库
+    if (!inputByLink.has(item.link)) inputByLink.set(item.link, item);
+  }
+
+  // 3) diff
+  const toInsert: any[] = [];
+  const toUpdate: Array<{ id: number; name: string; doc_sheet: string; size: string; category: string; source: string; link_code: string }> = [];
+  const toDeleteIds = new Set<number>();
+  let unchanged = 0;
+  let updated = 0;
+  // DB link 不在 input → 软删
+  for (const [link, dbR] of Array.from(existingByLink.entries())) {
+    if (!inputByLink.has(link)) {
+      toDeleteIds.add(dbR.id);
+    }
+  }
+  // input link 不在 DB → 插入
+  // input link 在 DB 但 name/sheet/size 不同 → UPDATE
+  for (const [link, inputItem] of Array.from(inputByLink.entries())) {
+    const dbR = existingByLink.get(link);
+    if (!dbR) {
+      toInsert.push(inputItem);
+    } else {
+      const newDocSheet = inputItem.doc_sheet || inferDocSheetFromCategory(inputItem.category || '其他');
+      const newSize = inputItem.size || '';
+      const newName = inputItem.name || '';
+      const newSource = inputItem.source || detectSource(link);
+      const newLinkCode = inputItem.link_code || '';
+      if (dbR.name !== newName || dbR.doc_sheet !== newDocSheet || dbR.size !== newSize) {
+        toUpdate.push({ id: dbR.id, name: newName, doc_sheet: newDocSheet, size: newSize, category: inputItem.category || '其他', source: newSource, link_code: newLinkCode });
+      } else {
+        unchanged++;
+      }
+    }
+  }
+  const toDeleteIdsArr = Array.from(toDeleteIds);
+
+  // 4) 软删（分批，限定 zezhe 防误伤）
+  let deleted = 0;
+  for (let i = 0; i < toDeleteIdsArr.length; i += BATCH) {
+    const batchIds = toDeleteIdsArr.slice(i, i + BATCH);
+    try {
+      await sql`
+        UPDATE xx_resources
+        SET status = 'deleted', updated_at = NOW()
+        WHERE id = ANY(${batchIds}) AND import_channel = 'zezhe' AND status = 'active'
+      `;
+      deleted += batchIds.length;
+    } catch (err: any) {
+      console.error(`[zezhe-full-sync] 软删批次失败:`, err.message);
+    }
+  }
+
+  // 5) UPDATE name/sheet/size/category (新版可能更准)
+  for (const r of toUpdate) {
+    try {
+      await sql`
+        UPDATE xx_resources
+        SET name = ${r.name}, doc_sheet = ${r.doc_sheet}, size = ${r.size},
+            category = ${r.category}, source = ${r.source}, link_code = ${r.link_code},
+            updated_at = NOW()
+        WHERE id = ${r.id} AND import_channel = 'zezhe' AND status = 'active'
+      `;
+      updated++;
+    } catch (err: any) {
+      console.error(`[zezhe-full-sync] UPDATE ${r.id} 失败:`, err.message);
+    }
+  }
+
+  // 6) 新增（分批，标 channel='zezhe'）
+  let inserted = 0;
+  let failed = 0;
+  for (let i = 0; i < toInsert.length; i += BATCH) {
+    const batch = toInsert.slice(i, i + BATCH);
+    const cols = 'name, link, link_code, source, category, size, doc_sheet, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
+    const vals = batch.map((_: any, idx: number) => {
+      const base = idx * 8;
+      return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, $${base+7}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), $${base+8})`;
+    }).join(', ');
+    const params: any[] = batch.flatMap((item: any) => [
+      item.name || '',
+      item.link || '',
+      item.link_code || '',
+      item.source || detectSource(item.link || ''),
+      item.category || '其他',
+      item.size || '',
+      item.doc_sheet || inferDocSheetFromCategory(item.category || '其他'),
+      'zezhe',
+    ]);
+    try {
+      const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) WHERE link IS NOT NULL AND link != '' DO NOTHING RETURNING id`, params);
+      inserted += (r as any[]).length;
+    } catch (err: any) {
+      console.error(`[zezhe-full-sync] 插入批次失败:`, err.message);
+      failed += batch.length;
+    }
+  }
+
+  return NextResponse.json({
+    success: true,
+    mode: 'zezhe-full-sync',
+    import_channel: 'zezhe',
+    total: totalInput,
+    totalFiltered: inputByLink.size,    // 实际参与 diff 的 link 数 (排除空 name/link)
+    skippedEmptyName,                    // 防空 name/link 过滤掉的行
+    inserted,
+    updated,                              // 同 link 但 name/sheet/size 改了
+    deleted,                              // 软删老的 (link 不在本次 Excel)
+    unchanged,                            // 同 link 同 name/sheet/size, 不动
+    failed,
+    skipped: totalInput - items.length,
+    skippedCodes: Array.from(skippedCodes),
+  });
+}
+
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get('authorization');
   // 临时跳过授权，方便调试导入
@@ -339,6 +489,17 @@ export async function POST(request: NextRequest) {
         }, { status: 403 });
       }
       return await handleZezheSync(sql, filteredItems, items.length, skippedCodes);
+    }
+
+    // zezhe-full-sync：泽泽妈妈全 sheet 完整覆盖同步（按 link 严格 dedup + 21-sheet 全部）
+    // 2026-07-31 用户拍板新增 mode - 比 ze zemom-sync 更彻底
+    if (importMode === 'zezhe-full-sync') {
+      if (process.env.ENABLE_ZEZHE_SYNC !== 'true') {
+        return NextResponse.json({
+          error: 'zezhe-full-sync 模式未启用，需在 Vercel 环境变量中设置 ENABLE_ZEZHE_SYNC=true',
+        }, { status: 403 });
+      }
+      return await handleZezheFullSync(sql, filteredItems, items.length, skippedCodes);
     }
 
     const BATCH = 200;
