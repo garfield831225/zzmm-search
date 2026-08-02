@@ -14,6 +14,14 @@ const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '夸克�
 const REGIONS = ['全部', '大陆', '欧美', '日韩', '港澳台'];
 const YEARS = ['全部', '2026', '2025', '2024', '2023', '2022', '2021', '2020', '2010-2019', '2000-2009'];
 
+// 2026-08-02: 后端 admin/links DELETE 给主表 source 加 ' [deleted]' 后缀标记软删的链接
+//   (避免清 link 字段撞 xx_resources_link_name_unique)
+//   前端展示时要去掉这个后缀, 不然用户看到 "aliyun [deleted]" 这种怪标签
+function cleanSource(s: string | undefined | null): string {
+  if (!s) return '';
+  return String(s).replace(/ \[deleted\]$/, '');
+}
+
 interface DownloadToast {
   id: number;
   type: 'success' | 'cooldown' | 'limit' | 'banned' | 'error' | 'warning';  // 2026-07-26 + warning (replica lag 提示)
@@ -767,7 +775,7 @@ export default function HomePage() {
                       <span>👑</span><span>泽泽妈</span>
                     </span>
                   )}
-                  <span className="px-2 py-0.5 bg-pink-600/80 text-xs rounded">{item.source}</span>
+                  <span className="px-2 py-0.5 bg-pink-600/80 text-xs rounded">{cleanSource(item.source)}</span>
                   {/* 2026-07-15 修正: 资源 access_level='basic' 不一定都是泽泽妈 - 脏数据 (baidu/quark) 也被标了 basic
                       应该按 import_channel='zezemom_excel' 判定, 才是真泽泽妈文档 */}
                   {/* 2026-07-15 VIP 锁: basic 用户看非 zezhe 资源时显示锁 (前端展示, 不卡后端) */}
@@ -1101,7 +1109,7 @@ export default function HomePage() {
                       {/* Basic info row */}
                       <div className="flex flex-wrap gap-2 text-sm">
                         <span className="px-2 py-1 bg-violet-600/30 rounded text-violet-300">{selectedItem.category}</span>
-                        <span className="px-2 py-1 bg-pink-600/30 rounded text-pink-300">{selectedItem.source}</span>
+                        <span className="px-2 py-1 bg-pink-600/30 rounded text-pink-300">{cleanSource(selectedItem.source)}</span>
                         {selectedItem.type && <span className="px-2 py-1 bg-white/10 rounded text-white/60">{selectedItem.type}</span>}
                         {selectedItem.size && <span className="px-2 py-1 bg-white/10 rounded text-white/50">📦 {selectedItem.size}</span>}
                       </div>

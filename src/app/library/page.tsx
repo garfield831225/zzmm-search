@@ -590,7 +590,7 @@ export default function LibraryPage() {
                   )}
                 </div>
                 {/* 来源 */}
-                <div className="text-sm text-gray-600 truncate">{item.sourceDisplay || item.source || '—'}</div>
+                <div className="text-sm text-gray-600 truncate">{item.sourceDisplay || (item.source ? String(item.source).replace(/ \[deleted\]$/, '') : null) || '—'}</div>
                 {/* 大小 */}
                 <div className="text-sm text-gray-500 truncate">{item.size || '—'}</div>
                 {/* 提取码 */}
@@ -718,9 +718,9 @@ export default function LibraryPage() {
                       <div className="flex gap-0.5">
                         <button
                           onClick={() => handleAdminDeleteLink(item, item.source!)}
-                          title={`删 ${item.source} 链接 (主表老字段, 标 source='${item.source} [deleted]')`}
+                          title={`删 ${String(item.source).replace(/ \[deleted\]$/, '')} 链接 (主表老字段, 标 source='${item.source}')`}
                           className="px-1 py-0.5 bg-white hover:bg-red-50 text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded text-[9px] transition">
-                          ✕{item.source}
+                          ✕{String(item.source).replace(/ \[deleted\]$/, '')}
                         </button>
                       </div>
                     ) : null}
