@@ -183,7 +183,7 @@ export default function LibraryPage() {
         if (section === 'zezhe') params.set('sheet', subCategory);
         else params.set('source', subCategory);
       }
-      const res = await fetch(`/api/catalog?${params}`);
+      const res = await fetch(`/api/catalog?${params}`, { cache: 'no-store' });
       const data = await res.json();
       const newItems = data.items || [];
 
