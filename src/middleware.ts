@@ -67,6 +67,9 @@ const PUBLIC_PATHS = [
   '/api/auth/sso/callback',  // SSO 回调 (免登录, 内部验 token + 签 JWT)
   '/api/internal/lumen/credit',  // 内部 API: Moviezone 调加流明 (Bearer INTERNAL_API_TOKEN 鉴权)
   '/api/user/balance',         // 查余额 (后端 Bearer 鉴权)
+  '/api/admin/bridge-health',  // 2026-08-01 同步桥健康 (admin/dashboard 调, 路由内自鉴权)
+  '/api/admin/bridge-reconnect', // 2026-08-01 同步桥手动重连 (POST, 路由内 JWT 鉴权)
+  '/api/admin/bridge-status',   // 2026-08-01 同步桥死信队列 (admin 鉴权)
   '/api/user/delete-account',  // 2026-07-28 注销账号 (后端 Bearer 鉴权)
   '/api/user/weekly-credit',   // 2026-07-28 周免费额度 (后端 Bearer 鉴权)
   // v2.1.4 单条定价 + admin 补全
@@ -133,12 +136,39 @@ const PUBLIC_PATHS = [
   '/api/admin/import/tg-json',   // 2026-07-16 TG JSON 上传导入 (VIP/admin, 内部鉴权)
   '/api/admin/import/tg-l3-worker', // 2026-07-16 TG L3 worker (status + process, VIP/admin)
   '/api/cron',                    // 2026-07-16 Vercel cron 调用 (match-task, tg-l3-worker)
+  // 2026-08-03 首页改版 5 模块: 最新上映 (公开, 未登录也能看)
+  '/api/upcoming',
+  '/upcoming',
+  // 2026-08-03 P3: basic 专区 (泽泽妈 115 文档, 公开)
+  '/api/basic',
+  '/basic',
+  // 2026-08-03 P4: vip 专区 (vip 资源, 公开浏览, 进详情才鉴权)
+  '/api/vip',
+  // 2026-08-03 P5.1: 主题专区 (公开浏览, admin CRUD 鉴权在路由内)
+  '/api/themes',
+  '/api/admin/themes',  // P5.2 admin 主题 CRUD, 鉴权在 route.ts 内
+  // 2026-08-03 P5.3: 主题内容管理 (admin, 鉴权在 route.ts 内)
+  '/api/admin/tmdb-search',
+  // 2026-08-03 P6.2: admin pending 审核 (auth route.ts 内)
+  '/api/admin/pending',
+  // 2026-08-04 P6.3: 签到 (auth route.ts 内)
+  '/api/checkin',
+  // 2026-08-03 P6.1: 待上传详情 + 上传 API (auth 路由内做, 返 401 JSON)
+  '/api/upcoming',
   // /api/resources/unlock 资源解锁 (后端 Bearer 鉴权, 双模式) - 用 startsWith 通配
   // /api/resources/[id]/unlock-status 动态路由也走 unlock 路径检查
 ];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // 2026-08-04 P7: Preview 环境全放行 (生产环境没有 APP_ENV=preview 变量, 不受影响)
+  // - middleware 完全跳过 token 校验
+  // - admin/* /api/admin/* 全部放行
+  // - route.ts 内部自己读 JWT 二次验证 (不变)
+  if (process.env.APP_ENV === 'preview') {
+    return NextResponse.next();
+  }
 
   // 白名单：静态资源 + 公开页面
   for (const path of PUBLIC_PATHS) {
@@ -175,7 +205,8 @@ export async function middleware(request: NextRequest) {
   // 2026-07-24 zzmm-vip 影视区: /vip/* 改用 client-side 鉴权 (page.tsx useEffect 检查 token)
   // middleware 不再拦截, 避免 RSC fetch 被重定向导致白屏
   // 安全性: API 层 /api/vip 自己检查 JWT (更安全, 不依赖 cookie)
-  if (pathname === '/vip' || pathname.startsWith('/vip/')) {
+  // 2026-08-03: 改成 startsWith('/vip') 容错 /vip** 这种用户误输入 URL (之前 startsWith('/vip/') 漏掉)
+  if (pathname.startsWith('/vip')) {
     return NextResponse.next();
   }
 
