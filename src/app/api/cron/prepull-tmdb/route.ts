@@ -97,10 +97,10 @@ async function upsertCacheBatch(sql: any, rows: any[]) {
     const batch = rows.slice(i, i + BATCH);
     // 13 字段: tmdb_id, tmdb_type, title, original_title, overview, poster_path, backdrop_path,
     //         vote_average, vote_count, release_date, discover_window, expires_at, origin_country
-    // cached_at 用 SQL NOW(), 不占参数
+    // cached_at 用 SQL NOW(), 不占参数 - 每个 row 后都加 NOW()
     const placeholders = batch.map((_, idx) => {
       const base = idx * 13;
-      return `($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6},$${base+7},$${base+8},$${base+9},$${base+10},$${base+11},$${base+12},$${base+13})`;
+      return `($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6},$${base+7},$${base+8},$${base+9},$${base+10},$${base+11},$${base+12},$${base+13},NOW())`;
     }).join(',');
     const params: any[] = [];
     for (const r of batch) {
@@ -115,7 +115,7 @@ async function upsertCacheBatch(sql: any, rows: any[]) {
       const r = await sql(
         `INSERT INTO xx_tmdb_cache
           (tmdb_id, tmdb_type, title, original_title, overview, poster_path, backdrop_path, vote_average, vote_count, release_date, discover_window, expires_at, origin_country, cached_at)
-         VALUES ${placeholders}, NOW()
+         VALUES ${placeholders}
          ON CONFLICT (tmdb_id) DO UPDATE SET
            tmdb_type = EXCLUDED.tmdb_type,
            title = EXCLUDED.title,

@@ -1,7 +1,9 @@
-// 2026-08-03: P4 vip 专区 API
-//   - access_level='vip' 已匹配 tmdbid 的资源
-//   - CTE + ROW_NUMBER() 拿 1 个 resource + 总数 (DISTINCT ON subquery 在 Neon 12s 超时)
+// 2026-08-03: P3 basic 专区 API
+//   - 泽泽妈 115 文档 (import_channel='zezhe') 已匹配 tmdbid 的资源
+//   - JOIN xx_tmdb_cache 拿 release_date + poster + overview
 //   - 按 release_date DESC 排序 (近→远)
+//   - DISTINCT ON (tmdb_id) 去重 (1 个 tmdb 多个网盘只显示 1 张卡)
+//   - 角标: 电影/剧集 + 资源数 (1/N 网盘) + access_level
 //   - type 过滤: 'all' / 'movie' / 'tv'
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -30,12 +32,13 @@ export async function GET(req: NextRequest) {
     const isTv = type === 'tv';
     const isAll = type === 'all';
 
-    // 2026-08-03 改: CTE + ROW_NUMBER() 拿 1 个 resource + count
+    // DISTINCT ON (r.tmdb_id) 拿每个 tmdb 第 1 条 + 资源数 count
     const rows = await sql`
-      WITH ranked AS (
-        SELECT
+      SELECT * FROM (
+        SELECT DISTINCT ON (r.tmdb_id)
           r.id as resource_id,
           r.tmdb_id,
+          r.name as resource_name,
           r.source,
           r.category,
           r.access_level,
@@ -47,24 +50,22 @@ export async function GET(req: NextRequest) {
           t.poster_path,
           t.vote_average,
           t.overview,
-          ROW_NUMBER() OVER (PARTITION BY r.tmdb_id ORDER BY r.id ASC) as rn,
-          count(*) OVER (PARTITION BY r.tmdb_id) as resource_count
+          (SELECT count(*) FROM xx_resources r2
+            WHERE r2.tmdb_id = r.tmdb_id
+              AND r2.import_channel='zezhe'
+              AND r2.status='active'
+          ) as resource_count
         FROM xx_resources r
         JOIN xx_tmdb_cache t ON t.tmdb_id = r.tmdb_id
-        WHERE r.access_level='vip'
+        WHERE r.import_channel='zezhe'
           AND r.status='active'
           AND r.tmdb_id IS NOT NULL
           AND r.tmdb_id != ''
-          AND r.tmdb_id NOT IN ('NOMATCH', 'SKIP')
+          AND r.tmdb_id != 'NOMATCH'
           AND t.release_date IS NOT NULL
           AND (${isAll} OR t.tmdb_type = ${type})
-      )
-      SELECT
-        resource_id, tmdb_id, source, category, access_level,
-        tmdb_title, title_zh, original_title, release_date, tmdb_type,
-        poster_path, vote_average, overview, resource_count
-      FROM ranked
-      WHERE rn = 1
+        ORDER BY r.tmdb_id, r.id ASC
+      ) AS sub
       ORDER BY release_date DESC
       LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
     `;
@@ -73,11 +74,11 @@ export async function GET(req: NextRequest) {
       SELECT count(DISTINCT r.tmdb_id) as cnt
       FROM xx_resources r
       JOIN xx_tmdb_cache t ON t.tmdb_id = r.tmdb_id
-      WHERE r.access_level='vip'
+      WHERE r.import_channel='zezhe'
         AND r.status='active'
         AND r.tmdb_id IS NOT NULL
         AND r.tmdb_id != ''
-        AND r.tmdb_id NOT IN ('NOMATCH', 'SKIP')
+        AND r.tmdb_id != 'NOMATCH'
         AND t.release_date IS NOT NULL
         AND (${isAll} OR t.tmdb_type = ${type})
     `;
@@ -87,7 +88,7 @@ export async function GET(req: NextRequest) {
       resourceId: r.resource_id,
       tmdbId: r.tmdb_id,
       tmdbType: r.tmdb_type,
-      title: r.title_zh || r.tmdb_title,
+      title: r.title_zh || r.tmdb_title || r.resource_name,
       originalTitle: r.original_title,
       releaseDate: r.release_date,
       posterPath: r.poster_path,

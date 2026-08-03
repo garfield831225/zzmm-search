@@ -162,14 +162,34 @@ export default function AdminDashboard() {
             <div className="text-[10px] text-gray-400 mt-1">已用 / 总数</div>
           </div>
           <div className="bg-white border border-gray-200 rounded-xl p-4">
-            <div className="text-xs text-gray-500 mb-1">同步桥</div>
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-xs text-gray-500">同步桥</div>
+              {/* 2026-08-01: 加重连按钮 (用户要求) */}
+              <button
+                onClick={async () => {
+                  const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
+                  try {
+                    const r = await fetch('/api/admin/bridge-reconnect', { method: 'POST', headers: { Authorization: `Bearer ${t}` } });
+                    const j = await r.json();
+                    alert(j.message || (j.ok ? '重连成功' : '重连失败: ' + (j.error || '未知')));
+                    fetchBridge();
+                  } catch (e: any) { alert('重连失败: ' + e.message); }
+                }}
+                className="text-[10px] px-2 py-0.5 bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 rounded transition"
+                title="手动重连 import-bridge"
+              >
+                🔄 重连
+              </button>
+            </div>
             <div className="flex items-center gap-2 mt-1">
               {bridgeHealth?.ok ? <CheckCircle2 className="w-5 h-5 text-emerald-500" /> : <XCircle className="w-5 h-5 text-red-500" />}
               <div className="text-sm font-medium text-gray-700">
                 {bridgeHealth?.ok ? `运行中` : bridgeHealth ? '离线' : '检测中...'}
               </div>
             </div>
-            <div className="text-[10px] text-gray-400 mt-1">NAS Docker</div>
+            <div className="text-[10px] text-gray-400 mt-1 truncate" title={bridgeHealth?.error || bridgeHealth?.bridge_url || 'NAS Docker'}>
+              {bridgeHealth?.error ? `❌ ${bridgeHealth.error.slice(0, 30)}` : 'NAS Docker'}
+            </div>
           </div>
         </section>
 

@@ -372,6 +372,31 @@ export function extractLinksFromTgMessage(msg: any): TgLink[] {
     if (thunders) for (const t of thunders) pushLink(t);
   }
 
+  // 2b. Fallback: text 字符串中 regex 找链接 (兼容 string text + array text)
+  // 2026-08-01: 原来只对 Array.isArray(text) 走, string text 永远 0 link
+  if (rawLinks.length === 0 && (Array.isArray(msg.text) || typeof msg.text === 'string')) {
+    let text = '';
+    if (typeof msg.text === 'string') {
+      text = msg.text;
+    } else if (Array.isArray(msg.text)) {
+      text = msg.text.filter((t: any) => typeof t === 'string').join('');
+    }
+    if (text) {
+      // http/https
+      const urlRegex = /https?:\/\/[^\s\u4e00-\u9fa5]+/g;
+      const matches = text.match(urlRegex);
+      if (matches) for (const url of matches) pushLink(url, extractPasswordFromUrl(url));
+      // magnet
+      const magnetRegex = /magnet:\?xt=urn:btih:[a-zA-Z0-9]+/g;
+      const magnets = text.match(magnetRegex);
+      if (magnets) for (const m of magnets) pushLink(m);
+      // thunder
+      const thunderRegex = /thunder:\/\/[a-zA-Z0-9=\/+=]+/gi;
+      const thunders = text.match(thunderRegex);
+      if (thunders) for (const t of thunders) pushLink(t);
+    }
+  }
+
   // 3. Dedup (by url) + 按 sort 排序 (1=115 优先)
   const seen = new Set<string>();
   const dedup = rawLinks.filter(l => {
@@ -405,55 +430,256 @@ export function extractPasswordFromUrl(url: string): string | undefined {
   return undefined;
 }
 
+// ─── 7b. parseStructuredMessage(msg) ─────────────────────────────────
+// 2026-08-01: 通用字段解析器 - 按"字段名"匹配, 不按"整段 text 格式"匹配
+// 背景: 百度网盘/讯雷等频道 (562) 用 "名称:xxx\n描述:xxx\n链接:..." 这种 bold 字段格式
+//   之前 extractTitleFromTgMessage 用整段 text regex 匹配"名称:xxx", 失败时 fallback 到 firstLine
+//   导致"name=名称"或"name=简介:xxx" 误识别
+// 解法: 解析 text 数组, 识别 bold 字段名 + 紧跟的 plain entity value, 配对成 { 字段名: 值 }
+//   然后从 fields['title'] 取 title, fields['description'] 取 desc 等
+export interface ParsedFields {
+  title?: string;        // 标题/名称/片名/Title/标题🎬
+  description?: string;  // 描述/简介/概要/📝描述
+  size?: string;         // 大小/容量/📁大小
+  tags?: string[];       // 标签/Tags/🏷标签
+  pushType?: string;     // 推送类型/来源/Type - 不入库, 仅供参考
+  year?: string;         // 年份/Year
+  category_hint?: string;// 分类/类型
+  status?: string;       // 状态
+  source_hint?: string;  // 来自/来自频道
+  channel_hint?: string; // 频道
+}
+
+// 字段名 → 标准 key 映射 (含 emoji 前缀容忍)
+const FIELD_MAP: Record<string, keyof ParsedFields> = {
+  // 标题
+  '标题': 'title', '名称': 'title', '片名': 'title', 'title': 'title', 'name': 'title',
+  '🎬标题': 'title', '📛标题': 'title', '📌标题': 'title', '📺剧名': 'title', '🎞片名': 'title',
+  '剧名': 'title', '作品名': 'title', '资源名': 'title', '资源标题': 'title',
+  // 描述
+  '描述': 'description', '简介': 'description', '概要': 'description', '剧情': 'description',
+  'description': 'description', 'desc': 'description', 'summary': 'description', 'synopsis': 'description',
+  'plot': 'description', '故事': 'description', '内容': 'description', '介绍': 'description',
+  '📝描述': 'description', '📖简介': 'description', '📃简介': 'description',
+  // 大小
+  '大小': 'size', '容量': 'size', '文件大小': 'size', 'size': 'size', 'filesize': 'size',
+  '📁大小': 'size', '📦大小': 'size', '💾大小': 'size', '🗂大小': 'size',
+  // 标签
+  '标签': 'tags', 'tags': 'tags', 'tag': 'tags', '🏷标签': 'tags', '#标签': 'tags', '关键词': 'tags',
+  // 推送类型
+  '推送类型': 'pushType', '来源': 'pushType', 'type': 'pushType', 'pushtype': 'pushType', 'source': 'pushType',
+  // 年份
+  '年份': 'year', 'year': 'year', '年代': 'year',
+  // 分类
+  '分类': 'category_hint', '类型': 'category_hint', 'category': 'category_hint',
+  // 状态
+  '状态': 'status', 'status': 'status',
+  // 来源
+  '来自': 'source_hint', '来自频道': 'source_hint', '投稿者': 'source_hint',
+  // 频道
+  '频道': 'channel_hint', 'channel': 'channel_hint',
+};
+
+// 字段名正则 (匹配 "名称：" "名称:" "名称 ：" 等 + emoji 前缀, 冒号可选)
+// 2026-08-01: 冒号改可选 - 让 bold 字段名 "名称" 后跟 plain value 模式也能识别
+const FIELD_LABEL_REGEX = new RegExp(
+  '^([\\s\\u{1F300}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{FE0F}]*)?' +  // 可选 emoji 前缀
+  '(' + Object.keys(FIELD_MAP).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')' +
+  '(?:\\s*[:：]\\s*)?(.*)$',
+  'iu'
+);
+
+export function parseStructuredMessage(msg: any): ParsedFields {
+  if (!msg) return {};
+  const out: ParsedFields = {};
+  if (typeof msg.text === 'string') {
+    // 单字符串: 按行解析
+    const lines = msg.text.split('\n');
+    for (const line of lines) {
+      const m = line.match(FIELD_LABEL_REGEX);
+      if (m) {
+        const key = FIELD_MAP[m[2]];
+        const value = (m[3] || '').trim();
+        if (key && value && !out[key]) {
+          // tags 可能是 "🏷 标签: #tag1 #tag2" 形式
+          if (key === 'tags') {
+            out.tags = (value.match(/#([^\s#]+)/g) || []).map((s: string) => s.slice(1));
+          } else {
+            (out as any)[key] = value;
+          }
+        }
+      }
+    }
+  } else if (Array.isArray(msg.text)) {
+    // 数组: 遍历 entity, 识别 bold 字段名 + 紧跟的 plain/后续值
+    // 关键修复: 看 bold entity 文本是不是字段名, 然后把同一 message 后续所有 text 内容当作 value
+    //   直到下一个 "字段名" bold entity 或明显的链接分隔符
+    let currentKey: keyof ParsedFields | null = null;
+    let currentValue = '';
+    const flush = () => {
+      if (currentKey && currentValue.trim()) {
+        const value = currentValue.trim();
+        if (!out[currentKey]) {
+          if (currentKey === 'tags') {
+            out.tags = (value.match(/#([^\s#]+)/g) || []).map((s: string) => s.slice(1));
+          } else {
+            (out as any)[currentKey] = value;
+          }
+        }
+      }
+      currentKey = null;
+      currentValue = '';
+    };
+    for (const t of msg.text) {
+      if (typeof t === 'string') {
+        // 2026-08-01: plain 字符串 (TG Desktop text array 第 0 元素) - 按行解析
+        //   实际格式: "名称：xxx\n\n描述：yyy\n\n" (可能 1-3 段用 \n 分隔)
+        //   必须按 \n split, 不能让 FIELD_LABEL_REGEX (冒号可选) 整段 match
+        if (t.includes('\n')) {
+          const lines = t.split('\n');
+          for (const line of lines) {
+            const trim = line.trim();
+            if (!trim) continue;
+            const m = trim.match(FIELD_LABEL_REGEX);
+            if (m) {
+              flush();
+              currentKey = FIELD_MAP[m[2]] || null;
+              // m[3] 是冒号后的部分, 如果为空 (冒号可选) → 视为需要后续 plain 补
+              currentValue = m[3] || '';
+            } else {
+              // 不是字段行, 累加 (但只在没 currentKey 时)
+              if (!currentKey) {
+                currentValue += (currentValue ? '\n' : '') + trim;
+              }
+            }
+          }
+        } else {
+          // 单行 plain 字符串
+          const trim = t.trim();
+          const m = trim.match(FIELD_LABEL_REGEX);
+          if (m && (!currentKey || trim.startsWith(m[2]))) {
+            flush();
+            currentKey = FIELD_MAP[m[2]] || null;
+            currentValue = m[3] || '';
+          } else {
+            currentValue += t;
+          }
+        }
+      } else if (t && typeof t === 'object') {
+        // 2026-08-01: { type: 'plain', text: 'xxx' } 对象类型 plain 也要 match 字段名
+        if (t.type === 'plain' && t.text) {
+          if (t.text.includes('\n')) {
+            const lines = t.text.split('\n');
+            for (const line of lines) {
+              const trim = line.trim();
+              if (!trim) continue;
+              const m = trim.match(FIELD_LABEL_REGEX);
+              if (m) {
+                flush();
+                currentKey = FIELD_MAP[m[2]] || null;
+                currentValue = m[3] || '';
+              } else {
+                if (!currentKey) {
+                  currentValue += (currentValue ? '\n' : '') + trim;
+                }
+              }
+            }
+          } else {
+            const plainTrim = String(t.text).trim();
+            const mPlain = plainTrim.match(FIELD_LABEL_REGEX);
+            if (mPlain && (!currentKey || plainTrim.startsWith(mPlain[2]))) {
+              flush();
+              currentKey = FIELD_MAP[mPlain[2]] || null;
+              currentValue = mPlain[3] || '';
+            } else {
+              currentValue += t.text;
+            }
+          }
+        } else if (t.type === 'bold' && t.text) {
+          // bold entity: 可能是字段名
+          const m = String(t.text).match(FIELD_LABEL_REGEX);
+          if (m) {
+            // 是字段名 → flush 旧的, 开始新的
+            flush();
+            currentKey = FIELD_MAP[m[2]] || null;
+            currentValue = m[3] || '';
+          } else {
+            // bold 但不是字段名, 加到 currentValue
+            currentValue += t.text;
+          }
+        } else if (t.type === 'hashtag' && t.text) {
+          // hashtag 单独累加 (常见于"标签: #xxx #yyy" 模式)
+          if (currentKey === 'tags') {
+            // 已经在 tags 字段, 加 #xxx
+            if (!out.tags) out.tags = [];
+            const tag = String(t.text).replace(/^#/, '').trim();
+            if (tag && !out.tags.includes(tag)) out.tags.push(tag);
+          } else {
+            currentValue += t.text;
+          }
+        } else if (t.type === 'link' || t.type === 'text_link') {
+          // 链接 entity: 不加到 value (extractLinksFromTgMessage 单独处理)
+          // 但链接前可能有 "🔗 xxx：" 前缀, 不算值
+          if (currentValue.trim()) {
+            // 已经有 value, 把链接当作分隔符
+            flush();
+          }
+        } else {
+          // 其他 entity, 加到 currentValue
+          if (t.text) currentValue += t.text;
+        }
+      }
+    }
+    flush();
+  }
+  return out;
+}
+
 // ─── 8. extractTitleFromTgMessage(msg) ──────────────────────────────
-// 从 TG message 提取标题
-// 优先用 text 第一行, 否则用 "标题:xxx" 格式
+// 2026-08-02 v4: 严格按字段名匹配, 找不到 title 字段就返空 (不入库)
+// 业务规则: 没"标题/名称/片名/Title"字段的消息不入库
+// 背景: 之前 v3 fallback 用 description 清理前缀前 30 字符, 但 description 是剧情介绍不是片名
+//   用户 library 显示"李红旗要办婚礼了！本想婚礼一切从简..."(描述截 30 字符) 当标题, 完全错误
+// 修法: 严格按"名称/标题/片名/Title"字段名, 没字段返空 (调用方会跳过不入库)
+// 用户的"短剧更新目录1/2/3"这种频道索引消息也会返空不入库 (没有"名称"字段, 是目录/索引)
 export function extractTitleFromTgMessage(msg: any): string {
   if (!msg) return '';
+  const fields = parseStructuredMessage(msg);
+  // 1) 优先: title 字段 (名称/标题/片名/Title)
+  if (fields.title && fields.title.trim()) {
+    return fields.title.trim().slice(0, 200);
+  }
+  // 2) 老格式 fallback: 整段 text regex (匹配"标题/名称/片名/Title:xxx"开头)
   let text = '';
   if (typeof msg.text === 'string') {
     text = msg.text;
   } else if (Array.isArray(msg.text)) {
-    // TG Desktop export 格式: text 是 string 数组, 含 entities
-    text = msg.text
-      .filter((t: any) => typeof t === 'string')
-      .join('')
-      .trim();
+    text = msg.text.filter((t: any) => typeof t === 'string').join('').trim();
   }
   if (!text) return '';
-
-  // 1. 找 "标题:xxx" 格式 (常见于资源分享群)
-  const m = text.match(/标题[:：]\s*(.+?)(?:\n|$)/);
-  if (m) return m[1].trim().slice(0, 200);
-
-  // 2. 找 "名称:xxx" 格式
-  const m2 = text.match(/(?:名称|片名)[:：]\s*(.+?)(?:\n|$)/);
-  if (m2) return m2[1].trim().slice(0, 200);
-
-  // 3. 第一行非空文本 (前 200 字符)
-  const firstLine = text.split('\n').find((l: string) => l.trim().length > 0);
-  if (firstLine) {
-    return firstLine.trim().slice(0, 200);
+  const m = text.match(/(?:标题|名称|片名|Title)[:：]\s*(.+?)(?:\n|$)/);
+  if (m) {
+    const v = m[1].trim();
+    if (v) return v.slice(0, 200);
   }
-
-  return text.trim().slice(0, 200);
+  return '';  // 没"名称/标题/片名/Title"字段 → 不入库 (业务规则)
 }
 
 // ─── 9. extractTagsFromTgMessage(msg) ───────────────────────────────
-// 从 TG message text 提取标签
-// 找 #xxx 形式 或 末尾的 [标签] 形式
+// 2026-08-01: 用 parseStructuredMessage 优先从"标签"字段提取, fallback #xxx regex
 export function extractTagsFromTgMessage(msg: any): string[] {
-  const tags: string[] = [];
-  if (!msg) return tags;
+  if (!msg) return [];
+  const fields = parseStructuredMessage(msg);
+  if (fields.tags && fields.tags.length) return fields.tags.slice(0, 10);
+  // Fallback: 整段 #xxx
   let text = '';
   if (Array.isArray(msg.text)) {
     text = msg.text.filter((t: any) => typeof t === 'string').join(' ');
   } else if (typeof msg.text === 'string') {
     text = msg.text;
   }
-  if (!text) return tags;
-
-  // #xxx 形式 (中文标签)
+  if (!text) return [];
+  const tags: string[] = [];
   const hashtagRegex = /#([^\s#]+)/g;
   let m;
   while ((m = hashtagRegex.exec(text)) !== null) {
@@ -466,9 +692,14 @@ export function extractTagsFromTgMessage(msg: any): string[] {
 }
 
 // ─── 10. extractSizeFromTgMessage(msg) ──────────────────────────────
-// 从 TG message text 提取大小信息
-// 找 "大小:xxx" 格式 或 "XXGB" 格式
+// 2026-08-01: 用 parseStructuredMessage 优先从"大小"字段提取, 支持 "📁 大小:5G" 格式
 export function extractSizeFromTgMessage(msg: any): string {
+  if (!msg) return '';
+  const fields = parseStructuredMessage(msg);
+  if (fields.size && fields.size.trim()) {
+    return fields.size.trim().slice(0, 50);
+  }
+  // Fallback: regex 找 XXGB / XXMB
   let text = '';
   if (Array.isArray(msg.text)) {
     text = msg.text.filter((t: any) => typeof t === 'string').join(' ');
@@ -476,14 +707,15 @@ export function extractSizeFromTgMessage(msg: any): string {
     text = msg.text;
   }
   if (!text) return '';
-
-  // 大小:xxx 格式
-  const m = text.match(/大[小檔]?[:：]\s*([^\n]+?)(?:\n|$)/);
-  if (m) return m[1].trim().slice(0, 50);
-
-  // XXGB / XXMB / XXKB 格式
   const m2 = text.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB|TB|GiB|MiB|KiB))/i);
   if (m2) return m2[1].toUpperCase().replace(/\s+/g, '');
-
   return '';
+}
+
+// ─── 10b. extractDescriptionFromTgMessage(msg) ──────────────────────
+// 2026-08-01: 提取描述 (可作 overview/剧情), 不入库 name
+export function extractDescriptionFromTgMessage(msg: any): string {
+  if (!msg) return '';
+  const fields = parseStructuredMessage(msg);
+  return (fields.description || '').trim().slice(0, 2000);
 }

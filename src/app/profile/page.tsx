@@ -109,6 +109,8 @@ export default function ProfilePage() {
         if (r3.ok) { const d3 = await r3.json(); setUnlocks(d3.items || []); }
         if (r4.ok) { const d4 = await r4.json(); if (typeof d4.lumen_balance === 'number') setLumenBalance(d4.lumen_balance); }
         if (r5.ok) { const d5 = await r5.json(); if (d5 && typeof d5.used === 'number') setWeeklyCredit({ used: d5.used, total: d5.total, weekStart: d5.week_start }); }
+        // 2026-08-04 P6.3: 加载签到状态
+        loadCheckin();
       } catch (e: any) { setError(e.message); }
       finally { setLoading(false); }
     };
@@ -116,10 +118,26 @@ export default function ProfilePage() {
   }, [router]);
 
   // 业务计算
+  // 2026-08-01: 修 /api/auth/me 已返 ISO UTC 字符串 (parseNeonTime 修 tz 标记), 这里直接 new Date() 即可
   const isVip = ['vip', 'admin'].includes(user?.user_group || '');
   const isBasic = user?.user_group === 'basic';
-  const isExpired = user?.expire_at ? new Date(user.expire_at) < new Date() : false;
-  const daysLeft = user?.expire_at ? Math.max(0, Math.ceil((new Date(user.expire_at).getTime() - Date.now()) / 86400000)) : (isVip ? 9999 : 0);
+  const expireMs = user?.expire_at ? new Date(user.expire_at).getTime() : null;
+  const nowMs = Date.now();
+  const isExpired = expireMs != null ? expireMs < nowMs : false;
+  // 2026-08-01: 精确到秒 — 显示 "X 天 Y 小时 Z 分" (VIP 截止时间, 用户要求)
+  const vipTimeLeft = (() => {
+    if (isExpired || expireMs == null) return null;
+    const ms = expireMs - nowMs;
+    if (ms <= 0) return null;
+    const totalMin = Math.floor(ms / 60000);
+    const days = Math.floor(totalMin / 1440);
+    const hours = Math.floor((totalMin % 1440) / 60);
+    const mins = totalMin % 60;
+    if (days > 0) return { days, hours, mins, expired: false };
+    if (hours > 0) return { days: 0, hours, mins, expired: false };
+    return { days: 0, hours: 0, mins, expired: false };
+  })();
+  const isForever = isVip && (user?.expire_at == null);
   const daysSinceReg = user?.created_at ? Math.floor((Date.now() - new Date(user.created_at).getTime()) / 86400000) : 0;
   const daysSinceLogin = user?.last_login ? Math.floor((Date.now() - new Date(user.last_login).getTime()) / 86400000) : 0;
   // 2026-07-28: 每周免费额度 - 真实读 xx_user_weekly_credit
@@ -127,6 +145,49 @@ export default function ProfilePage() {
   const [weeklyCredit, setWeeklyCredit] = useState<{ used: number; total: number; weekStart: string | null }>({ used: 0, total: 0, weekStart: null });
   const weeklyUsed = weeklyCredit.used;
   const weeklyTotal = isVip ? weeklyCredit.total : 0;  // 只 VIP/admin 有额度
+
+  // 2026-08-04 P6.3: 签到状态 (积分系统, 跟流明分开!)
+  const [checkinToday, setCheckinToday] = useState(false);
+  const [checkinRecent, setCheckinRecent] = useState<Array<{ id: number; points: number; createdAt: string; description: string }>>([]);
+  const [checkinLoading, setCheckinLoading] = useState(false);
+  const [pointsBalance, setPointsBalance] = useState(0);
+
+  const loadCheckin = async () => {
+    try {
+      const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
+      const r = await fetch('/api/checkin', { headers: { Authorization: 'Bearer ' + t, 'Cache-Control': 'no-cache' } });
+      if (r.ok) {
+        const d = await r.json();
+        setCheckinToday(d.already_checked_in);
+        setCheckinRecent(d.recent || []);
+        if (typeof d.points_balance === 'number') setPointsBalance(d.points_balance);
+      }
+    } catch {}
+  };
+
+  const handleCheckin = async () => {
+    setCheckinLoading(true);
+    try {
+      const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
+      const r = await fetch('/api/checkin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+      });
+      const d = await r.json();
+      if (d.success) {
+        showToast('success', d.message);
+        setCheckinToday(true);
+        if (typeof d.points_balance === 'number') setPointsBalance(d.points_balance);
+        await loadCheckin();
+      } else if (d.already_checked_in) {
+        showToast('error', d.message);
+        setCheckinToday(true);
+      } else {
+        showToast('error', d.error || '签到失败');
+      }
+    } catch (e: any) { showToast('error', e.message); }
+    finally { setCheckinLoading(false); }
+  };
 
   // 危险操作
   const handleDeleteShares = async () => {
@@ -263,6 +324,51 @@ export default function ProfilePage() {
           </Link>
         </div>
 
+        {/* 2026-08-04 P6.3: 每日签到 + 积分余额 (积分独立系统, 跟流明分开!) */}
+        <div className="mb-6 p-4 rounded-xl border border-cyan-500/30 bg-gradient-to-r from-cyan-500/[0.04] to-blue-500/[0.04] flex items-center gap-4 flex-wrap">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <Sparkles className="w-4 h-4 text-cyan-300" />
+              <span className="font-semibold text-sm text-cyan-100">每日签到 (积分)</span>
+              {checkinToday ? (
+                <span className="px-1.5 py-0.5 bg-emerald-500/30 text-emerald-300 rounded text-[10px]">✓ 今日已签</span>
+              ) : (
+                <span className="px-1.5 py-0.5 bg-cyan-500/30 text-cyan-300 rounded text-[10px]">未签到</span>
+              )}
+            </div>
+            <div className="text-xs text-white/50">
+              积分余额: <span className="text-cyan-300 font-semibold">{pointsBalance}</span> · 签到奖励: {isVip ? 'VIP/Admin 8-20' : 'Basic 1-5'} 积分
+            </div>
+            <div className="text-[10px] text-white/30 mt-0.5">
+              (流明 {lumenBalance} 是付费系统, 跟积分分开)
+            </div>
+          </div>
+          <button
+            onClick={handleCheckin}
+            disabled={checkinLoading || checkinToday}
+            className="px-5 py-2 bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg font-semibold text-sm flex items-center gap-2">
+            <Calendar className="w-4 h-4" />
+            {checkinToday ? '今日已签' : checkinLoading ? '签到中...' : '🎯 签到'}
+          </button>
+        </div>
+
+        {/* 签到记录 (最近 7 天) */}
+        {checkinRecent.length > 0 && (
+          <div className="mb-6 p-3 rounded-xl border border-white/10 bg-white/[0.02]">
+            <div className="text-xs text-white/40 mb-2 flex items-center gap-1">
+              <Activity className="w-3 h-3" /> 最近 30 天签到记录 (积分)
+            </div>
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {checkinRecent.slice(0, 7).map(r => (
+                <div key={r.id} className="flex items-center justify-between text-xs">
+                  <span className="text-white/60">{new Date(r.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+                  <span className="text-cyan-300 font-semibold">+{r.points} 积分</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* 2026-07-28: 头部下方快捷操作 (显眼位置放注销) */}
         <div className="mb-6 flex items-center gap-2 flex-wrap p-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.03]">
           <span className="text-xs text-amber-300/80">快捷操作:</span>
@@ -317,7 +423,7 @@ export default function ProfilePage() {
               {new Date(user.created_at).toISOString().slice(0, 10)}
             </div>
           </div>
-          {/* 会员状态 */}
+          {/* 会员状态 - 2026-08-01 精确到秒 */}
           <div className={`rounded-2xl p-4 md:p-5 border relative overflow-hidden ${
             isVip && !isExpired
               ? 'border-fuchsia-500/20 bg-gradient-to-br from-fuchsia-500/5 to-pink-500/5'
@@ -329,14 +435,38 @@ export default function ProfilePage() {
               isVip ? 'bg-fuchsia-500/10' : isBasic ? 'bg-sky-500/10' : 'bg-white/5'
             }`} />
             <div className={`text-xs mb-1 ${isVip ? 'text-fuchsia-300/80' : isBasic ? 'text-sky-300/80' : 'text-white/60'}`}>会员状态</div>
-            <div className="flex items-baseline gap-1">
-              <span className={`text-2xl md:text-3xl font-bold ${isVip ? 'text-fuchsia-300' : isBasic ? 'text-sky-300' : 'text-white'}`}>
-                {daysLeft === 9999 ? '永久' : daysLeft}
-              </span>
-              <span className={`text-sm ${isVip ? 'text-fuchsia-300/80' : isBasic ? 'text-sky-300/80' : 'text-white/60'}`}>
-                {daysLeft === 9999 ? '' : '天'}
-              </span>
-            </div>
+            {isForever ? (
+              <div className="flex items-baseline gap-1">
+                <span className={`text-2xl md:text-3xl font-bold ${isVip ? 'text-fuchsia-300' : 'text-white'}`}>永久</span>
+              </div>
+            ) : vipTimeLeft ? (
+              <div>
+                <div className="flex items-baseline gap-1">
+                  {vipTimeLeft.days > 0 && (
+                    <>
+                      <span className={`text-2xl md:text-3xl font-bold ${isVip ? 'text-fuchsia-300' : isBasic ? 'text-sky-300' : 'text-white'}`}>{vipTimeLeft.days}</span>
+                      <span className={`text-sm ${isVip ? 'text-fuchsia-300/80' : isBasic ? 'text-sky-300/80' : 'text-white/60'}`}>天</span>
+                    </>
+                  )}
+                  <span className={`text-2xl md:text-3xl font-bold ${isVip ? 'text-fuchsia-300' : isBasic ? 'text-sky-300' : 'text-white'} ${vipTimeLeft.days > 0 ? 'ml-1' : ''}`}>{vipTimeLeft.hours}</span>
+                  <span className={`text-sm ${isVip ? 'text-fuchsia-300/80' : isBasic ? 'text-sky-300/80' : 'text-white/60'}`}>时</span>
+                  <span className={`text-2xl md:text-3xl font-bold ${isVip ? 'text-fuchsia-300' : isBasic ? 'text-sky-300' : 'text-white'} ml-1`}>{vipTimeLeft.mins}</span>
+                  <span className={`text-sm ${isVip ? 'text-fuchsia-300/80' : isBasic ? 'text-sky-300/80' : 'text-white/60'}`}>分</span>
+                </div>
+                {/* 精确到秒的截止时间戳 (用户要求) */}
+                <div className="text-[10px] text-white/40 mt-1 font-mono">
+                  {user.expire_at ? `${new Date(user.expire_at).toLocaleString('zh-CN', { hour12: false })} 到期` : ''}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="flex items-baseline gap-1">
+                  <span className={`text-2xl md:text-3xl font-bold text-white/40`}>0</span>
+                  <span className="text-sm text-white/40">天</span>
+                </div>
+                <div className="text-[10px] text-red-300/80 mt-1">已过期</div>
+              </div>
+            )}
             <div className="text-[10px] text-white/40 mt-1">
               {user.user_group === 'admin' ? '👑 管理员' : isVip ? 'VIP 用户' : isBasic ? '基础会员' : '普通用户'}
             </div>

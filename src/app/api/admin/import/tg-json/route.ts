@@ -318,16 +318,24 @@ export async function POST(req: NextRequest) {
 
       // 2. INSERT (不依赖 RETURNING)
       // 2026-07-27: 加 doc_sheet 字段 (从 category 推, 套 sheet-mapping 合并规则)
+      // 2026-08-01: ON CONFLICT 改 (link) 唯一 + DO UPDATE 覆盖 name
+      //   之前 (link, name) 复合唯一 → 重导入时旧 name="描述：xxx" + 新 name="4分44秒" 不冲突 → 重复插入
+      //   现在用 constraint name 明确指定 (PG 有 2 个 UNIQUE 索引时不指定会失败)
+      //   覆盖 name: 只覆盖"描述：xxx"等脏数据, 不覆盖用户手动编辑过的 name
       const insertResults = await Promise.all(chunk.map(async (c) => {
         try {
           const docSheet = c.doc_sheet || inferDocSheetFromCategory(c.category);
           await sql`
             INSERT INTO xx_resources (name, link, link_code, source, category, size, doc_sheet, tags, access_level, pay_type, import_channel, status, is_multi_link, created_at, updated_at)
             VALUES (${c.name}, ${c.link}, ${c.link_code || ''}, ${c.source}, ${c.category}, ${c.size || ''}, ${docSheet}, ${c.tags || []}::text[], ${c.access_level}, ${c.pay_type}, ${c.import_channel}, 'active', ${c.is_multi_link || false}, NOW(), NOW())
-            ON CONFLICT (link, name) DO NOTHING
+            ON CONFLICT (link) WHERE link IS NOT NULL AND link <> '' DO UPDATE SET
+              name = CASE WHEN xx_resources.name ~ '^(描述|简介|概要|剧情|介绍|内容|故事|desc|summary)[:：]' THEN EXCLUDED.name ELSE xx_resources.name END,
+              updated_at = NOW()
           `;
           return { c, ok: true };
         } catch (e: any) {
+          // 2026-08-01: log SQL error 到 stderr 方便诊断
+          console.error('[tg-json] INSERT failed:', e.message?.slice(0, 200), 'name:', c.name?.slice(0, 30), 'link:', c.link?.slice(0, 60));
           return { c, ok: false, e };
         }
       }));

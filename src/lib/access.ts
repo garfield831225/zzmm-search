@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
 import { sql } from './db';
+import { isFutureTime, parseNeonTime } from '@/lib/time';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
@@ -74,7 +75,8 @@ export async function requireAccess(
     id: user.id,
     username: user.username,
     user_group: user.user_group,
-    expire_at: user.expire_at ? new Date(user.expire_at).toISOString() : null,
+    // 2026-08-01: 用 helper 处理 Neon HTTP 端 timestamptz 缺 tz 标记
+    expire_at: parseNeonTime(user.expire_at),
     is_expired: isExpired,
     effective_group: effectiveGroup,
   };
@@ -170,8 +172,8 @@ function isVipActive(userGroup: string, expireAt: string | Date | null): boolean
   if (userGroup === 'admin') return true;
   if (userGroup !== 'vip') return false;
   if (!expireAt) return true; // 永久码
-  const t = new Date(expireAt).getTime();
-  return t > Date.now();
+  // 2026-08-01: Neon HTTP 端 timestamptz 缺 tz 标记 → 用 helper 强制 UTC 解析
+  return isFutureTime(expireAt);
 }
 
 /**
