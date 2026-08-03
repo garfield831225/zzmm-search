@@ -4,7 +4,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv, Shield, Crown, User, Gift, Sparkles } from 'lucide-react';
+import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv, Shield, Crown, User, Gift, Sparkles, ChevronRight } from 'lucide-react';
+import HomeBanner from '@/components/home/Banner';
+import HomeSection, { type SectionItem } from '@/components/home/Section';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
@@ -139,6 +141,61 @@ export default function HomePage() {
   const [unlockMode, setUnlockMode] = useState<'code' | 'lumen'>('lumen');  // 默认走流明
   let toastCounter = 0;
   let copyToastCounter = 0;
+
+  // 2026-08-04: 首页 4 模块行 (Banner + 最新上映 + Basic 专区 + VIP 专区 + 主题专区)
+  const [secUpcoming, setSecUpcoming] = useState<SectionItem[]>([]);
+  const [secBasic, setSecBasic] = useState<SectionItem[]>([]);
+  const [secVip, setSecVip] = useState<SectionItem[]>([]);
+  const [secThemes, setSecThemes] = useState<{ id: number; name: string; slug: string; item_count: number }[]>([]);
+  const [secLoading, setSecLoading] = useState(true);
+
+  useEffect(() => {
+    // 2026-08-04: 4 模块并发加载, 取小数据 pageSize=12
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [upRes, baRes, vipRes, thRes] = await Promise.allSettled([
+          fetch('/api/upcoming?type=all&pageSize=12'),
+          fetch('/api/basic?pageSize=12'),
+          fetch('/api/vip?pageSize=12'),
+          fetch('/api/themes'),
+        ]);
+        if (cancelled) return;
+        const upData = upRes.status === 'fulfilled' ? await upRes.value.json() : { items: [] };
+        const baData = baRes.status === 'fulfilled' ? await baRes.value.json() : { items: [] };
+        const vipData = vipRes.status === 'fulfilled' ? await vipRes.value.json() : { items: [] };
+        const thData = thRes.status === 'fulfilled' ? await thRes.value.json() : { themes: [] };
+        setSecUpcoming((upData.items || []).map(mapToSection));
+        setSecBasic((baData.items || []).map(mapToSection));
+        setSecVip((vipData.items || []).map(mapToSection));
+        setSecThemes(thData.themes || []);
+        setSecLoading(false);
+      } catch (e) {
+        if (!cancelled) setSecLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  // 将 API item 映射到 SectionItem
+  function mapToSection(it: any): SectionItem {
+    return {
+      id: it.id,
+      tmdbId: it.tmdbId || it.tmdb_id,
+      title: it.title || it.name || '',
+      posterUrl: it.posterUrl || it.poster_url || (it.posterPath ? `https://image.tmdb.org/t/p/w500${it.posterPath}` : '') || '',
+      releaseDate: it.releaseDate || it.release_date,
+      voteAverage: it.voteAverage ?? it.vote_average,
+      source: it.source,
+      resourceCount: it.resourceCount ?? it.resource_count,
+      accessLevel: it.accessLevel ?? it.access_level,
+      importChannel: it.importChannel ?? it.import_channel,
+      payType: it.payType ?? it.pay_type,
+      category: it.category,
+      tmdbType: it.tmdbType ?? it.tmdb_type,
+    };
+  }
 
   const addToast = useCallback((type: DownloadToast['type'], message: string) => {
     const id = ++toastCounter;
@@ -665,7 +722,88 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* Content */}
+      {/* 2026-08-04: 4ktop 风格首页模块 (Banner + 4 模块行) */}
+      <div className="max-w-7xl mx-auto px-4 pt-6">
+        {/* 1. 顶部 banner 轮播 */}
+        <HomeBanner />
+
+        {/* 2. 最新上映模块 */}
+        <div className="mt-6">
+          <HomeSection
+            title="最新上映"
+            titleEn="NEW RELEASES"
+            emoji="🎬"
+            accent="cyan"
+            href="/upcoming"
+            items={secUpcoming}
+            loading={secLoading}
+          />
+        </div>
+
+        {/* 3. Basic 专区 (泽泽妈 115 文档) */}
+        <HomeSection
+          title="泽泽妈文档"
+          titleEn="ZEZHE LIBRARY"
+          emoji="👑"
+          accent="violet"
+          href="/basic"
+          items={secBasic}
+          loading={secLoading}
+        />
+
+        {/* 4. VIP 专区 */}
+        <HomeSection
+          title="VIP 影视"
+          titleEn="VIP EXCLUSIVE"
+          emoji="💎"
+          accent="amber"
+          href="/vip"
+          items={secVip}
+          loading={secLoading}
+        />
+
+        {/* 5. 主题专区 (横排卡片) */}
+        {secThemes.length > 0 && (
+          <section className="mb-6">
+            <div className="flex items-center justify-between mb-3 px-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🎯</span>
+                <h2 className="text-base sm:text-lg font-bold text-emerald-300">
+                  主题专区
+                  <span className="ml-2 text-[10px] sm:text-xs text-white/40 font-normal tracking-wider uppercase">THEMES</span>
+                </h2>
+              </div>
+              <Link href="/themes" className="flex items-center gap-0.5 text-xs text-white/50 hover:text-white transition">
+                查看更多 <ChevronRight size={14} />
+              </Link>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              {secThemes.slice(0, 8).map((th, i) => (
+                <motion.div
+                  key={th.id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.03 }}
+                >
+                  <Link
+                    href={`/themes/${th.id}`}
+                    className="block p-3 rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.04] to-teal-500/[0.04] hover:border-emerald-500/40 hover:from-emerald-500/[0.08] hover:to-teal-500/[0.08] transition group/th"
+                  >
+                    <div className="text-sm font-medium text-emerald-200 group-hover/th:text-emerald-100 line-clamp-1">
+                      🎬 {th.name}
+                    </div>
+                    <div className="text-[10px] text-white/40 mt-1">
+                      {th.item_count} 部资源
+                    </div>
+                  </Link>
+                </motion.div>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+
+      {/* 原来的搜索 + 卡片网格 (保留所有现有功能) */}
       <main className="max-w-7xl mx-auto px-4 py-6 relative">
         {/* Sort & Size Bar - 2026-07-25 改: 玻璃态 + 紫粉激活 */}
         <div className="flex flex-wrap items-center justify-between gap-3 mb-5 px-2">
