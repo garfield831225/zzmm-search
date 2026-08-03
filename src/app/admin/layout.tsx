@@ -63,6 +63,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <Link href="/admin/blacklist" className="text-white/60 hover:text-white">🚫 黑名单</Link>
           <Link href="/admin/users" className="text-white/60 hover:text-white">👥 用户列表</Link>
           <Link href="/admin/stats-dashboard" className="text-white/60 hover:text-white">📊 详细统计</Link>
+          <Link href="/admin/themes" className="text-emerald-300 hover:text-emerald-200 font-medium">🎯 主题专区</Link>
+          <Link href="/admin/pending" className="text-pink-300 hover:text-pink-200 font-medium">📥 审核队列</Link>
           <Link href="/admin/import" className="text-white/60 hover:text-white">📥 导入</Link>
           <Link href="/admin/import-tg" className="text-white/60 hover:text-white">📡 TG导入</Link>
           <Link href="/admin/import-hub" className="text-pink-300 hover:text-pink-200 font-medium">📤 数据导入中心</Link>
