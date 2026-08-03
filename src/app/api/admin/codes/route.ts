@@ -22,6 +22,7 @@ const VIP_PLANS: Record<string, { plan_id: string; duration: number; label: stri
   vip_180d:    { plan_id: 'VIP-180D',    duration: 180,  label: 'VIP 半年',   default_price: 58 },
   vip_365d:    { plan_id: 'VIP-365D',    duration: 365,  label: 'VIP 年卡',   default_price: 98 },
   vip_forever: { plan_id: 'VIP-FOREVER', duration: 0,    label: 'VIP 永久',   default_price: 198 },
+  vip_trial:   { plan_id: 'VIP-TRIAL-1D', duration: 1,   label: 'VIP 试用 1 天', default_price: 0 },
 };
 
 function genCodeFull(channel: string): string {
@@ -39,38 +40,103 @@ export async function POST(req: NextRequest) {
   const count = Math.max(1, Math.min(1000, parseInt(String(body.count || 1), 10)));
   const channel = String(body.channel || 'xy');
   const note = String(body.note || '').slice(0, 200);
+  const batchId = body.batch_id ? String(body.batch_id).slice(0, 50) : null;
+  const lumenAmount = body.lumen_amount ? parseInt(String(body.lumen_amount), 10) : null;
+  const targetResourceId = body.target_resource_id ? parseInt(String(body.target_resource_id), 10) : null;
 
-  const plan = VIP_PLANS[planKey];
-  if (!plan) return NextResponse.json({ error: '未知的 plan: ' + planKey }, { status: 400 });
-
+  // 2026-07-28: 4 种 plan: vip_30d/180d/365d/forever (VIP) + lumen (流明) + unlock (单资源)
+  // 不同的 code_type 走不同的 INSERT
   const sql = neon(process.env.DATABASE_URL || '');
   try {
     const codes: string[] = [];
-    // 2026-07-20: JS 算 expires_at (Neon v3 无 .unsafe())
+    // 流明码默认 1 年有效 (避免后台忘了清, 长期堆积)
+    const baseExpiresAt = new Date(Date.now() + 365 * 86400000).toISOString();
+
+    if (planKey === 'lumen') {
+      // 流明兑换码: code_type='lumen', user_group=任意(谁都能用)
+      if (!lumenAmount || lumenAmount < 1 || lumenAmount > 1000000) {
+        return NextResponse.json({ error: '流明数必须 1-1000000' }, { status: 400 });
+      }
+      for (let i = 0; i < count; i++) codes.push(genCodeFull(channel));
+      const BATCH = 50;
+      let inserted = 0;
+      for (let i = 0; i < codes.length; i += BATCH) {
+        const slice = codes.slice(i, i + BATCH);
+        await Promise.all(slice.map(code =>
+          sql`INSERT INTO xx_activation_codes
+              (code, code_type, plan_id, duration, channel, sent_note, batch_id, created_by, expires_at, is_used, user_group, lumen_amount, price_at_issue)
+              VALUES (${code}, 'lumen', 'LUMEN-CODE', 0, ${channel}, ${note}, ${batchId}, ${auth.userId}, ${baseExpiresAt}, false, 'user', ${lumenAmount}, 0)`
+            .then(() => { inserted++; })
+            .catch((e: any) => {
+              if (!String(e.message).includes('duplicate key') && !String(e.message).includes('unique')) throw e;
+            })
+        ));
+      }
+      return NextResponse.json({
+        codes, plan: '流明兑换码', plan_id: 'LUMEN-CODE', count, channel,
+        channel_label: channel === 'wd' ? '微店' : '闲鱼',
+        batch_id: batchId || '', price_at_issue: 0, lumen_amount: lumenAmount,
+        inserted, requested: count
+      });
+    }
+
+    if (planKey === 'unlock') {
+      // 单资源解锁码: code_type='unlock', target_resource_id 必填
+      if (!targetResourceId) {
+        return NextResponse.json({ error: '请指定 target_resource_id' }, { status: 400 });
+      }
+      for (let i = 0; i < count; i++) codes.push(genCodeFull(channel));
+      const BATCH = 50;
+      let inserted = 0;
+      for (let i = 0; i < codes.length; i += BATCH) {
+        const slice = codes.slice(i, i + BATCH);
+        await Promise.all(slice.map(code =>
+          sql`INSERT INTO xx_activation_codes
+              (code, code_type, plan_id, duration, channel, sent_note, batch_id, created_by, expires_at, is_used, user_group, target_resource_id, price_at_issue)
+              VALUES (${code}, 'unlock', 'UNLOCK', 0, ${channel}, ${note}, ${batchId}, ${auth.userId}, ${baseExpiresAt}, false, 'user', ${targetResourceId}, 0)`
+            .then(() => { inserted++; })
+            .catch((e: any) => {
+              if (!String(e.message).includes('duplicate key') && !String(e.message).includes('unique')) throw e;
+            })
+        ));
+      }
+      return NextResponse.json({
+        codes, plan: '单资源解锁码', plan_id: 'UNLOCK', count, channel,
+        channel_label: channel === 'wd' ? '微店' : '闲鱼',
+        batch_id: batchId || '', price_at_issue: 0, target_resource_id: targetResourceId,
+        inserted, requested: count
+      });
+    }
+
+    // VIP 套餐 (vip_30d/180d/365d/forever)
+    const plan = VIP_PLANS[planKey];
+    if (!plan) return NextResponse.json({ error: '未知的 plan: ' + planKey }, { status: 400 });
+
     const expiresAt = plan.duration > 0
       ? new Date(Date.now() + plan.duration * 86400000).toISOString()
       : null;
-    // duration: 永久=0, 但表 NOT NULL, 用 9999 表示永久 (前端展示时判断为永久)
     const durationValue = plan.duration > 0 ? plan.duration : 9999;
-
     for (let i = 0; i < count; i++) codes.push(genCodeFull(channel));
-
-    // 50 并发批量 INSERT, 避免 300/500 触发 Vercel 30s 超时
     const BATCH = 50;
     let inserted = 0;
     for (let i = 0; i < codes.length; i += BATCH) {
       const slice = codes.slice(i, i + BATCH);
       await Promise.all(slice.map(code =>
         sql`INSERT INTO xx_activation_codes
-            (code, code_type, plan_id, duration, channel, sent_note, created_by, expires_at, is_used, user_group)
-            VALUES (${code}, 'vip', ${plan.plan_id}, ${durationValue}, ${channel}, ${note}, ${auth.userId}, ${expiresAt}, false, 'vip')`
+            (code, code_type, plan_id, duration, channel, sent_note, batch_id, created_by, expires_at, is_used, user_group, price_at_issue)
+            VALUES (${code}, 'vip', ${plan.plan_id}, ${durationValue}, ${channel}, ${note}, ${batchId}, ${auth.userId}, ${expiresAt}, false, 'vip', ${plan.default_price})`
           .then(() => { inserted++; })
           .catch((e: any) => {
             if (!String(e.message).includes('duplicate key') && !String(e.message).includes('unique')) throw e;
           })
       ));
     }
-    return NextResponse.json({ codes, plan: plan.label, count, channel, inserted, requested: count });
+    return NextResponse.json({
+      codes, plan: plan.label, plan_id: plan.plan_id, count, channel,
+      channel_label: channel === 'wd' ? '微店' : '闲鱼',
+      batch_id: batchId || '', price_at_issue: plan.default_price,
+      inserted, requested: count
+    });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

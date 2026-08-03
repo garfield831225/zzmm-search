@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { CheckCircle2, AlertCircle, Loader2, Sparkles, Crown, Calendar, Tag, ArrowRight, Home } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Loader2, Sparkles, Crown, Calendar, Tag, ArrowRight, Home, Gift, Coins, Clock, History } from 'lucide-react';
 
 interface ActivateResult {
   success: boolean;
@@ -44,6 +44,10 @@ export default function ActivatePage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ActivateResult | null>(null);
   const [logged, setLogged] = useState<boolean | null>(null);
+  // 2026-07-29: 兑换中心 - 3 统计卡 + 兑换历史
+  const [balance, setBalance] = useState<{ lumen_balance: number; user_group: string; expire_at: string | null; vip_active: boolean } | null>(null);
+  const [activationHistory, setActivationHistory] = useState<any[]>([]);
+  const [unlockHistory, setUnlockHistory] = useState<any[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
@@ -53,6 +57,36 @@ export default function ActivatePage() {
     // 探测登录态
     const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token');
     setLogged(!!t);
+  }, []);
+
+  // 2026-07-29: 加载余额 + 兑换历史 + 解锁历史
+  useEffect(() => {
+    const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token');
+    if (!t) return;
+    const headers = { Authorization: 'Bearer ' + t };
+    fetch('/api/user/balance', { headers, cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => {
+        if (d && typeof d.lumen_balance !== 'undefined') {
+          setBalance({
+            lumen_balance: d.lumen_balance || 0,
+            user_group: d.user_group || 'basic',
+            expire_at: d.expire_at || null,
+            vip_active: d.vip_active || false,
+          });
+        }
+      })
+      .catch(() => {});
+    // 兑换历史 (激活码使用记录)
+    fetch('/api/user/activations', { headers, cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => setActivationHistory((d.items || []).slice(0, 5)))
+      .catch(() => {});
+    // 解锁历史
+    fetch('/api/user/unlocks/list', { headers, cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => setUnlockHistory((d.items || []).slice(0, 5)))
+      .catch(() => {});
   }, []);
 
   const handleActivate = async (e: React.FormEvent) => {
@@ -109,10 +143,45 @@ export default function ActivatePage() {
               <Sparkles className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold">激活码兑换</h1>
-              <p className="text-xs text-white/40 mt-0.5">支持 VIP 会员码 / 单资源解锁码</p>
+              <h1 className="text-xl font-bold">兑换中心</h1>
+              <p className="text-xs text-white/40 mt-0.5">激活码兑换 · 流明余额 · 兑换历史</p>
             </div>
           </div>
+
+          {/* 2026-07-29: 3 统计卡 (流明余额 / VIP 状态 / 解锁次数) */}
+          {logged && (
+            <div className="grid grid-cols-3 gap-2 mb-5">
+              <div className="rounded-xl p-3 border border-amber-500/20 bg-gradient-to-br from-amber-500/5 to-yellow-500/5">
+                <div className="flex items-center gap-1.5 text-amber-300/80 text-[10px] mb-1">
+                  <Coins className="w-3 h-3" /> 流明余额
+                </div>
+                <div className="text-xl font-bold text-amber-300">
+                  {balance?.lumen_balance ?? '-'}
+                </div>
+              </div>
+              <div className="rounded-xl p-3 border border-violet-500/20 bg-gradient-to-br from-violet-500/5 to-purple-500/5">
+                <div className="flex items-center gap-1.5 text-violet-300/80 text-[10px] mb-1">
+                  <Crown className="w-3 h-3" /> 会员状态
+                </div>
+                <div className="text-sm font-bold text-violet-300 truncate">
+                  {balance?.vip_active ? 'VIP' : balance?.user_group || 'basic'}
+                </div>
+                <div className="text-[9px] text-white/40 mt-0.5 truncate">
+                  {balance?.vip_active && balance?.expire_at
+                    ? new Date(balance.expire_at).toLocaleDateString('zh-CN') + ' 到期'
+                    : '无 VIP'}
+                </div>
+              </div>
+              <div className="rounded-xl p-3 border border-cyan-500/20 bg-gradient-to-br from-cyan-500/5 to-blue-500/5">
+                <div className="flex items-center gap-1.5 text-cyan-300/80 text-[10px] mb-1">
+                  <Sparkles className="w-3 h-3" /> 解锁次数
+                </div>
+                <div className="text-xl font-bold text-cyan-300">
+                  {unlockHistory.length}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 登录提示 */}
           {logged === false && (
@@ -168,9 +237,9 @@ export default function ActivatePage() {
                   className="w-full py-3.5 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl font-semibold hover:opacity-90 disabled:opacity-50 transition flex items-center justify-center gap-2 shadow-lg shadow-violet-500/20"
                 >
                   {loading ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> 激活中...</>
+                    <><Loader2 className="w-4 h-4 animate-spin" /> 升级中...</>
                   ) : (
-                    <><Sparkles className="w-4 h-4" /> 立即激活</>
+                    <><Sparkles className="w-4 h-4" /> 立即升级</>
                   )}
                 </button>
               </form>
@@ -181,7 +250,7 @@ export default function ActivatePage() {
             <>
               <div className="mt-6 text-center text-sm text-white/40">还没有激活码？</div>
               <button
-                onClick={() => router.push('/shop')}
+                onClick={() => router.push('/upgrade')}
                 className="mt-3 w-full py-3 bg-gradient-to-r from-orange-500 to-amber-500 rounded-xl font-semibold hover:opacity-90 transition flex items-center justify-center gap-2"
               >
                 <span>🛒</span>
@@ -194,6 +263,48 @@ export default function ActivatePage() {
             </>
           )}
         </div>
+
+        {/* 2026-07-29: 兑换历史 + 解锁历史 */}
+        {logged && (activationHistory.length > 0 || unlockHistory.length > 0) && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="mt-4 bg-[#12121a] border border-white/5 rounded-2xl p-4"
+          >
+            <div className="flex items-center gap-2 mb-3 text-white/80">
+              <History className="w-4 h-4" />
+              <h3 className="text-sm font-semibold">最近兑换 / 解锁</h3>
+            </div>
+            <div className="space-y-2">
+              {activationHistory.map((h) => (
+                <div key={`a-${h.id}`} className="flex items-center gap-2 text-xs px-2 py-1.5 rounded-lg bg-white/5">
+                  <Gift className="w-3 h-3 text-pink-300 shrink-0" />
+                  <span className="text-white/70 truncate flex-1">
+                    {h.code || h.code_value || h.code_id || '激活码'} · {h.plan_label || h.code_type || '兑换'}
+                  </span>
+                  <span className="text-white/40 shrink-0">
+                    {h.used_at ? new Date(h.used_at).toLocaleDateString('zh-CN') : ''}
+                  </span>
+                </div>
+              ))}
+              {unlockHistory.map((u) => (
+                <div key={`u-${u.id}`} className="flex items-center gap-2 text-xs px-2 py-1.5 rounded-lg bg-white/5">
+                  <Sparkles className="w-3 h-3 text-cyan-300 shrink-0" />
+                  <span className="text-white/70 truncate flex-1">
+                    {(u.resource_name || `资源 #${u.resource_id}`).substring(0, 28)}
+                  </span>
+                  <span className="text-amber-300 shrink-0">
+                    {u.lumen_cost ? `💎${u.lumen_cost}` : '免费'}
+                  </span>
+                  <span className="text-white/40 shrink-0">
+                    {u.unlocked_at ? new Date(u.unlocked_at).toLocaleDateString('zh-CN') : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
 
         <div className="mt-4 text-center">
           <Link href="/" className="text-sm text-white/30 hover:text-white/60 inline-flex items-center gap-1">
@@ -282,10 +393,10 @@ function SuccessView({ result, router }: { result: ActivateResult; router: any }
           </button>
         ) : (
           <button
-            onClick={() => router.push('/tmdb-films')}
+            onClick={() => router.push('/')}
             className="flex-1 py-3 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl text-sm font-medium hover:opacity-90 transition flex items-center justify-center gap-1"
           >
-            去看电影 <ArrowRight className="w-4 h-4" />
+            请享受vip旅程 <ArrowRight className="w-4 h-4" />
           </button>
         )}
       </div>

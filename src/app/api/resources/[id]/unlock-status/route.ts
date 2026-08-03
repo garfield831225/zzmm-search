@@ -1,11 +1,15 @@
 // /api/resources/[id]/unlock-status - 查资源解锁状态
 // 返回: { unlocked, lumen_cost, lumen_balance (if user), user_vip_active }
+// 2026-08-01: 加 fetchOptions no-store (修 memory #9 stale cache) + helper 修 tz bug
 import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
+import { neon, neonConfig } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
+import { isFutureTime } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 5;
+
+neonConfig.fetchConnectionCache = false;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
@@ -28,7 +32,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 
   const auth = getUserId(req.headers.get('authorization'));
-  const sql = neon(process.env.DATABASE_URL || '');
+  const sql = neon(process.env.DATABASE_URL || '', { fetchOptions: { cache: 'no-store' } });
 
   try {
     // 查资源
@@ -49,7 +53,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
                                 WHERE u.id = ${auth.userId} LIMIT 1` as any[];
       if (users[0]) {
         lumenBalance = users[0].lumen_balance || 0;
-        userVipActive = (users[0].user_group === 'vip' || users[0].user_group === 'admin') && (!users[0].expire_at || new Date(users[0].expire_at) > new Date());
+        userVipActive = (users[0].user_group === 'vip' || users[0].user_group === 'admin') && isFutureTime(users[0].expire_at);
       }
     }
 

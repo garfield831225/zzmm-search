@@ -91,6 +91,18 @@ const TMDB_KEYS = [
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
 
+// 2026-07-27: 拿完整 TMDB 详情 (overview/origin_country/genres/backdrop/original_title/vote_count/full release_date)
+// 不拿这个, cache 99% 字段空, 详情页看不到
+async function getTmdbDetails(tmdbId, type, keyIndex = 0) {
+  await tmdbLimiter.wait(keyIndex);
+  const url = `${TMDB_BASE}/${type}/${tmdbId}?api_key=${TMDB_KEYS[keyIndex % TMDB_KEYS.length]}&language=zh-CN`;
+  try {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
 log(`start: batch=${BATCH_SIZE} max_rounds=${MAX_ROUNDS} interval=${INTERVAL_MS}ms pid=${process.pid} proxy=${PROXY_URL}`);
 
 // ─── 速率限制 ────────────────────────────────────────────────────────────────
@@ -131,7 +143,8 @@ function isGarbled(name) {
 function subTypeToTmdb(subType) {
   if (!subType) return 'movie';
   const s = subType.toLowerCase();
-  if (['剧集', '韩剧', '欧美剧', '港台剧', '国产剧', '日剧'].some(t => s.includes(t))) return 'tv';
+  // 2026-07-27: 补 动漫/综艺/纪录片/少儿 等子类型 → 都是 tv
+  if (['剧集', '韩剧', '欧美剧', '港台剧', '国产剧', '日剧', '动漫', '动画', '综艺', '纪录片', '少儿', '演唱会', '连载'].some(t => s.includes(t))) return 'tv';
   return 'movie';
 }
 
@@ -261,6 +274,40 @@ function cleanFolderName(raw) {
   }
   const trimmed = raw.replace(/^[\[\]（）【】《》\s]+|[\[\]（）【】《》\s]+$/g, '').trim();
   if (trimmed.length >= 2 && !/[\u4e00-\u9fff]/.test(trimmed)) {
+    // 2026-07-27: 纯英文场景再清洗一遍 (剥 . 分隔的短修饰词, Blu-ray/HEVC/USA/UHD/1080p 等)
+    // 比如 "The.Summer.Hikaru.Died.. .JPN.Blu-ray.AVC.LPCM.2.0-NA" → "The Summer Hikaru Died"
+    const t = trimmed
+      .split(/[.\s_\-]+/)  // 按 . 空格 _ - 切
+      .map(s => s.trim())
+      .filter(s => {
+        if (!s) return false;
+        if (/^\d{1,2}\.\d+G$/.test(s)) return false; // 5.1 / 7.1 等
+        if (/^(19\d{2}|20\d{2})$/i.test(s)) return false; // 年份
+        if (/^(4k|8k|2160p|1080p|720p|480p|bluray|blu-ray|bdmv|remux|web-?dl|hdtv|webrip|hdr10\+?|hdr|dv|dovi|hevc|avc|x264|x265|h\.?264|h\.?265|10bit|atmos|truehd|dts-?hd|dts|dts-hd|ma\d|pcm|lpcm|ac3|aac|mp3|flac|ddp|dd5\.?1|dd7\.?1|2\.0|5\.1|7\.1|usa|uk|jp|kr|cn|eu|fr|de|hk|tw|bd|cd|dvd|iso|uhd|hd|sdr|qpel|xvid|divx|complete|criterion|extended|director|edition|theatrical|uncut|remastered|proper|repack|limited|dual|audio|multi|subs?|nfo|sample|cover|jpg|png|web|netflix|amazon|disney|appletv|hulu|paramount|sony|warners?|universal|fox|mill creek|arrow|criterion|shout|factory|vinegar|kino|lions|gate|IMDb|Blu-ray|BDRip|BRRip|remaster|multi)$/i.test(s)) return false;
+        if (s.length === 1) return false;
+        if (s.length <= 2 && !/[A-Z]/.test(s)) return false; // 单字符 + 双字符小写不要
+        return true;
+      })
+      .join(' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    // 2026-07-27: 再剥 stopword (a/the/in) + tracker + 短词 (JPN/NA), 严格 ≥ 4 字符
+    if (t.length >= 2) {
+      const STOP2 = /^(the|a|an|and|or|of|in|on|at|to|for|by|with|from|is|are|was|were|be|been|being|have|has|had|do|does|did|will|would|should|could|may|might|can|must|na|no|oh|my|his|her|its|our|your|their|i|me|you|he|she|we|they|them|us|him|this|that|these|those|some|any|all|each|every|most|more|less|very|just|only|also|even|still|too|so|if|then|than|as|but|not|n't|jp|kr|us|uk|cn|hk|tw|eu|na|au|ca|fr|de|it|es|ru|in|br|mx|jp0|kr0|us0|uk0|cn0|hk0|tw0|na0|ray|blu|nyaa|0chd|cmct|hdsky|ourbits|chdbits|hdc|tjupt|hdt|lemonhd|hds|frds|beast|tsdm|fresh|pub|web|netflix|disney|amzn|hulu|appletv|n0|n1|nan|nan0|nan1|ntsc|pal|secam)$/i;
+      const t2 = t
+        .split(/\s+/)
+        .map(s => s.replace(/[.,;:!?'"()\[\]{}]/g, '').trim())
+        .filter(s => s.length >= 4)
+        .filter(s => !STOP2.test(s))
+        .filter(s => !/@/.test(s))
+        .filter(s => !/^\d+$/.test(s))
+        .join(' ')
+        .trim();
+      if (t2.length >= 2) {
+        return { cleanName: t2, year, season };
+      }
+      return { cleanName: t, year, season };
+    }
     return { cleanName: trimmed, year, season };
   }
   const afterStrip = raw.replace(/\s*\(\d{4}\)\s*$/, '').trim();
@@ -277,7 +324,7 @@ function cleanFolderName(raw) {
   return { cleanName: t, year, season };
 }
 
-async function searchTmdb(name, type, category, year, lang = 'zh-CN', keyIndex = 0) {
+async function searchTmdb(name, type, category, year, lang = 'zh-CN', keyIndex = 0, useYear = false) {
   await tmdbLimiter.wait(keyIndex);
   const endpoint = type === 'tv' ? '/search/tv' : '/search/movie';
   const yearParam = type === 'tv' ? 'first_air_date_year' : 'year';
@@ -296,30 +343,108 @@ async function searchTmdb(name, type, category, year, lang = 'zh-CN', keyIndex =
       if (candidates.length >= 8) break;
     }
     if (candidates.length === 0) return null;
+
+    // 2026-07-27 用户拍板: "title 那列不能作为匹配依据么?? 剥离那么差么!!!!"
+    // 1 个候选就是它 (仅 useYear=true 时接受, useYear=false 是兜底不能 1 候选就接受)
+    // year 校验: 候选的 release_date 必须跟用户提供的 year 一致 (±2 年)
+    if (candidates.length === 1 && useYear) {
+      if (year) {
+        const releaseYear = (candidates[0].result.release_date || candidates[0].result.first_air_date || '').slice(0, 4);
+        if (releaseYear && Math.abs(parseInt(releaseYear) - parseInt(year)) > 2) {
+          return null;
+        }
+      }
+      return { ...candidates[0].result, tmdb_status: candidates[0].status };
+    }
+
+    // 多个候选: 如果用户给了 year, 先按 year 过滤 (release_date year ±2 范围内)
+    let filtered = candidates;
+    if (year) {
+      filtered = candidates.filter(c => {
+        const ry = (c.result.release_date || c.result.first_air_date || '').slice(0, 4);
+        return !ry || Math.abs(parseInt(ry) - parseInt(year)) <= 2;
+      });
+      if (filtered.length === 0) filtered = candidates;
+      if (filtered.length === 1) return { ...filtered[0].result, tmdb_status: filtered[0].status };
+    }
+
     const norm = (s) => s.toLowerCase().replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '');
     const cn = norm(name);
-    for (const c of candidates) {
+    for (const c of filtered) {
       const t = c.result.title || c.result.name || '';
       if (!t) continue;
       const tn = norm(t);
       if (tn.length === cn.length && tn === cn) return { ...c.result, tmdb_status: c.status };
     }
-    for (const c of candidates) {
+    for (const c of filtered) {
       const t = c.result.title || c.result.name || '';
       if (!t) continue;
       const tn = norm(t);
       if (tn.includes(cn) && cn.length >= 2 && tn.length - cn.length <= 6) return { ...c.result, tmdb_status: c.status };
     }
-    for (const c of candidates) {
+    for (const c of filtered) {
       const t = c.result.title || c.result.name || '';
       if (!t) continue;
       const tn = norm(t);
       if (tn.startsWith(cn) && cn.length >= 2) return { ...c.result, tmdb_status: c.status };
     }
-    return null;
+    // 2026-07-27: token 全包含匹配 (剥 stopword), 解决 "The Summer Hikaru Died" vs "Summer Hikaru Died" 问题
+    const STOP_EN = /\b(the|a|an|and|or|of|in|on|at|to|for|by|with|from|is|are|was|were|be|been|being|have|has|had|do|does|did|will|would|may|might|can|must|i|me|you|he|she|we|they|this|that|some|any|all|no)\b/gi;
+    const tokens = (s) => s.toLowerCase().replace(/[^a-zA-Z0-9\u4e00-\u9fff\s]/g, ' ').split(/\s+/).filter(t => t.length >= 2 && !STOP_EN.test(t));
+    const cnTokens = tokens(name);
+    if (cnTokens.length >= 2) {
+      for (const c of filtered) {
+        const t = c.result.title || c.result.name || '';
+        if (!t) continue;
+        const tTokens = tokens(t);
+        if (cnTokens.every(tok => tTokens.includes(tok))) {
+          return { ...c.result, tmdb_status: c.status };
+        }
+      }
+    }
+    // 2026-07-27: 模糊编辑距离匹配 (中文同人不同字, 如 "侠盗石川" vs "大盗五右卫门")
+    if (cn.length >= 2) {
+      for (const c of filtered) {
+        const t = c.result.title || c.result.name || '';
+        if (!t) continue;
+        const tn = norm(t);
+        if (tn.length < 2) continue;
+        const d = levenshtein(cn, tn);
+        const maxLen = Math.max(cn.length, tn.length);
+        const allow = Math.max(2, Math.floor(maxLen * 0.3));
+        if (d <= allow) {
+          return { ...c.result, tmdb_status: c.status };
+        }
+      }
+    }
+    // 多个候选 + 全不严格匹配 → useYear=true 才接受第 1 个, false 不接受
+    if (!useYear) return null;
+    return { ...filtered[0].result, tmdb_status: filtered[0].status };
   } catch (e) {
     return null;
   }
+}
+
+// 2026-07-27: Levenshtein 编辑距离 (中文 fuzzy 匹配)
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return dp[m][n];
 }
 
 async function matchOne(rawName, category, subType) {
@@ -331,8 +456,39 @@ async function matchOne(rawName, category, subType) {
     if (['剧集', '动漫', '综艺', '少儿频道'].includes(category)) tmdbType = 'tv';
     return { id: tmdbId, tmdb_type: tmdbType, poster: '', title: rawName.replace(/\s*\{tmdb-\d+\}/, '').trim(), vote: 0, year: '' };
   }
-  const { cleanName, year, season } = cleanFolderName(rawName);
-  if (cleanName.length < 2) return 'NOMATCH';
+
+  // 2026-07-27: 用户拍板 - "title 那列不能作为匹配依据么?? 剥离那么差么!!!!"
+  // 用户表的 name 字段 = 片名/标题, 直接搜 TMDB 就行, 不要瞎剥
+  // 判定"是不是文件名字符串" (含 [xxx].iso/1080p/Blu-ray/HEVC 等典型特征) → 才走 cleanFolderName
+  // 否则直接拿 rawName 当 cleanName (再小幅清洗掉 (YYYY) 等不影响匹配的修饰)
+  const isFileNameString = /\[[^\]]+\]|\.iso|1080p|720p|2160p|480p|4K|8K|UHD|BDMV|Blu-?ray|REMUX|HDTV|WEB-?DL|HEVC|AVC|x\.?264|x\.?265|HDR10|Dolby|TrueHD|Atmos|DTS/i.test(rawName)
+    || /[（(]\d{4}[)）]/.test(rawName)  // 含 (2024) 之类年份括号
+    || /第[一二三四五六七八九十\d]+季|S\d{1,2}/i.test(rawName);  // 季号
+
+  let cleanName, year, season;
+  if (isFileNameString) {
+    // 是文件名字符串 → 才走 cleanFolderName
+    const r = cleanFolderName(rawName);
+    cleanName = r.cleanName; year = r.year; season = r.season;
+  } else {
+    // 干净标题 → 只剥 (YYYY) 跟末尾季号, 不瞎剥
+    cleanName = rawName
+      .replace(/\s*[（(]\s*\d{4}\s*[)）]\s*$/g, '')  // 末尾 (2024) 剥
+      .replace(/第[一二三四五六七八九十\d]+季.*$/g, '')  // 末尾"第X季"剥
+      .replace(/\s*\{tmdb-\d+\}/g, '')
+      .trim();
+    // 提取年份
+    const ym = cleanName.match(/[（(]\s*(19\d{2}|20\d{2})\s*[)）]/);
+    year = ym ? ym[1] : '';
+    if (year) cleanName = cleanName.replace(ym[0], '').trim();
+    const sm = cleanName.match(/第([一二三四五六七八九十\d]+)季|S(\d{1,2})/i);
+    season = sm ? (sm[1] ? chineseToNumber(sm[1]) : parseInt(sm[2])) : null;
+    if (sm) cleanName = cleanName.replace(sm[0], '').trim();
+  }
+
+  if (!cleanName || cleanName.length < 2) return 'NOMATCH';
+  if (cleanName.length > 80) cleanName = cleanName.slice(0, 80);  // 太长截断
+
   const isEng = isEnglishName(cleanName);
   const strategies = isEng
     ? [{ lang: 'en-US', useYear: true }, { lang: 'en-US', useYear: false }, { lang: 'zh-CN', useYear: true }]
@@ -351,7 +507,7 @@ async function matchOne(rawName, category, subType) {
   let keyIdx = 0;
   for (const s of strategies) {
     for (const type of typeOrder) {
-      const result = await searchTmdb(cleanName, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length);
+      const result = await searchTmdb(cleanName, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length, s.useYear);
       keyIdx++;
       if (result) {
         return {
@@ -364,38 +520,110 @@ async function matchOne(rawName, category, subType) {
       }
     }
   }
+
+  // 2026-07-27: 降级搜不带尾部数字/符号的版本 (续集匹配系列名)
+  // "真人快打2" → "真人快打", "马达加斯加1+2" → "马达加斯加"
+  let noTrailingNum = cleanName;
+  for (let i = 0; i < 3; i++) {
+    const next = noTrailingNum.replace(/[\s:：\-_+/&]?\d{1,3}\s*$/, '').trim();
+    if (next === noTrailingNum) break;
+    noTrailingNum = next;
+  }
+  if (noTrailingNum !== cleanName && noTrailingNum.length >= 2) {
+    for (const s of strategies) {
+      for (const type of typeOrder) {
+        const result = await searchTmdb(noTrailingNum, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length, s.useYear);
+        keyIdx++;
+        if (result) {
+          return {
+            id: String(result.id), tmdb_type: type,
+            poster: result.poster_path ? `${TMDB_IMG}${result.poster_path}` : '',
+            title: result.title || result.name || cleanName,
+            vote: result.vote_average || 0,
+            year: (result.release_date || result.first_air_date || '').slice(0, 4) || year,
+          };
+        }
+      }
+    }
+  }
+
   return 'NOMATCH';
 }
 
+// 2026-07-27: 调 getTmdbDetails 拿完整字段 (overview/origin_country/genres/backdrop/original_title/vote_count/release_date 完整版)
+// 2026-07-09: 旧 cacheIt 只写 title/poster/vote/year, 99% cache 字段空, 详情页看不到
 async function cacheIt(r) {
   if (DRY_RUN) return;
+  // 拿完整 detail
+  let detail = null;
+  try { detail = await getTmdbDetails(r.id, r.tmdb_type); } catch {}
+  const originalTitle = detail?.original_title || detail?.original_name || null;
+  const overview = detail?.overview || null;
+  const tagline = detail?.tagline || null;
+  const genres = (detail?.genres || []).map(g => g.name);
+  const backdrop = detail?.backdrop_path || null;
+  const releaseDate = detail?.release_date || detail?.first_air_date || null;
+  const voteCount = detail?.vote_count ?? 0;
+  const originCountry = r.tmdb_type === 'tv'
+    ? (detail?.origin_country || []).join(',') || null
+    : (detail?.production_countries?.[0]?.iso_3166_1 || null);
   try {
     await sql`
-      INSERT INTO xx_tmdb_cache (tmdb_id, tmdb_type, title, original_title, overview, poster_path, vote_average, vote_count, release_date, status, tagline, genres, cached_at)
-      VALUES (${r.id}, ${r.tmdb_type}, ${r.title}, ${''}, ${''}, ${r.poster}, ${r.vote}, ${0}, ${r.year || null}, ${null}, ${''}, ${null}, NOW())
+      INSERT INTO xx_tmdb_cache (tmdb_id, tmdb_type, title, original_title, overview, poster_path, vote_average, vote_count, release_date, status, tagline, genres, origin_country, backdrop_path, cached_at)
+      VALUES (${r.id}, ${r.tmdb_type}, ${r.title}, ${originalTitle}, ${overview}, ${r.poster}, ${r.vote}, ${String(voteCount)}, ${releaseDate || r.year || null}, ${detail?.status || null}, ${tagline}, ${genres.length ? genres : null}, ${originCountry}, ${backdrop}, NOW())
       ON CONFLICT (tmdb_id) DO UPDATE SET
         title = EXCLUDED.title,
+        original_title = COALESCE(EXCLUDED.original_title, xx_tmdb_cache.original_title),
+        overview = COALESCE(EXCLUDED.overview, xx_tmdb_cache.overview),
         poster_path = EXCLUDED.poster_path,
         vote_average = EXCLUDED.vote_average,
+        vote_count = COALESCE(EXCLUDED.vote_count, xx_tmdb_cache.vote_count),
+        release_date = COALESCE(EXCLUDED.release_date, xx_tmdb_cache.release_date),
+        status = COALESCE(EXCLUDED.status, xx_tmdb_cache.status),
+        tagline = COALESCE(EXCLUDED.tagline, xx_tmdb_cache.tagline),
+        genres = COALESCE(EXCLUDED.genres, xx_tmdb_cache.genres),
+        origin_country = COALESCE(EXCLUDED.origin_country, xx_tmdb_cache.origin_country),
+        backdrop_path = COALESCE(EXCLUDED.backdrop_path, xx_tmdb_cache.backdrop_path),
         cached_at = NOW()
     `;
-  } catch {}
+  } catch (e) {
+    log('cacheIt err: ' + (e.message || '').slice(0, 200));
+  }
 }
 
 // ─── 一轮 batch ──────────────────────────────────────────────────────────────
 async function runOneBatch(batchSize) {
   try {
+    // 2026-07-27: 修 SQL 条件 (用户报"匹配不上是你匹配有问题"):
+    //   1) 去掉 `name ~ '[\u4e00-\u9fff]'` 限制 (纯英文资源也能进入 matcher, 走 en-US 策略)
+    //   2) `LENGTH(TRIM(name)) > 1` 而不是 `LENGTH(name) > 5` (放过短名字)
+    //   3) 加 `NOT (name ~ '[\x00-\x1F]')` 排除控制字符 (虽然 Neon 不会写入)
+    //   4) `category NOT IN (...)` 保持, 不匹配 音乐/体育/合集 等
+    // 2026-07-27: 优先跑易命中的 category (剧集/电影/动漫/纪录片), 原盘类重试率太低放最后
+    //   同时 NOMATCH 的重试放最后 (已经试过没匹配到的, 别反复重试浪费 API)
+    //   2026-07-27: 加上 created_at 优先 (新导入的资源立刻匹配, 不等老资源清完)
     const rows = await sql`
       SELECT id, name, link, category, source, sub_type
       FROM xx_resources
       WHERE (tmdb_id IS NULL OR tmdb_id = '' OR tmdb_id IN ('NOMATCH', 'GARBLED'))
         AND status = 'active'
         AND name IS NOT NULL
-        AND LENGTH(name) > 5
-        AND name ~ '[\u4e00-\u9fff]'
+        AND LENGTH(TRIM(name)) > 1
         AND category NOT IN ('音乐', '体育', '合集', '学习资料', '其他', '游戏', '电子书', '精品课', '文档')
         AND (last_attempt_at IS NULL OR last_attempt_at < NOW() - INTERVAL '5 minutes')
-      ORDER BY id
+      ORDER BY
+        CASE
+          WHEN tmdb_id IN ('NOMATCH', 'GARBLED') THEN 1
+          ELSE 0
+        END,
+        CASE
+          WHEN category IN ('电影', '剧集', '动漫', '纪录片') THEN 0
+          WHEN category IN ('演唱会', '连载') THEN 1
+          ELSE 2
+        END,
+        -- 2026-07-27: 新插入的资源 (id 大) 优先 (用户期望新数据立刻出现)
+        created_at DESC,
+        id
       LIMIT ${batchSize}
     `;
     if (!rows.length) return { processed: 0, matched: 0, nomatch: 0, garbled: 0, reused: 0, failed: 0, done: true };
@@ -419,7 +647,7 @@ async function runOneBatch(batchSize) {
           if (item.link && linkMap[item.link]) {
             const reusedId = linkMap[item.link];
             if (!DRY_RUN) {
-              await sql`UPDATE xx_resources SET tmdb_id = ${reusedId}, last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
+              await sql`UPDATE xx_resources SET tmdb_id = ${reusedId}, matched_tmdb_at = NOW(), last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id}`.catch(() => {});
             }
             return { reused: true };
           }
@@ -438,7 +666,7 @@ async function runOneBatch(batchSize) {
           }
           if (result) {
             if (!DRY_RUN) {
-              const upd = await sql`UPDATE xx_resources SET tmdb_id = ${result.id}, last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id} RETURNING id`.catch(() => []);
+              const upd = await sql`UPDATE xx_resources SET tmdb_id = ${result.id}, matched_tmdb_at = NOW(), last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id} RETURNING id`.catch(() => []);
               if (!upd || !upd.length) return { status: 'failed' };
               await cacheIt(result);
             }

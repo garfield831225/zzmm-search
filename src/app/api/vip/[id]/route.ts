@@ -80,8 +80,14 @@ export async function GET(
         originalTitle: head.original_title,
         originalLanguage: head.original_language,
         overview: head.overview,
-        posterUrl: head.poster_path ? `${TMDB_IMG}/w500${head.poster_path}` : null,
-        backdropUrl: head.backdrop_path ? `${TMDB_IMG}/w1280${head.backdrop_path}` : null,
+        source: head.source,  // 2026-07-30: 区分来源
+        // 2026-07-30: xingfan poster 是完整 URL, tmdb 是 path
+        posterUrl: head.poster_path
+          ? (head.poster_path.startsWith('http') ? head.poster_path : `${TMDB_IMG}/w500${head.poster_path}`)
+          : null,
+        backdropUrl: head.backdrop_path
+          ? (head.backdrop_path.startsWith('http') ? head.backdrop_path : `${TMDB_IMG}/w1280${head.backdrop_path}`)
+          : null,
         voteAverage: head.vote_average ? Number(head.vote_average) : null,
         voteCount: head.vote_count ? Number(head.vote_count) : 0,
         releaseDate: head.release_date || head.first_air_date || null,

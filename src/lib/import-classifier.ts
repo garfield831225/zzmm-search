@@ -49,14 +49,43 @@ interface KeywordRule {
 }
 
 const KEYWORD_CATEGORY_RULES: KeywordRule[] = [
-  // 电子书 / 有声 / 小说
-  { patterns: ['有声', '小说', 'EPUB', 'MOBI', 'AZW3', 'TXT电子书', 'txt电子'], category: '电子书', priority: 100 },
+  // 电子书 / 有声 / 小说 / 2026-07-27 扩: 新书/豆瓣/书单/书推荐/合集/套装共/完整版
+  { patterns: ['有声', '小说', 'EPUB', 'MOBI', 'AZW3', 'TXT电子书', 'txt电子',
+    '新书', '豆瓣', '书单', '书推荐', '世界禁书', '读完这', '心理学神作', '霸榜',
+    '豆瓣9', '豆瓣8', '豆瓣7', '豆瓣TOP', '看完这', '读完这5本', '藏了多少', '震撼',
+    '套装共', '完整版',
+  ], category: '电子书', priority: 100 },
+  // 2026-07-27 扩: 短剧/微短剧/更新X集 归"剧集" (priority 50 介于动漫 75 和 综艺 25 之间, 不被电影吃掉)
+  { patterns: ['短剧', '微短剧', '横屏短剧', '抖音短剧', '快手短剧', '付费小说', '合集总链', '集完', '连载至', '更新X集', '更新0', '更新1', '更新2', '更新3', '更新4', '更新5', '更新6', '更新7', '更新8', '更新9'], category: '剧集', priority: 50 },
+  // 2026-07-27 扩: 1990s 老港片/台片"【稀有资源】" + 行业报告/电脑报/期号/杂志 归"电影"/"文档"
+  { patterns: ['稀有资源', '稀有', '豆瓣TOP', '合集', '精选', '6部', '全集', '原声', '国粤', '国配',
+    // 续扩: 老港片
+    '恐怖', '悬疑', '惊悚', '伦理', '情色', '三级', '风月', '艳情',
+    '邪典', 'Cult', '禁片', '邪教', 'Cult Film',
+    'TVB', '邵氏', '嘉禾', '老港片', '老电影', '怀旧经典',
+  ], category: '电影', priority: 36 },
+  { patterns: ['行业报告', '电脑报', '期号', '杂志', '周报', '月报', '期刊', '体坛', '销售与市场', '静心守一', '遇见虎灵', '隐形冠军', '逻辑新引'], category: '文档', priority: 85 },
   // 精品课
   { patterns: ['精品课', '课程', '讲座', '培训', '网课', '教学', '教程课'], category: '精品课', priority: 90 },
+  // 2026-07-27 软件/游戏 (免安装中文版/安卓/破解版/3DM/...) - 2026-07-27 改名"软件" (含游戏 + 工具)
+  // 注意: 范围比"游戏"广, 因为"免安装中文版"也匹配工具 (录屏/转换器/IDM 等)
+  // 用户视角看: 这些都是"软件"区, 不细分游戏/工具
+  { patterns: [
+    '免安装中文版', '免安装', '免安装版', '免安装绿色',
+    '安卓手机游戏', '安卓游戏', '安卓',
+    '单机联机', 'Steam', 'STEAM', 'Steam移植',
+    '3DM', '破解版', 'v1.', 'v0.',
+    '模拟器', 'PC策略', 'PC游戏', 'PC动作', '端游', '页游', '手游',
+    '送修改器', '便携', '绿色版', '汉化版',
+    '录屏', '转换器', '下载器', '文件搜索', '录屏大师',
+    '影音', '播放器', '解码器', '驱动', '插件',
+    'PDF工具', 'Office', 'Adobe', 'Photoshop', 'IDM',
+  ], category: '软件', priority: 76 },
   // 文档 / 教辅 / 教材 / PDF
-  { patterns: ['文档', '教程', '讲义', '课件', '教材', '学习资料', 'PDF', '教辅'], category: '文档', priority: 80 },
+  { patterns: ['文档', '教程', '讲义', '课件', '教材', '学习资料', 'PDF', '教辅', '电子书籍'], category: '文档', priority: 80 },
   // 动漫 (2026-07-18 加: 动漫花园新番推送全归动漫)
   // 字幕组白名单 + 动漫/新番/Raws/Baha/B-Global/TVアニメ 等
+  // 2026-07-27 加: 国漫 (国内动漫) / 更至 / 已刮削
   { patterns: [
     '动漫', '动画', '新番', 'Raws', 'RAW', 'Baha', 'B-Global', 'TVアニメ',
     '桜都', 'SweetSub', '喵萌', '酷漫', '星空', '千夏', 'MingY', 'MagicStar',
@@ -64,13 +93,14 @@ const KEYWORD_CATEGORY_RULES: KeywordRule[] = [
     'ANi', '天月', '猎户', 'JMAX', 'PorterRAWS', 'jibaketa', '肥猫压制',
     '爪爪', '铃风', '氢焰', '北宇治', '风都', '星河', '萌新乐园', '小猪动漫',
     '漫猫', '异世界', '后宫', '魔法少女', 'リリカル', 'Lycoris', 'Luminous',
+    '国漫', '更至', '已刮削', '刮削',
   ], category: '动漫', priority: 75 },
   // 音乐
   { patterns: ['FLAC', 'Hi-Res', 'HiRes', '专辑', 'SACD', 'DSD', 'HiFi', '演唱会', 'mp3下载', 'APE', 'WAV', '无损'], category: '音乐', priority: 70 },
   // 体育
   { patterns: ['NBA', '球赛', '欧冠', '世界杯', '英超', '西甲', '德甲', '意甲', '中超', 'CBA'], category: '体育', priority: 60 },
-  // 剧集 (连续剧标志)
-  { patterns: ['S0', 'E0', '连载', '更新至', '全', '第', '季'], category: '剧集', priority: 30 },
+  // 剧集 (连续剧标志) - 2026-07-27 扩: 完结 / EP / 已刮削 / 古装 / 内封简中
+  { patterns: ['S0', 'E0', '连载', '更新至', '全', '第', '季', '完结', 'EP', '古装', '内封简中', '内封简繁', '内嵌简中'], category: '剧集', priority: 30 },
   // 综艺
   { patterns: ['综艺', '真人秀', '选秀'], category: '综艺', priority: 25 },
   // 纪录片
@@ -79,6 +109,7 @@ const KEYWORD_CATEGORY_RULES: KeywordRule[] = [
   { patterns: ['演唱会', 'live', 'LIVE', 'concert', 'Concert', '巡演', '音乐会'], category: '演唱会', priority: 65 },
   // 2026-07-22 加: 电影 keyword (2025) / WEB-4K / BluRay / WEB-DL / REMUX / 蓝光
   // 之前 4K / WEB-DL 等没分类 → 全走"其他", 现加电影规则
+  // 2026-07-27 续扩: 剧情/奇幻/爱情/高码率/中文字幕/已刮削
   { patterns: [
     // 短链
     'S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9',
@@ -89,6 +120,13 @@ const KEYWORD_CATEGORY_RULES: KeywordRule[] = [
     'x264', 'x265', 'H.264', 'H.265', 'HEVC', 'AVC', 'AV1',
     'DTS', 'DTS-HD', 'TrueHD', 'Atmos', 'DDP', 'EAC3', 'AC3', 'AAC',
     '蓝光', '原盘', '重制', '国配', '国语', '中字', '中英',
+    // 类型标签
+    '剧情', '奇幻', '爱情', '惊悚', '悬疑', '动作', '喜剧', '战争', '科幻', '犯罪', '古装',
+    // 高码率 + 字幕
+    '高码率', '中文字幕', '国语中字', '高码', '内封简中', '内封简繁',
+    // FPS/HQ
+    'HQ', 'FPS', '60FPS', 'KHDR', 'SDR', '臻彩', '高码', 'HDR10', 'Dolby',
+    'WEB-', 'WEB',
   ], category: '电影', priority: 35 },
 ];
 
@@ -334,6 +372,31 @@ export function extractLinksFromTgMessage(msg: any): TgLink[] {
     if (thunders) for (const t of thunders) pushLink(t);
   }
 
+  // 2b. Fallback: text 字符串中 regex 找链接 (兼容 string text + array text)
+  // 2026-08-01: 原来只对 Array.isArray(text) 走, string text 永远 0 link
+  if (rawLinks.length === 0 && (Array.isArray(msg.text) || typeof msg.text === 'string')) {
+    let text = '';
+    if (typeof msg.text === 'string') {
+      text = msg.text;
+    } else if (Array.isArray(msg.text)) {
+      text = msg.text.filter((t: any) => typeof t === 'string').join('');
+    }
+    if (text) {
+      // http/https
+      const urlRegex = /https?:\/\/[^\s\u4e00-\u9fa5]+/g;
+      const matches = text.match(urlRegex);
+      if (matches) for (const url of matches) pushLink(url, extractPasswordFromUrl(url));
+      // magnet
+      const magnetRegex = /magnet:\?xt=urn:btih:[a-zA-Z0-9]+/g;
+      const magnets = text.match(magnetRegex);
+      if (magnets) for (const m of magnets) pushLink(m);
+      // thunder
+      const thunderRegex = /thunder:\/\/[a-zA-Z0-9=\/+=]+/gi;
+      const thunders = text.match(thunderRegex);
+      if (thunders) for (const t of thunders) pushLink(t);
+    }
+  }
+
   // 3. Dedup (by url) + 按 sort 排序 (1=115 优先)
   const seen = new Set<string>();
   const dedup = rawLinks.filter(l => {
@@ -367,55 +430,256 @@ export function extractPasswordFromUrl(url: string): string | undefined {
   return undefined;
 }
 
+// ─── 7b. parseStructuredMessage(msg) ─────────────────────────────────
+// 2026-08-01: 通用字段解析器 - 按"字段名"匹配, 不按"整段 text 格式"匹配
+// 背景: 百度网盘/讯雷等频道 (562) 用 "名称:xxx\n描述:xxx\n链接:..." 这种 bold 字段格式
+//   之前 extractTitleFromTgMessage 用整段 text regex 匹配"名称:xxx", 失败时 fallback 到 firstLine
+//   导致"name=名称"或"name=简介:xxx" 误识别
+// 解法: 解析 text 数组, 识别 bold 字段名 + 紧跟的 plain entity value, 配对成 { 字段名: 值 }
+//   然后从 fields['title'] 取 title, fields['description'] 取 desc 等
+export interface ParsedFields {
+  title?: string;        // 标题/名称/片名/Title/标题🎬
+  description?: string;  // 描述/简介/概要/📝描述
+  size?: string;         // 大小/容量/📁大小
+  tags?: string[];       // 标签/Tags/🏷标签
+  pushType?: string;     // 推送类型/来源/Type - 不入库, 仅供参考
+  year?: string;         // 年份/Year
+  category_hint?: string;// 分类/类型
+  status?: string;       // 状态
+  source_hint?: string;  // 来自/来自频道
+  channel_hint?: string; // 频道
+}
+
+// 字段名 → 标准 key 映射 (含 emoji 前缀容忍)
+const FIELD_MAP: Record<string, keyof ParsedFields> = {
+  // 标题
+  '标题': 'title', '名称': 'title', '片名': 'title', 'title': 'title', 'name': 'title',
+  '🎬标题': 'title', '📛标题': 'title', '📌标题': 'title', '📺剧名': 'title', '🎞片名': 'title',
+  '剧名': 'title', '作品名': 'title', '资源名': 'title', '资源标题': 'title',
+  // 描述
+  '描述': 'description', '简介': 'description', '概要': 'description', '剧情': 'description',
+  'description': 'description', 'desc': 'description', 'summary': 'description', 'synopsis': 'description',
+  'plot': 'description', '故事': 'description', '内容': 'description', '介绍': 'description',
+  '📝描述': 'description', '📖简介': 'description', '📃简介': 'description',
+  // 大小
+  '大小': 'size', '容量': 'size', '文件大小': 'size', 'size': 'size', 'filesize': 'size',
+  '📁大小': 'size', '📦大小': 'size', '💾大小': 'size', '🗂大小': 'size',
+  // 标签
+  '标签': 'tags', 'tags': 'tags', 'tag': 'tags', '🏷标签': 'tags', '#标签': 'tags', '关键词': 'tags',
+  // 推送类型
+  '推送类型': 'pushType', '来源': 'pushType', 'type': 'pushType', 'pushtype': 'pushType', 'source': 'pushType',
+  // 年份
+  '年份': 'year', 'year': 'year', '年代': 'year',
+  // 分类
+  '分类': 'category_hint', '类型': 'category_hint', 'category': 'category_hint',
+  // 状态
+  '状态': 'status', 'status': 'status',
+  // 来源
+  '来自': 'source_hint', '来自频道': 'source_hint', '投稿者': 'source_hint',
+  // 频道
+  '频道': 'channel_hint', 'channel': 'channel_hint',
+};
+
+// 字段名正则 (匹配 "名称：" "名称:" "名称 ：" 等 + emoji 前缀, 冒号可选)
+// 2026-08-01: 冒号改可选 - 让 bold 字段名 "名称" 后跟 plain value 模式也能识别
+const FIELD_LABEL_REGEX = new RegExp(
+  '^([\\s\\u{1F300}-\\u{1FAFF}\\u{2600}-\\u{27BF}\\u{FE0F}]*)?' +  // 可选 emoji 前缀
+  '(' + Object.keys(FIELD_MAP).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')' +
+  '(?:\\s*[:：]\\s*)?(.*)$',
+  'iu'
+);
+
+export function parseStructuredMessage(msg: any): ParsedFields {
+  if (!msg) return {};
+  const out: ParsedFields = {};
+  if (typeof msg.text === 'string') {
+    // 单字符串: 按行解析
+    const lines = msg.text.split('\n');
+    for (const line of lines) {
+      const m = line.match(FIELD_LABEL_REGEX);
+      if (m) {
+        const key = FIELD_MAP[m[2]];
+        const value = (m[3] || '').trim();
+        if (key && value && !out[key]) {
+          // tags 可能是 "🏷 标签: #tag1 #tag2" 形式
+          if (key === 'tags') {
+            out.tags = (value.match(/#([^\s#]+)/g) || []).map((s: string) => s.slice(1));
+          } else {
+            (out as any)[key] = value;
+          }
+        }
+      }
+    }
+  } else if (Array.isArray(msg.text)) {
+    // 数组: 遍历 entity, 识别 bold 字段名 + 紧跟的 plain/后续值
+    // 关键修复: 看 bold entity 文本是不是字段名, 然后把同一 message 后续所有 text 内容当作 value
+    //   直到下一个 "字段名" bold entity 或明显的链接分隔符
+    let currentKey: keyof ParsedFields | null = null;
+    let currentValue = '';
+    const flush = () => {
+      if (currentKey && currentValue.trim()) {
+        const value = currentValue.trim();
+        if (!out[currentKey]) {
+          if (currentKey === 'tags') {
+            out.tags = (value.match(/#([^\s#]+)/g) || []).map((s: string) => s.slice(1));
+          } else {
+            (out as any)[currentKey] = value;
+          }
+        }
+      }
+      currentKey = null;
+      currentValue = '';
+    };
+    for (const t of msg.text) {
+      if (typeof t === 'string') {
+        // 2026-08-01: plain 字符串 (TG Desktop text array 第 0 元素) - 按行解析
+        //   实际格式: "名称：xxx\n\n描述：yyy\n\n" (可能 1-3 段用 \n 分隔)
+        //   必须按 \n split, 不能让 FIELD_LABEL_REGEX (冒号可选) 整段 match
+        if (t.includes('\n')) {
+          const lines = t.split('\n');
+          for (const line of lines) {
+            const trim = line.trim();
+            if (!trim) continue;
+            const m = trim.match(FIELD_LABEL_REGEX);
+            if (m) {
+              flush();
+              currentKey = FIELD_MAP[m[2]] || null;
+              // m[3] 是冒号后的部分, 如果为空 (冒号可选) → 视为需要后续 plain 补
+              currentValue = m[3] || '';
+            } else {
+              // 不是字段行, 累加 (但只在没 currentKey 时)
+              if (!currentKey) {
+                currentValue += (currentValue ? '\n' : '') + trim;
+              }
+            }
+          }
+        } else {
+          // 单行 plain 字符串
+          const trim = t.trim();
+          const m = trim.match(FIELD_LABEL_REGEX);
+          if (m && (!currentKey || trim.startsWith(m[2]))) {
+            flush();
+            currentKey = FIELD_MAP[m[2]] || null;
+            currentValue = m[3] || '';
+          } else {
+            currentValue += t;
+          }
+        }
+      } else if (t && typeof t === 'object') {
+        // 2026-08-01: { type: 'plain', text: 'xxx' } 对象类型 plain 也要 match 字段名
+        if (t.type === 'plain' && t.text) {
+          if (t.text.includes('\n')) {
+            const lines = t.text.split('\n');
+            for (const line of lines) {
+              const trim = line.trim();
+              if (!trim) continue;
+              const m = trim.match(FIELD_LABEL_REGEX);
+              if (m) {
+                flush();
+                currentKey = FIELD_MAP[m[2]] || null;
+                currentValue = m[3] || '';
+              } else {
+                if (!currentKey) {
+                  currentValue += (currentValue ? '\n' : '') + trim;
+                }
+              }
+            }
+          } else {
+            const plainTrim = String(t.text).trim();
+            const mPlain = plainTrim.match(FIELD_LABEL_REGEX);
+            if (mPlain && (!currentKey || plainTrim.startsWith(mPlain[2]))) {
+              flush();
+              currentKey = FIELD_MAP[mPlain[2]] || null;
+              currentValue = mPlain[3] || '';
+            } else {
+              currentValue += t.text;
+            }
+          }
+        } else if (t.type === 'bold' && t.text) {
+          // bold entity: 可能是字段名
+          const m = String(t.text).match(FIELD_LABEL_REGEX);
+          if (m) {
+            // 是字段名 → flush 旧的, 开始新的
+            flush();
+            currentKey = FIELD_MAP[m[2]] || null;
+            currentValue = m[3] || '';
+          } else {
+            // bold 但不是字段名, 加到 currentValue
+            currentValue += t.text;
+          }
+        } else if (t.type === 'hashtag' && t.text) {
+          // hashtag 单独累加 (常见于"标签: #xxx #yyy" 模式)
+          if (currentKey === 'tags') {
+            // 已经在 tags 字段, 加 #xxx
+            if (!out.tags) out.tags = [];
+            const tag = String(t.text).replace(/^#/, '').trim();
+            if (tag && !out.tags.includes(tag)) out.tags.push(tag);
+          } else {
+            currentValue += t.text;
+          }
+        } else if (t.type === 'link' || t.type === 'text_link') {
+          // 链接 entity: 不加到 value (extractLinksFromTgMessage 单独处理)
+          // 但链接前可能有 "🔗 xxx：" 前缀, 不算值
+          if (currentValue.trim()) {
+            // 已经有 value, 把链接当作分隔符
+            flush();
+          }
+        } else {
+          // 其他 entity, 加到 currentValue
+          if (t.text) currentValue += t.text;
+        }
+      }
+    }
+    flush();
+  }
+  return out;
+}
+
 // ─── 8. extractTitleFromTgMessage(msg) ──────────────────────────────
-// 从 TG message 提取标题
-// 优先用 text 第一行, 否则用 "标题:xxx" 格式
+// 2026-08-02 v4: 严格按字段名匹配, 找不到 title 字段就返空 (不入库)
+// 业务规则: 没"标题/名称/片名/Title"字段的消息不入库
+// 背景: 之前 v3 fallback 用 description 清理前缀前 30 字符, 但 description 是剧情介绍不是片名
+//   用户 library 显示"李红旗要办婚礼了！本想婚礼一切从简..."(描述截 30 字符) 当标题, 完全错误
+// 修法: 严格按"名称/标题/片名/Title"字段名, 没字段返空 (调用方会跳过不入库)
+// 用户的"短剧更新目录1/2/3"这种频道索引消息也会返空不入库 (没有"名称"字段, 是目录/索引)
 export function extractTitleFromTgMessage(msg: any): string {
   if (!msg) return '';
+  const fields = parseStructuredMessage(msg);
+  // 1) 优先: title 字段 (名称/标题/片名/Title)
+  if (fields.title && fields.title.trim()) {
+    return fields.title.trim().slice(0, 200);
+  }
+  // 2) 老格式 fallback: 整段 text regex (匹配"标题/名称/片名/Title:xxx"开头)
   let text = '';
   if (typeof msg.text === 'string') {
     text = msg.text;
   } else if (Array.isArray(msg.text)) {
-    // TG Desktop export 格式: text 是 string 数组, 含 entities
-    text = msg.text
-      .filter((t: any) => typeof t === 'string')
-      .join('')
-      .trim();
+    text = msg.text.filter((t: any) => typeof t === 'string').join('').trim();
   }
   if (!text) return '';
-
-  // 1. 找 "标题:xxx" 格式 (常见于资源分享群)
-  const m = text.match(/标题[:：]\s*(.+?)(?:\n|$)/);
-  if (m) return m[1].trim().slice(0, 200);
-
-  // 2. 找 "名称:xxx" 格式
-  const m2 = text.match(/(?:名称|片名)[:：]\s*(.+?)(?:\n|$)/);
-  if (m2) return m2[1].trim().slice(0, 200);
-
-  // 3. 第一行非空文本 (前 200 字符)
-  const firstLine = text.split('\n').find((l: string) => l.trim().length > 0);
-  if (firstLine) {
-    return firstLine.trim().slice(0, 200);
+  const m = text.match(/(?:标题|名称|片名|Title)[:：]\s*(.+?)(?:\n|$)/);
+  if (m) {
+    const v = m[1].trim();
+    if (v) return v.slice(0, 200);
   }
-
-  return text.trim().slice(0, 200);
+  return '';  // 没"名称/标题/片名/Title"字段 → 不入库 (业务规则)
 }
 
 // ─── 9. extractTagsFromTgMessage(msg) ───────────────────────────────
-// 从 TG message text 提取标签
-// 找 #xxx 形式 或 末尾的 [标签] 形式
+// 2026-08-01: 用 parseStructuredMessage 优先从"标签"字段提取, fallback #xxx regex
 export function extractTagsFromTgMessage(msg: any): string[] {
-  const tags: string[] = [];
-  if (!msg) return tags;
+  if (!msg) return [];
+  const fields = parseStructuredMessage(msg);
+  if (fields.tags && fields.tags.length) return fields.tags.slice(0, 10);
+  // Fallback: 整段 #xxx
   let text = '';
   if (Array.isArray(msg.text)) {
     text = msg.text.filter((t: any) => typeof t === 'string').join(' ');
   } else if (typeof msg.text === 'string') {
     text = msg.text;
   }
-  if (!text) return tags;
-
-  // #xxx 形式 (中文标签)
+  if (!text) return [];
+  const tags: string[] = [];
   const hashtagRegex = /#([^\s#]+)/g;
   let m;
   while ((m = hashtagRegex.exec(text)) !== null) {
@@ -428,9 +692,14 @@ export function extractTagsFromTgMessage(msg: any): string[] {
 }
 
 // ─── 10. extractSizeFromTgMessage(msg) ──────────────────────────────
-// 从 TG message text 提取大小信息
-// 找 "大小:xxx" 格式 或 "XXGB" 格式
+// 2026-08-01: 用 parseStructuredMessage 优先从"大小"字段提取, 支持 "📁 大小:5G" 格式
 export function extractSizeFromTgMessage(msg: any): string {
+  if (!msg) return '';
+  const fields = parseStructuredMessage(msg);
+  if (fields.size && fields.size.trim()) {
+    return fields.size.trim().slice(0, 50);
+  }
+  // Fallback: regex 找 XXGB / XXMB
   let text = '';
   if (Array.isArray(msg.text)) {
     text = msg.text.filter((t: any) => typeof t === 'string').join(' ');
@@ -438,14 +707,15 @@ export function extractSizeFromTgMessage(msg: any): string {
     text = msg.text;
   }
   if (!text) return '';
-
-  // 大小:xxx 格式
-  const m = text.match(/大[小檔]?[:：]\s*([^\n]+?)(?:\n|$)/);
-  if (m) return m[1].trim().slice(0, 50);
-
-  // XXGB / XXMB / XXKB 格式
   const m2 = text.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB|TB|GiB|MiB|KiB))/i);
   if (m2) return m2[1].toUpperCase().replace(/\s+/g, '');
-
   return '';
+}
+
+// ─── 10b. extractDescriptionFromTgMessage(msg) ──────────────────────
+// 2026-08-01: 提取描述 (可作 overview/剧情), 不入库 name
+export function extractDescriptionFromTgMessage(msg: any): string {
+  if (!msg) return '';
+  const fields = parseStructuredMessage(msg);
+  return (fields.description || '').trim().slice(0, 2000);
 }

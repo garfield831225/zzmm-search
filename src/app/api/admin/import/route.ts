@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import * as XLSX from 'xlsx';
+import { inferDocSheetFromCategory } from '@/lib/sheet-mapping';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -88,12 +89,16 @@ async function fetchFeishuDoc(docUrl: string): Promise<any[]> {
 
 /**
  * 泽泽妈妈专属增量同步（mode='zezhe-sync'）
- * - 拉取 DB 中 import_channel='zezhe' AND status='active' 的所有 link
- * - 与本次 items 做 diff：
- *     新增：本次有、DB 没有 → INSERT（标 channel='zezhe'）
- *     删除：DB 有、本次没有 → 软删（status='deleted'，只动 zezhe 通道）
- *     不变：本次有、DB 也有 → 不动（link/link_code 视为唯一键）
- * - 全程只动 import_channel='zezhe' 的行，其他资源完全不动
+ * - 2026-07-31 用户拍板: 只在 doc_sheet IN ('每日更新', '追更区') 范围内 diff
+ *   - 追更 = 每日更新 (sheet-mapping 已合并 追更区 → 每日更新)
+ *   - 其他 sheet (外语电影/华语电影/国产剧/欧美剧/...) 的同名资源完全不动
+ * - 拉取 DB 中 import_channel='zezhe' AND status='active' AND doc_sheet IN 白名单 的 (id, name, link)
+ * - 按 name 分组跟本次 items 比对 (items 也按白名单过滤):
+ *     同名 + 同 link  → 不动
+ *     同名 + 不同 link → 软删旧 link（按 DB 中同 name 的所有 link）+ 插新 link
+ *     同名 + 本次没   → 软删（按 name 找 DB 中的所有 link）— 追更里去掉的就删
+ *     DB 没 + 本次有   → 插入
+ * - 全程只动 import_channel='zezhe' AND doc_sheet IN 白名单 的行，其他完全不动
  */
 async function handleZezheSync(
   sql: any,
@@ -103,45 +108,83 @@ async function handleZezheSync(
 ) {
   const BATCH = 200;
 
-  // 1) 拉取 DB 中 zezhe 的所有 (id, link)
+  // 2026-07-31: 追更专属 sheet 白名单 (用户拍板)
+  //   - 追更 = 每日更新 (sheet-mapping 已合并 追更区 → 每日更新)
+  //   - 只在这两个 sheet 范围内 diff / 软删 / 插入
+  //   - 其他 sheet (外语电影/华语电影/国产剧/...) 的同名资源完全不动
+  const SYNC_SHEET_WHITELIST = new Set(['每日更新', '追更区']);
+
+  // 0) 本次 items 过滤 - 只保留 sheet 在白名单的行 (防用户误传错 Excel)
+  const filteredItems = items.filter(item => {
+    const sheet = item.doc_sheet || inferDocSheetFromCategory(item.category || '');
+    return SYNC_SHEET_WHITELIST.has(sheet);
+  });
+  const skippedNonWhitelist = items.length - filteredItems.length;
+
+  // 1) 拉取 DB 中 zezhe 通道的 (id, name, link) - 只看白名单 sheet
   const existing = await sql`
-    SELECT id, link FROM xx_resources
+    SELECT id, name, link, doc_sheet FROM xx_resources
     WHERE import_channel = 'zezhe' AND status = 'active' AND link IS NOT NULL AND link != ''
-  `;
-  const existingLinkToId = new Map<string, number>();
-  for (const r of existing as any[]) {
-    existingLinkToId.set(r.link, r.id);
+      AND doc_sheet = ANY(${Array.from(SYNC_SHEET_WHITELIST)})
+  ` as any[];
+  // 按 name 分组 (一个剧多集 → 不同 name "小芳 S01E01" / "S01E02")
+  const existingByName = new Map<string, Array<{ id: number; link: string }>>();
+  for (const r of existing) {
+    if (!existingByName.has(r.name)) existingByName.set(r.name, []);
+    existingByName.get(r.name)!.push({ id: r.id, link: r.link });
   }
 
-  // 2) diff
+  // 2) 本次 items 按 name 分组 (已经过滤过白名单)
+  const inputByName = new Map<string, Array<any>>();
+  for (const item of filteredItems) {
+    if (!item.link || !item.name) continue;
+    if (!inputByName.has(item.name)) inputByName.set(item.name, []);
+    inputByName.get(item.name)!.push(item);
+  }
+
+  // 3) diff
   const toInsert: any[] = [];
-  const seenLinks = new Set<string>();
+  const toDeleteIds = new Set<number>();
   let unchanged = 0;
-  for (const item of items) {
-    if (!item.link) continue;
-    if (seenLinks.has(item.link)) continue;  // 本次去重
-    seenLinks.add(item.link);
-    if (existingLinkToId.has(item.link)) {
-      unchanged++;
-    } else {
-      toInsert.push(item);
+  let replaced = 0;  // 同名新版本替换
+  for (const [name, inputItems] of Array.from(inputByName.entries())) {
+    const dbLinks = existingByName.get(name) || [];
+    const dbLinkSet = new Set(dbLinks.map((d: any) => d.link));
+    const inputLinkSet = new Set(inputItems.map((i: any) => i.link));
+    // DB 中 link 不在 input → 软删 (追更去掉或同剧换新版本)
+    for (const dbLink of dbLinks) {
+      if (!inputLinkSet.has(dbLink.link)) {
+        toDeleteIds.add(dbLink.id);
+      }
+    }
+    // input 中 link 不在 DB → 插入 (新版本或全新剧集)
+    for (const inputItem of inputItems) {
+      if (!dbLinkSet.has(inputItem.link)) {
+        toInsert.push(inputItem);
+        if (dbLinks.length > 0) replaced++;  // 已有同名, 算作"替换"统计
+      } else {
+        unchanged++;
+      }
     }
   }
-  const toDeleteIds: number[] = [];
-  for (const entry of Array.from(existingLinkToId.entries())) {
-    const [link, id] = entry;
-    if (!seenLinks.has(link)) toDeleteIds.push(id);
+  // 4) 本次没的 name → DB 中该 name 全部软删
+  for (const [name, dbLinks] of Array.from(existingByName.entries())) {
+    if (!inputByName.has(name)) {
+      for (const dbLink of dbLinks) toDeleteIds.add(dbLink.id);
+    }
   }
+  const toDeleteIdsArr = Array.from(toDeleteIds);
 
-  // 3) 软删（分批，限定 zezhe 防误伤）
+  // 5) 软删（分批，限定 zezhe + 白名单 sheet 防误伤）
   let deleted = 0;
-  for (let i = 0; i < toDeleteIds.length; i += BATCH) {
-    const batchIds = toDeleteIds.slice(i, i + BATCH);
+  for (let i = 0; i < toDeleteIdsArr.length; i += BATCH) {
+    const batchIds = toDeleteIdsArr.slice(i, i + BATCH);
     try {
       await sql`
         UPDATE xx_resources
         SET status = 'deleted', updated_at = NOW()
         WHERE id = ANY(${batchIds}) AND import_channel = 'zezhe' AND status = 'active'
+          AND doc_sheet = ANY(${Array.from(SYNC_SHEET_WHITELIST)})
       `;
       deleted += batchIds.length;
     } catch (err: any) {
@@ -149,15 +192,16 @@ async function handleZezheSync(
     }
   }
 
-  // 4) 新增（分批，标 channel='zezhe'）
+  // 6) 新增（分批，标 channel='zezhe'）
   let inserted = 0;
   let failed = 0;
   for (let i = 0; i < toInsert.length; i += BATCH) {
     const batch = toInsert.slice(i, i + BATCH);
-    const cols = 'name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
+    // 2026-07-27: 加 doc_sheet 字段 (从 category 推, 套 sheet-mapping 合并规则)
+    const cols = 'name, link, link_code, source, category, size, doc_sheet, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
     const vals = batch.map((_: any, idx: number) => {
-      const base = idx * 7;
-      return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), $${base+7})`;
+      const base = idx * 8;
+      return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, $${base+7}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), $${base+8})`;
     }).join(', ');
     const params: any[] = batch.flatMap((item: any) => [
       item.name || '',
@@ -166,6 +210,7 @@ async function handleZezheSync(
       item.source || detectSource(item.link || ''),
       item.category || '其他',
       item.size || '',
+      item.doc_sheet || inferDocSheetFromCategory(item.category || '其他'),
       'zezhe',
     ]);
     try {
@@ -181,11 +226,165 @@ async function handleZezheSync(
     success: true,
     mode: 'zezhe-sync',
     import_channel: 'zezhe',
+    sheetWhitelist: Array.from(SYNC_SHEET_WHITELIST),  // 2026-07-31: 白名单
     total: items.length,
+    totalFiltered: filteredItems.length,              // 过滤后实际处理数
+    skippedNonWhitelist,                              // 2026-07-31: 不在白名单 sheet 的行
     inserted,
+    replaced,        // 2026-07-31: 同名新版本替换的 link 数
     failed,
     deleted,
     unchanged,
+    skipped: totalInput - items.length,
+    skippedCodes: Array.from(skippedCodes),
+  });
+}
+
+/**
+ * 泽泽妈妈全 sheet 完整覆盖同步（mode='zezhe-full-sync'）
+ * 2026-07-31 用户拍板: 比 ze zemom-sync 更彻底
+ * - 按 link 严格 dedup (跟 ze zemom-sync 的按 name 不同)
+ * - 21-sheet 全部覆盖 (不限 [每日更新/追更区] 白名单)
+ * - DB 中 zezhe 通道老的资源, link 不在新 Excel → 软删
+ * - 新 Excel 中 link 不在 DB → 插入
+ * - 同 link 不同 name/doc_sheet/size → UPDATE (新版可能更准)
+ * - 全程只动 import_channel='zezhe' 的行
+ * - 用法: 用户上传完整 21-sheet 文档, 一次性把 ze zemom 通道全部刷成最新版本
+ */
+async function handleZezheFullSync(
+  sql: any,
+  items: any[],
+  totalInput: number,
+  skippedCodes: Set<string>
+) {
+  const BATCH = 200;
+
+  // 1) 拉 DB 中 zezhe 全部 (id, name, link, doc_sheet, size)
+  const existing = await sql`
+    SELECT id, name, link, doc_sheet, size FROM xx_resources
+    WHERE import_channel = 'zezhe' AND status = 'active' AND link IS NOT NULL AND link != ''
+  ` as any[];
+  // 按 link 分组 (一个资源只对应 1 个 link)
+  const existingByLink = new Map<string, { id: number; name: string; doc_sheet: string; size: string }>();
+  for (const r of existing) {
+    existingByLink.set(r.link, { id: r.id, name: r.name, doc_sheet: r.doc_sheet, size: r.size });
+  }
+
+  // 2) 本次 items 按 link 分组
+  const inputByLink = new Map<string, any>();
+  let skippedEmptyName = 0;
+  for (const item of items) {
+    if (!item.link) { skippedEmptyName++; continue; }
+    if (!item.name) { skippedEmptyName++; continue; }  // 防空 name 入库
+    if (!inputByLink.has(item.link)) inputByLink.set(item.link, item);
+  }
+
+  // 3) diff
+  const toInsert: any[] = [];
+  const toUpdate: Array<{ id: number; name: string; doc_sheet: string; size: string; category: string; source: string; link_code: string }> = [];
+  const toDeleteIds = new Set<number>();
+  let unchanged = 0;
+  let updated = 0;
+  // DB link 不在 input → 软删
+  for (const [link, dbR] of Array.from(existingByLink.entries())) {
+    if (!inputByLink.has(link)) {
+      toDeleteIds.add(dbR.id);
+    }
+  }
+  // input link 不在 DB → 插入
+  // input link 在 DB 但 name/sheet/size 不同 → UPDATE
+  for (const [link, inputItem] of Array.from(inputByLink.entries())) {
+    const dbR = existingByLink.get(link);
+    if (!dbR) {
+      toInsert.push(inputItem);
+    } else {
+      const newDocSheet = inputItem.doc_sheet || inferDocSheetFromCategory(inputItem.category || '其他');
+      const newSize = inputItem.size || '';
+      const newName = inputItem.name || '';
+      const newSource = inputItem.source || detectSource(link);
+      const newLinkCode = inputItem.link_code || '';
+      if (dbR.name !== newName || dbR.doc_sheet !== newDocSheet || dbR.size !== newSize) {
+        toUpdate.push({ id: dbR.id, name: newName, doc_sheet: newDocSheet, size: newSize, category: inputItem.category || '其他', source: newSource, link_code: newLinkCode });
+      } else {
+        unchanged++;
+      }
+    }
+  }
+  const toDeleteIdsArr = Array.from(toDeleteIds);
+
+  // 4) 软删（分批，限定 zezhe 防误伤）
+  let deleted = 0;
+  for (let i = 0; i < toDeleteIdsArr.length; i += BATCH) {
+    const batchIds = toDeleteIdsArr.slice(i, i + BATCH);
+    try {
+      await sql`
+        UPDATE xx_resources
+        SET status = 'deleted', updated_at = NOW()
+        WHERE id = ANY(${batchIds}) AND import_channel = 'zezhe' AND status = 'active'
+      `;
+      deleted += batchIds.length;
+    } catch (err: any) {
+      console.error(`[zezhe-full-sync] 软删批次失败:`, err.message);
+    }
+  }
+
+  // 5) UPDATE name/sheet/size/category (新版可能更准)
+  for (const r of toUpdate) {
+    try {
+      await sql`
+        UPDATE xx_resources
+        SET name = ${r.name}, doc_sheet = ${r.doc_sheet}, size = ${r.size},
+            category = ${r.category}, source = ${r.source}, link_code = ${r.link_code},
+            updated_at = NOW()
+        WHERE id = ${r.id} AND import_channel = 'zezhe' AND status = 'active'
+      `;
+      updated++;
+    } catch (err: any) {
+      console.error(`[zezhe-full-sync] UPDATE ${r.id} 失败:`, err.message);
+    }
+  }
+
+  // 6) 新增（分批，标 channel='zezhe'）
+  let inserted = 0;
+  let failed = 0;
+  for (let i = 0; i < toInsert.length; i += BATCH) {
+    const batch = toInsert.slice(i, i + BATCH);
+    const cols = 'name, link, link_code, source, category, size, doc_sheet, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
+    const vals = batch.map((_: any, idx: number) => {
+      const base = idx * 8;
+      return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, $${base+7}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), $${base+8})`;
+    }).join(', ');
+    const params: any[] = batch.flatMap((item: any) => [
+      item.name || '',
+      item.link || '',
+      item.link_code || '',
+      item.source || detectSource(item.link || ''),
+      item.category || '其他',
+      item.size || '',
+      item.doc_sheet || inferDocSheetFromCategory(item.category || '其他'),
+      'zezhe',
+    ]);
+    try {
+      const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) WHERE link IS NOT NULL AND link != '' DO NOTHING RETURNING id`, params);
+      inserted += (r as any[]).length;
+    } catch (err: any) {
+      console.error(`[zezhe-full-sync] 插入批次失败:`, err.message);
+      failed += batch.length;
+    }
+  }
+
+  return NextResponse.json({
+    success: true,
+    mode: 'zezhe-full-sync',
+    import_channel: 'zezhe',
+    total: totalInput,
+    totalFiltered: inputByLink.size,    // 实际参与 diff 的 link 数 (排除空 name/link)
+    skippedEmptyName,                    // 防空 name/link 过滤掉的行
+    inserted,
+    updated,                              // 同 link 但 name/sheet/size 改了
+    deleted,                              // 软删老的 (link 不在本次 Excel)
+    unchanged,                            // 同 link 同 name/sheet/size, 不动
+    failed,
     skipped: totalInput - items.length,
     skippedCodes: Array.from(skippedCodes),
   });
@@ -218,11 +417,12 @@ export async function POST(request: NextRequest) {
 
         for (let i = 0; i < items.length; i += BATCH) {
           const batch = items.slice(i, i + BATCH);
-          const cols = 'name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at';
+          // 2026-07-27: 加 doc_sheet 字段 (从 category 推, 套 sheet-mapping 合并规则)
+          const cols = 'name, link, link_code, source, category, size, doc_sheet, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at';
           const vals = batch.map((item, idx) => {
             const offset = i + idx;
-            const base = offset * 6;
-            return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, NULL, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW())`;
+            const base = offset * 7;
+            return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, NULL, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW())`;
           }).join(', ');
           const params: any[] = batch.flatMap(item => [
             item.name || '',
@@ -231,6 +431,7 @@ export async function POST(request: NextRequest) {
             item.source || detectSource(item.link || ''),
             item.category || '其他',
             item.size || '',
+            item.doc_sheet || inferDocSheetFromCategory(item.category || '其他'),
           ]);
           try {
             const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) WHERE link IS NOT NULL AND link != '' DO NOTHING RETURNING id`, params);
@@ -290,16 +491,28 @@ export async function POST(request: NextRequest) {
       return await handleZezheSync(sql, filteredItems, items.length, skippedCodes);
     }
 
+    // zezhe-full-sync：泽泽妈妈全 sheet 完整覆盖同步（按 link 严格 dedup + 21-sheet 全部）
+    // 2026-07-31 用户拍板新增 mode - 比 ze zemom-sync 更彻底
+    if (importMode === 'zezhe-full-sync') {
+      if (process.env.ENABLE_ZEZHE_SYNC !== 'true') {
+        return NextResponse.json({
+          error: 'zezhe-full-sync 模式未启用，需在 Vercel 环境变量中设置 ENABLE_ZEZHE_SYNC=true',
+        }, { status: 403 });
+      }
+      return await handleZezheFullSync(sql, filteredItems, items.length, skippedCodes);
+    }
+
     const BATCH = 200;
     let totalImported = 0;
     let totalFailed = 0;
 
     for (let i = 0; i < filteredItems.length; i += BATCH) {
       const batch = filteredItems.slice(i, i + BATCH);
-      const cols = 'name, link, link_code, source, category, size, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
+      // 2026-07-27: 加 doc_sheet 字段 (从 category 推, 套 sheet-mapping 合并规则)
+      const cols = 'name, link, link_code, source, category, size, doc_sheet, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
       const vals = batch.map((_: any, idx: number) => {
-        const base = idx * 7;
-        return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), $${base+7})`;
+        const base = idx * 8;
+        return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, $${base+7}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), $${base+8})`;
       }).join(', ');
       const params: any[] = batch.flatMap((item: any) => [
         item.name || '',
@@ -308,6 +521,7 @@ export async function POST(request: NextRequest) {
         item.source || detectSource(item.link || ''),
         item.category || '其他',
         item.size || '',
+        item.doc_sheet || inferDocSheetFromCategory(item.category || '其他'),
         channel,
       ]);
       try {

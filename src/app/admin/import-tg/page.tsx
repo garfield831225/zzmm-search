@@ -49,12 +49,11 @@ const CHANNEL_OPTIONS = [
   { value: 'tg_other', label: 'TG 其他', icon: '📦' },
 ];
 
-// Vercel Hobby body 限制 4.5MB, JSON 转义 + headers 余量, 实际安全上限 ~2MB
-// 但每条消息 1 资源 + N 链接 = N+1 INSERT, Vercel 60s 超时
-// 1 消息 200 字节平均 + 2 链接 = 400 字节. 2MB ≈ 5000 消息 ≈ 15000 INSERT × 20ms = 300s 超时
-// 1MB 保守切, 估算 800 消息 × 2 链接 = 2400 INSERT × 20ms = 48s 边界
-// 800 消息 × 2 链接 = 1600 INSERT × 50 并发 = 32s 应该 OK
-const MAX_BATCH_BYTES = 1 * 1024 * 1024;
+// 2026-07-26 改: CF tunnel 524 timeout = 100s, 587 条 1MB INSERT 50 并发要 126s
+// 拆小到 ~300 条/批 (0.5MB) 让单批 < 90s, 给 CF 留 buffer
+// Neon serverless 免费版 5 inserts/s 限速, 50 并发排队可能拖到 100s+
+// 300 条 × 3 链接 = 900 INSERT × 50ms (含 Neon RPS 排队) ≈ 45-60s 应该 OK
+const MAX_BATCH_BYTES = 500 * 1024;
 
 export default function ImportTgPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -328,14 +327,25 @@ export default function ImportTgPage() {
 
       try {
         const start = Date.now();
-        const r = await fetch('/api/admin/import/tg-json', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: 'Bearer ' + token,
-          },
-          body: JSON.stringify({ jsonContent: batch.jsonStr }),
-        });
+        // 2026-07-26 改: 90s abort 早于 CF tunnel 524 timeout (100s)
+        // route.ts maxDuration=300, 但 CF 等 100s 就断开 → 524 HTML 错误
+        // 90s abort 让 client 主动断, 返 AbortError, 提示用户重试更小批
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 90_000);
+        let r: Response;
+        try {
+          r = await fetch('/api/admin/import/tg-json', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: 'Bearer ' + token,
+            },
+            body: JSON.stringify({ jsonContent: batch.jsonStr }),
+            signal: ctrl.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
         const data = await r.json();
         const duration = Date.now() - start;
 
@@ -382,7 +392,14 @@ export default function ImportTgPage() {
           });
         }
       } catch (e: any) {
-        addLog(`❌ [${i + 1}] 网络错误: ${e.message}`);
+        // 2026-07-26: 细分错误, 给清晰重试提示
+        if (e.name === 'AbortError') {
+          addLog(`⏱️ [${i + 1}] 超时 (>240s), 批次 ${batch.count} 条太多被 Neon 卡住. 建议: 重新切更小批次 (500 条) 重试.`);
+        } else if (e.message?.includes('Failed to fetch')) {
+          addLog(`❌ [${i + 1}] 网络断开. 检查: 1) 浏览器没关 2) 域名 zzmm-search.uk 通 3) NAS systemd 在跑`);
+        } else {
+          addLog(`❌ [${i + 1}] 网络错误: ${e.message?.slice(0, 200)}`);
+        }
       }
 
       setProgress(Math.round(((i + 1) / splitPayloads.length) * 100));

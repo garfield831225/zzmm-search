@@ -1,0 +1,22 @@
+# match-direct Docker Compose
+# 极空间 NAS GUI 部署:
+#   1. 极空间 → Docker → 容器 → 自定义
+#   2. 路径选这个 docker-compose.yml
+#   3. 启动 (一次性跑, 跑完就停)
+
+services:
+  match-direct:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zzmm-match-direct
+    restart: "no"  # 跑完就退, 不循环
+    environment:
+      # Neon 数据库连接串 (直连 endpoint, 没有 -pooler)
+      # 直连跟 pooler 密码一样, 只 hostname 不同
+      DATABASE_URL: "postgresql://neondb_owner:npg_2KcMmEWjnXd3@ep-misty-resonance-aoiefatw.c-2.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
+      # TMDB API Key (跟 Vercel env 一致, 也可以用默认 key)
+      TMDB_API_KEY: "7985342d5961e9ee3d5ef6d969c1b8dd"
+    # 不需要端口 (后台跑批, 不暴露 web)
+    # 1 次跑完 200 条 (~30-60 秒)
+    # 跑完容器自动退

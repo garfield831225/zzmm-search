@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import {
   BarChart3, Users, Key, FileText, Target, Upload, DollarSign, MessageSquareWarning,
   ShieldOff, Code2, Settings, ListChecks, Database, Network, Activity,
-  Zap, Server, AlertCircle, Tv, ExternalLink, RefreshCw, CheckCircle2, XCircle,
+  Zap, Server, AlertCircle, Tv, ExternalLink, RefreshCw, CheckCircle2, XCircle, ShieldAlert,
 } from 'lucide-react';
 
 interface Card {
@@ -35,6 +35,8 @@ const CARDS: Card[] = [
   // ===== 用户管理 =====
   { id: 'invites', title: '邀请码', desc: '生成/列表/复制/清理', icon: Key, href: '/admin/invites', category: '用户管理', color: 'text-rose-700', bg: 'bg-rose-50 hover:bg-rose-100' },
   { id: 'blacklist', title: '黑名单', desc: '用户/IP/设备拉黑', icon: ShieldOff, href: '/admin/blacklist', category: '用户管理', color: 'text-red-700', bg: 'bg-red-50 hover:bg-red-100' },
+  { id: 'login-risk', title: '登录 IP 风险', desc: '一天两城市标风险 + 禁用', icon: ShieldAlert, href: '/admin/login-risk', category: '用户管理', color: 'text-amber-700', bg: 'bg-amber-50 hover:bg-amber-100' },
+  { id: 'user-credits', title: '用户看板', desc: '流明余额 + VIP 到期 + 周额度', icon: Activity, href: '/admin/user-credits', category: '用户管理', color: 'text-cyan-700', bg: 'bg-cyan-50 hover:bg-cyan-100' },
   { id: 'codes', title: '激活码', desc: '4 模板 + 流明码', icon: Code2, href: '/admin/codes', category: '用户管理', color: 'text-pink-700', bg: 'bg-pink-50 hover:bg-pink-100' },
   { id: 'users', title: '用户列表', desc: '查/改用户状态', icon: Users, href: '/admin/users', category: '用户管理', color: 'text-fuchsia-700', bg: 'bg-fuchsia-50 hover:bg-fuchsia-100' },
 
@@ -160,14 +162,34 @@ export default function AdminDashboard() {
             <div className="text-[10px] text-gray-400 mt-1">已用 / 总数</div>
           </div>
           <div className="bg-white border border-gray-200 rounded-xl p-4">
-            <div className="text-xs text-gray-500 mb-1">同步桥</div>
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-xs text-gray-500">同步桥</div>
+              {/* 2026-08-01: 加重连按钮 (用户要求) */}
+              <button
+                onClick={async () => {
+                  const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
+                  try {
+                    const r = await fetch('/api/admin/bridge-reconnect', { method: 'POST', headers: { Authorization: `Bearer ${t}` } });
+                    const j = await r.json();
+                    alert(j.message || (j.ok ? '重连成功' : '重连失败: ' + (j.error || '未知')));
+                    fetchBridge();
+                  } catch (e: any) { alert('重连失败: ' + e.message); }
+                }}
+                className="text-[10px] px-2 py-0.5 bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 rounded transition"
+                title="手动重连 import-bridge"
+              >
+                🔄 重连
+              </button>
+            </div>
             <div className="flex items-center gap-2 mt-1">
               {bridgeHealth?.ok ? <CheckCircle2 className="w-5 h-5 text-emerald-500" /> : <XCircle className="w-5 h-5 text-red-500" />}
               <div className="text-sm font-medium text-gray-700">
                 {bridgeHealth?.ok ? `运行中` : bridgeHealth ? '离线' : '检测中...'}
               </div>
             </div>
-            <div className="text-[10px] text-gray-400 mt-1">NAS Docker</div>
+            <div className="text-[10px] text-gray-400 mt-1 truncate" title={bridgeHealth?.error || bridgeHealth?.bridge_url || 'NAS Docker'}>
+              {bridgeHealth?.error ? `❌ ${bridgeHealth.error.slice(0, 30)}` : 'NAS Docker'}
+            </div>
           </div>
         </section>
 
@@ -198,6 +220,14 @@ export default function AdminDashboard() {
                   if (card.href.startsWith('http') || card.href.startsWith('/api/')) {
                     return (
                       <a key={card.id} href={card.href} target={card.external ? '_blank' : undefined} rel="noopener noreferrer" className="block">
+                        {inner}
+                      </a>
+                    );
+                  }
+                  // 2026-07-26: admin 内部链接用 <a> 强制刷新, 避免 next/link client nav 失败导致页面卡住
+                  if (card.href.startsWith('/admin')) {
+                    return (
+                      <a key={card.id} href={card.href} className="block">
                         {inner}
                       </a>
                     );

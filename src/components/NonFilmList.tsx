@@ -151,7 +151,11 @@ export default function NonFilmList({ category, title, icon, description, accent
       });
       if (query) params.set('q', query);
       if (source !== '全部') params.set('source', SOURCE_KEY_MAP[source] || source);
-      const res = await fetch(`/api/search?${params}`);
+      // 2026-07-29: 登录态 token 带上, 不然 /api/search 未登录被 1=0 拦返 0 条
+      const tk = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      const headers: Record<string, string> = {};
+      if (tk) headers['Authorization'] = `Bearer ${tk}`;
+      const res = await fetch(`/api/search?${params}`, { headers });
       const data = await res.json();
       const mapped: ResourceItem[] = (data.items || []).map((it: any) => ({
         ...it,

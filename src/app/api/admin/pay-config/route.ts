@@ -1,5 +1,12 @@
+// 2026-07-28: pay-config 增强版
+// 1. 搜索: 加 ?q + ?doc_sheet (按 21-sheet 库的 sheet 名筛)
+// 2. 返回: 加 doc_sheet, doc_sheet, lumen_cost, access_level, import_channel 字段
+// 3. 设置: 支持 pay_type + lumen_cost + code_price 三者独立更新
+// 4. 设置 pay_type='code' 时自动同步 access_level='code' (前端过滤双轨)
+// 5. doc_sheet 列表: /api/admin/pay-config/sheets
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
+import { authAdmin } from '@/lib/admin-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -11,26 +18,44 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const q = (searchParams.get('q') || '').trim();
   const payType = searchParams.get('pay_type') || '';
+  const docSheet = (searchParams.get('doc_sheet') || '').trim();
+  const channel = (searchParams.get('channel') || '').trim();
   const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-  const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') || '30')));
+  const pageSize = Math.min(200, Math.max(1, parseInt(searchParams.get('pageSize') || '50')));
   const offset = (page - 1) * pageSize;
 
   try {
-    const nameFilter = q ? `r.name ILIKE '%${esc(q)}%'` : '1=1';
-    const payFilter = payType ? `r.pay_type = '${esc(payType)}'` : '1=1';
+    // 2026-07-28: 多条件组合
+    const conds: string[] = [];
+    const condVals: any[] = [];
+    const addCond = (condSQL: string, ...vals: any[]) => {
+      const offset = condVals.length;
+      const renum = condSQL.replace(/\$(\d+)/g, (_, n) => `$${parseInt(n) + offset}`);
+      conds.push(renum);
+      condVals.push(...vals);
+    };
+    addCond('r.status = $1', 'active');
+    if (q) addCond('(r.name ILIKE $1 OR r.id::text = $1)', `%${q}%`);
+    if (payType) addCond('r.pay_type = $1', payType);
+    if (docSheet) addCond('r.doc_sheet = $1', docSheet);
+    if (channel) addCond('r.import_channel = $1', channel);
+    const whereSQL = 'WHERE ' + conds.join(' AND ');
 
-    const cnt = await sql(`SELECT COUNT(*) as cnt FROM xx_resources r WHERE r.status = 'active' AND ${nameFilter} AND ${payFilter}`) as any[];
+    const cnt = await sql(`SELECT COUNT(*) as cnt FROM xx_resources r ${whereSQL}`, condVals) as any[];
     const total = parseInt(cnt?.[0]?.cnt || '0');
 
+    const limitPh = `$${condVals.length + 1}`;
+    const offsetPh = `$${condVals.length + 2}`;
     const rows = await sql(`
-      SELECT r.id, r.name, r.category, r.pay_type, r.code_price, r.tmdb_id, r.source,
+      SELECT r.id, r.name, r.category, r.doc_sheet, r.pay_type, r.code_price, r.lumen_cost,
+             r.access_level, r.import_channel, r.source, r.tmdb_id, r.size, r.sub_type, r.created_at,
              COALESCE(c.poster_path, '') as poster_path
       FROM xx_resources r
       LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
-      WHERE r.status = 'active' AND ${nameFilter} AND ${payFilter}
+      ${whereSQL}
       ORDER BY r.id DESC
-      LIMIT ${pageSize} OFFSET ${offset}
-    `) as any[];
+      LIMIT ${limitPh} OFFSET ${offsetPh}
+    `, [...condVals, pageSize, offset]) as any[];
 
     return NextResponse.json({
       items: rows,
@@ -44,9 +69,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  // 2026-07-28: 增强 - 支持独立设置 pay_type / code_price / lumen_cost
+  // 设 pay_type='code' 时自动同步 access_level='code'
   const sql = neon(process.env.DATABASE_URL || '');
   const body = await req.json().catch(() => ({}));
-  const { id, pay_type, code_price } = body;
+  const { id, pay_type, code_price, lumen_cost } = body;
 
   if (!id) return NextResponse.json({ error: 'missing id' }, { status: 400 });
   if (pay_type && !['free', 'code'].includes(pay_type)) {
@@ -56,31 +83,49 @@ export async function POST(req: NextRequest) {
   if (priceNum !== null && (isNaN(priceNum) || priceNum < 0 || priceNum > 9999)) {
     return NextResponse.json({ error: 'code_price must be 0-9999' }, { status: 400 });
   }
+  const lumenNum = lumen_cost !== undefined ? Number(lumen_cost) : null;
+  if (lumenNum !== null && (!Number.isInteger(lumenNum) || lumenNum < 1 || lumenNum > 999)) {
+    return NextResponse.json({ error: 'lumen_cost must be 1-999' }, { status: 400 });
+  }
 
   try {
-    let updated: any = null;
-    if (pay_type && priceNum !== null) {
-      const r = await sql`UPDATE xx_resources SET pay_type = ${pay_type}, code_price = ${priceNum.toFixed(2)}, updated_at = NOW() WHERE id = ${id} RETURNING id, pay_type, code_price`;
-      updated = r[0];
-    } else if (pay_type) {
-      const r = await sql`UPDATE xx_resources SET pay_type = ${pay_type}, updated_at = NOW() WHERE id = ${id} RETURNING id, pay_type, code_price`;
-      updated = r[0];
-    } else if (priceNum !== null) {
-      const r = await sql`UPDATE xx_resources SET code_price = ${priceNum.toFixed(2)}, updated_at = NOW() WHERE id = ${id} RETURNING id, pay_type, code_price`;
-      updated = r[0];
+    // 2026-07-28: 改用 sql 模板串 (Neon v3 不支持 unsafe 链式)
+    const setParts: string[] = [];
+    const setVals: any[] = [];
+    const addSet = (clause: string, ...vals: any[]) => {
+      const offset = setVals.length;
+      const renum = clause.replace(/\$(\d+)/g, (_, n) => `$${parseInt(n) + offset}`);
+      setParts.push(renum);
+      setVals.push(...vals);
+    };
+    if (pay_type) {
+      addSet('pay_type = $1', pay_type);
+      // 同步 access_level: code → code, free → 维持原值 (默认 basic)
+      if (pay_type === 'code') addSet('access_level = $1', 'code');
     }
+    if (priceNum !== null) addSet('code_price = $1', priceNum.toFixed(2));
+    if (lumenNum !== null) addSet('lumen_cost = $1', lumenNum);
+    addSet('updated_at = NOW()');
 
-    return NextResponse.json({ success: true, item: updated });
+    if (setParts.length === 1) {
+      return NextResponse.json({ error: 'no fields to update' }, { status: 400 });
+    }
+    setVals.push(Number(id));
+    const idPh = `$${setVals.length}`;
+    const sqlText = `UPDATE xx_resources SET ${setParts.join(', ')} WHERE id = ${idPh} RETURNING id, pay_type, code_price, lumen_cost, access_level`;
+
+    const updated = await sql(sqlText, setVals) as any[];
+    return NextResponse.json({ success: true, item: updated[0] });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest) {
-  // 批量：把所有 pay_type='code' 资源改回 'free'
+  // 批量：把所有 pay_type='code' 资源改回 'free' + access_level='basic'
   const sql = neon(process.env.DATABASE_URL || '');
   try {
-    await sql`UPDATE xx_resources SET pay_type = 'free', code_price = 0.00 WHERE pay_type = 'code'`;
+    await sql`UPDATE xx_resources SET pay_type = 'free', code_price = 0.00, access_level = 'basic' WHERE pay_type = 'code'`;
     return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });

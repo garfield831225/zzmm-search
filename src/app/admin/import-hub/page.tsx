@@ -1,10 +1,9 @@
 'use client';
 
-// 2026-07-24: 多资源入口中心 - 4 个入口的导航 + 入库统计
-// 用户从 admin dashboard 进这里, 一目了然知道用哪个口
+// 2026-07-25: 去掉 framer-motion (SSR hydration 冲突导致整个 client tree 崩)
+// 改用 CSS transition + 普通 a, 兼容 SSR
 
 import { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
 
 interface ChannelStat {
   channel: string;
@@ -115,10 +114,17 @@ export default function ImportHubPage() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch('/api/admin/import-hub-stats');
+        // 2026-07-26: 带 token + cookie, 避免 401
+        const token = (typeof window !== 'undefined') ?
+          (localStorage.getItem('zzmm_token') || localStorage.getItem('adminToken') || localStorage.getItem('token') || '') : '';
+        const r = await fetch('/api/admin/import-hub-stats', {
+          credentials: 'include',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!r.ok) { setLoading(false); return; }
         const d = await r.json();
         if (d.success) setStats({ total: d.total, channels: d.channels });
-      } catch { /* 静默 */ }
+      } catch (e) { /* 静默 */ }
       finally { setLoading(false); }
     })();
   }, []);
@@ -166,11 +172,10 @@ export default function ImportHubPage() {
         {/* 入口卡片 */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {HUBS.map((h) => (
-            <motion.a
+            <a
               key={h.key}
               href={h.href}
-              whileHover={{ scale: 1.01 }}
-              className={`relative bg-gradient-to-br ${h.color} border rounded-2xl p-5 transition block`}
+              className={`relative bg-gradient-to-br ${h.color} border rounded-2xl p-5 transition block hover:scale-[1.01] hover:brightness-110`}
             >
               {h.badge && (
                 <div className="absolute top-3 right-3 px-2 py-0.5 bg-gradient-to-r from-pink-500 to-violet-500 rounded-full text-xs font-medium">
@@ -197,7 +202,7 @@ export default function ImportHubPage() {
                 </div>
                 <div className="text-violet-400 text-sm">进入 →</div>
               </div>
-            </motion.a>
+            </a>
           ))}
         </div>
 

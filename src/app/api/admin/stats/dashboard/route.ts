@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
+import { neon, neonConfig } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
 
 export const dynamic = 'force-dynamic';
+// 2026-08-01: 修 Neon HTTP endpoint 5 分钟 stale cache (memory #9)
+neonConfig.fetchConnectionCache = false;
+
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
 export async function GET(req: NextRequest) {
@@ -19,7 +22,7 @@ export async function GET(req: NextRequest) {
     jwt.verify(token, JWT_SECRET);
   } catch { return NextResponse.json({ error: 'Token 无效' }, { status: 401 }); }
 
-  const sql = neon(process.env.DATABASE_URL || '');
+  const sql = neon(process.env.DATABASE_URL || '', { fetchOptions: { cache: 'no-store' } });
 
   // 4 张营收卡数据
   const codes = await sql`SELECT
@@ -31,9 +34,16 @@ export async function GET(req: NextRequest) {
 
   const users = await sql`SELECT
     COUNT(*)::int as total,
+    SUM(CASE WHEN user_group IN ('basic', 'vip', 'admin') AND status = 'active' THEN 1 ELSE 0 END)::int as active_count,
     SUM(CASE WHEN user_group IN ('vip', 'admin') THEN 1 ELSE 0 END)::int as vip_count,
     SUM(CASE WHEN user_group IN ('vip', 'admin') AND (expire_at IS NULL OR expire_at > NOW()) THEN 1 ELSE 0 END)::int as vip_active
     FROM xx_users`;
+
+  // 2026-08-01: 加资源总数 + 激活用户 (admin/dashboard 显示 "—" 原因)
+  const resources = await sql`SELECT
+    COUNT(*)::int as total,
+    SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END)::int as active
+    FROM xx_resources`;
 
   // 本月数据
   const monthCodes = await sql`SELECT
@@ -82,6 +92,11 @@ export async function GET(req: NextRequest) {
     LIMIT 20`;
 
   return NextResponse.json({
+    // 2026-08-01: 仪表盘顶部 4 个统计卡需要这 2 个字段 (admin/dashboard 显示)
+    total_resources: resources[0]?.total || 0,
+    active_resources: resources[0]?.active || 0,
+    active_users: users[0]?.active_count || 0,
+    // 4 张营收卡
     total_codes: codes[0]?.total || 0,
     used_codes: codes[0]?.used || 0,
     unused_codes: codes[0]?.unused || 0,

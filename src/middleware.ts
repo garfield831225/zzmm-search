@@ -14,6 +14,7 @@ const PUBLIC_PATHS = [
   '/login',
   '/register',
   '/activate',
+  '/upgrade',           // 2026-07-29 闲鱼 VIP 购买引导 (公开页, 未登录也能看)
   '/api/auth/login',
   '/api/auth/register',
   '/api/auth/me',
@@ -66,6 +67,11 @@ const PUBLIC_PATHS = [
   '/api/auth/sso/callback',  // SSO 回调 (免登录, 内部验 token + 签 JWT)
   '/api/internal/lumen/credit',  // 内部 API: Moviezone 调加流明 (Bearer INTERNAL_API_TOKEN 鉴权)
   '/api/user/balance',         // 查余额 (后端 Bearer 鉴权)
+  '/api/admin/bridge-health',  // 2026-08-01 同步桥健康 (admin/dashboard 调, 路由内自鉴权)
+  '/api/admin/bridge-reconnect', // 2026-08-01 同步桥手动重连 (POST, 路由内 JWT 鉴权)
+  '/api/admin/bridge-status',   // 2026-08-01 同步桥死信队列 (admin 鉴权)
+  '/api/user/delete-account',  // 2026-07-28 注销账号 (后端 Bearer 鉴权)
+  '/api/user/weekly-credit',   // 2026-07-28 周免费额度 (后端 Bearer 鉴权)
   // v2.1.4 单条定价 + admin 补全
   '/api/user/unlocks',         // 解锁记录列表 (后端 Bearer 鉴权)
   '/api/admin/pay-config',     // pay-config CRUD (后端 adminOnly 鉴权)
@@ -95,6 +101,8 @@ const PUBLIC_PATHS = [
   '/api/admin/sync-now',         // 2026-07-21 临时: 强制主 endpoint 同步 (修 read replica lag)
   '/api/admin/diag-replica',     // 2026-07-21 临时: 看 read replica 状态 + replication lag
   '/api/admin/check-by-id',       // 2026-07-21 临时: 查指定 id 真实状态 (主 endpoint 走 sync-now)
+  '/api/resource/links-by-tmdb',  // 2026-07-31 详情页 modal 拿同剧所有 link (路由内自鉴权 userGroup)
+  '/api/cron/prepull-tmdb',      // 2026-07-31 凌晨 3 点 NAS cron 调 (路由内 CRON_SECRET 鉴权)
   // 2026-07-24 zzmm-vip 影视区: API 层鉴权, 走 page 层 JWT 解码
   '/api/vip',                       // 列表/详情 API (由路由内自己校验 group)
   // 2026-07-24 zzmm-vip 影视区 (页面层鉴权在 middleware 里, API 自己读 JWT 二次验证)
@@ -128,12 +136,39 @@ const PUBLIC_PATHS = [
   '/api/admin/import/tg-json',   // 2026-07-16 TG JSON 上传导入 (VIP/admin, 内部鉴权)
   '/api/admin/import/tg-l3-worker', // 2026-07-16 TG L3 worker (status + process, VIP/admin)
   '/api/cron',                    // 2026-07-16 Vercel cron 调用 (match-task, tg-l3-worker)
+  // 2026-08-03 首页改版 5 模块: 最新上映 (公开, 未登录也能看)
+  '/api/upcoming',
+  '/upcoming',
+  // 2026-08-03 P3: basic 专区 (泽泽妈 115 文档, 公开)
+  '/api/basic',
+  '/basic',
+  // 2026-08-03 P4: vip 专区 (vip 资源, 公开浏览, 进详情才鉴权)
+  '/api/vip',
+  // 2026-08-03 P5.1: 主题专区 (公开浏览, admin CRUD 鉴权在路由内)
+  '/api/themes',
+  '/api/admin/themes',  // P5.2 admin 主题 CRUD, 鉴权在 route.ts 内
+  // 2026-08-03 P5.3: 主题内容管理 (admin, 鉴权在 route.ts 内)
+  '/api/admin/tmdb-search',
+  // 2026-08-03 P6.2: admin pending 审核 (auth route.ts 内)
+  '/api/admin/pending',
+  // 2026-08-04 P6.3: 签到 (auth route.ts 内)
+  '/api/checkin',
+  // 2026-08-03 P6.1: 待上传详情 + 上传 API (auth 路由内做, 返 401 JSON)
+  '/api/upcoming',
   // /api/resources/unlock 资源解锁 (后端 Bearer 鉴权, 双模式) - 用 startsWith 通配
   // /api/resources/[id]/unlock-status 动态路由也走 unlock 路径检查
 ];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // 2026-08-04 P7: Preview 环境全放行 (生产环境没有 APP_ENV=preview 变量, 不受影响)
+  // - middleware 完全跳过 token 校验
+  // - admin/* /api/admin/* 全部放行
+  // - route.ts 内部自己读 JWT 二次验证 (不变)
+  if (process.env.APP_ENV === 'preview') {
+    return NextResponse.next();
+  }
 
   // 白名单：静态资源 + 公开页面
   for (const path of PUBLIC_PATHS) {
@@ -170,7 +205,8 @@ export async function middleware(request: NextRequest) {
   // 2026-07-24 zzmm-vip 影视区: /vip/* 改用 client-side 鉴权 (page.tsx useEffect 检查 token)
   // middleware 不再拦截, 避免 RSC fetch 被重定向导致白屏
   // 安全性: API 层 /api/vip 自己检查 JWT (更安全, 不依赖 cookie)
-  if (pathname === '/vip' || pathname.startsWith('/vip/')) {
+  // 2026-08-03: 改成 startsWith('/vip') 容错 /vip** 这种用户误输入 URL (之前 startsWith('/vip/') 漏掉)
+  if (pathname.startsWith('/vip')) {
     return NextResponse.next();
   }
 
@@ -183,6 +219,47 @@ export async function middleware(request: NextRequest) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('redirect', pathname);
     return NextResponse.redirect(loginUrl);
+  }
+
+  // 2026-07-29: 单点登录 - 校验 token iat vs user.last_login
+  // 新登录会 UPDATE last_login=NOW(), 比 token.iat 新 → 旧 token 失效 → 跳登录 + Toast
+  // admin 不挤 (怕自己误踢)
+  try {
+    const secret = new TextEncoder().encode(process.env.JWT_SECRET || '');
+    const { payload } = await jwtVerify(token, secret);
+    if ((payload as any)?.group !== 'admin') {
+      const { neon } = await import('@neondatabase/serverless');
+      const sql = neon(process.env.DATABASE_URL || '');
+      const r = await sql`SELECT last_login, status FROM xx_users WHERE id = ${payload.id} LIMIT 1` as any[];
+      const u = r[0];
+      if (!u || u.status !== 'active') {
+        // 账号禁用/不存在 → 跳登录
+        const r2 = new URL('/login', request.url);
+        r2.searchParams.set('redirect', pathname);
+        r2.searchParams.set('error', 'account_disabled');
+        const res = NextResponse.redirect(r2);
+        res.cookies.delete('zzmm_token');
+        res.cookies.delete('token');
+        return res;
+      }
+      const lastLoginMs = new Date(u.last_login).getTime();
+      const tokenIatMs = ((payload as any).iat || 0) * 1000;
+      if (tokenIatMs < lastLoginMs) {
+        // 被挤下线
+        const r3 = new URL('/login', request.url);
+        r3.searchParams.set('redirect', pathname);
+        r3.searchParams.set('kicked', '1');
+        const res = NextResponse.redirect(r3);
+        res.cookies.delete('zzmm_token');
+        res.cookies.delete('token');
+        return res;
+      }
+    }
+  } catch (e) {
+    // verify 失败 / DB 失败 → 跳登录 (按未登录处理)
+    const r4 = new URL('/login', request.url);
+    r4.searchParams.set('redirect', pathname);
+    return NextResponse.redirect(r4);
   }
 
   return NextResponse.next();

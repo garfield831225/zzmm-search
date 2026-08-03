@@ -4,21 +4,36 @@
 //   - /library: 完整功能, 返 link/提取码/解锁状态等
 //   - 两个页面共用此 API, 通过 zone=titles|library 区分字段返回
 //   - 分类方案:
-//       zezhe (泽泽妈妈115文档) → 按 doc_sheet 分类 (21-sheet 库的 sheet 名)
-//       vip / code → 按 source (网盘类型) 分类
+//       zezhe (泽泽妈妈115文档) → 按 doc_sheet 分类 (21-sheet 库的 sheet 名, 含 "未分类" 兜底)
+//       vip / code → 按 source (网盘类型) 分类 (vip 区里 "待归类" 也是一个 source 按钮)
 //   - 排序: 按 created_at asc=文档原始顺序 (默认) / desc=倒序
+//
+// 2026-07-27 重大修复 (用户报: library 看不到泽泽妈文档 + 不要单独"待归类"区):
+//   1) 改 nodejs runtime — Edge runtime 多次 await sql() 第二次 query (副表) 偶发返空
+//      (Neon serverless 在 Edge session 下 session 不持久, 副表 xx_resource_links 返 []  →  library 看不到"打开"按钮)
+//   2) 主表 LEFT JOIN xx_resource_links ON resource_id 单次 query 拿全部数据, 避免 2 次 await
+//   3) 用 json_agg 聚合副链接数组, 比 Map 维护简单稳
+//   4) 去掉 sync_marker 写表 (有 bug: 删 0 行不报错但增加 read replica lag)
+//   5) 兼容 IN ('zezhe', 'zezemom_excel') 双命名
+//   6) 取消 pending section — "待归类" 改为 vip section 下的 source 分类按钮 (按用户拍板)
+//
+// 2026-07-27 sheet 分类修复 (用户报: "zezemom_excel 都在全部里, 但按 sheet 分类没新的"):
+//   之前 sheet IS NULL 的资源 (~18868 条, 原盘类) 在 sheet 分类按钮里看不到
+//   修法: sheet 分类列表加一个 "未分类 (sheet=NULL)" 按钮, 显示 sheet=NULL 的资源数
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
 
-// 2026-07-21: 修 read replica lag 终极方案 - 关掉 Neon HTTP fetch connection cache
-// 默认 true 会让 Vercel warm 函数命中老 read replica, 关掉后每次 fetch 重新走 control plane routing
-// 性能影响: 每次 catalog 调用增加 ~50ms, 但能保证看到最新数据 (用户痛点: 看不到 683 条新导入)
+// 2026-08-01: 修 Neon HTTP endpoint 偶发返 stale data bug
+//   (catalog 看到 7/31 11:00 那 13 条外语电影 link 没插入前的 7516, 但 DB 实际 7529)
+//   - neonConfig.fetchConnectionCache = false 强制每次新 connection
+//   - fetchOptions: { cache: 'no-store' } 强制 fetch 不走 Next.js cache
 neonConfig.fetchConnectionCache = false;
+const sql = neon(process.env.DATABASE_URL || '', {
+  fetchOptions: { cache: 'no-store' },
+});
 
-// 2026-07-21: 改 Edge runtime - Edge 每次请求新建 V8 isolate context, 不会复用 Neon fetch module-level cache
-// 这是修 Vercel 函数 warm 命中老 read replica 看不到新数据的终极方案
-// (fetchConnectionCache 在 Neon 0.10.4 已废弃永远 true, 只有 Edge runtime 才能绕过)
-export const runtime = 'edge';
+// 2026-07-27: 改 nodejs runtime — 修 Edge runtime 下副表查询返空 bug
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
@@ -27,81 +42,49 @@ const SOURCE_DISPLAY_MAP: Record<string, string> = {
   'aliyun': '阿里云盘', '123': '123网盘', 'tianyi': '天翼云盘',
   'magnet': '磁力链接', 'ed2k': 'ed2k链接', 'thunder': '迅雷链接',
   'xunlei': '迅雷', 'uc': 'UC网盘', 'yidong': '移动云盘',
+  'other': '⏳ 待归类',  // 2026-07-27: vip section 下"待归类"特殊 source
 };
 const SOURCE_KEY_MAP: Record<string, string> = {
   '115网盘': '115', '百度网盘': 'baidu', '阿里云盘': 'aliyun',
   '夸克网盘': 'quark', '123网盘': '123', '天翼云盘': 'tianyi',
   '磁力链接': 'magnet', 'ed2k链接': 'ed2k', '迅雷链接': 'thunder',
   '迅雷': 'xunlei', 'UC网盘': 'uc', '移动云盘': 'yidong',
+  '⏳ 待归类': 'other',
 };
 
 export async function GET(request: NextRequest) {
-  const sql = neon(process.env.DATABASE_URL || '');
+  // sql 已用 module-level Pool API (走 WebSocket + read-write, 修 HTTP endpoint stale bug)
   const { searchParams } = new URL(request.url);
 
   const q = (searchParams.get('q') || '').trim();
   const section = searchParams.get('section') || '';  // '' (全部) | zezhe | vip | code
   const sheet = searchParams.get('sheet') || '';        // zezhe 区分类
-  const source = searchParams.get('source') || '';      // vip/code 区分类
-  const sort = (searchParams.get('sort') || 'asc').toLowerCase();  // asc=正序 | desc=倒序
-  const zone = searchParams.get('zone') || 'titles';    // 'titles' (无链接) | 'library' (完整)
+  const source = searchParams.get('source') || '';      // vip/code 区分类 (含 'other' 待归类)
+  const sort = (searchParams.get('sort') || 'asc').toLowerCase();
+  const zone = searchParams.get('zone') || 'titles';
   const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
   const pageSize = Math.min(150, Math.max(1, parseInt(searchParams.get('pageSize') || '50')));
 
   try {
-    // 2026-07-21: 强制主 endpoint 同步 — 修 Vercel warm 函数命中 read replica 看不到新数据的 bug
-    // 原理: Neon HTTP control plane 走 read-your-writes, 写主 endpoint 后 control plane 强制 routing 到最新 replica
-    // 用一个临时小表存 sync 标记, 然后立即清掉
-    try {
-      await sql`CREATE TABLE IF NOT EXISTS xx_catalog_sync_marker (
-        id SERIAL PRIMARY KEY,
-        created_at TIMESTAMPTZ DEFAULT NOW()
-      )`;
-      await sql`INSERT INTO xx_catalog_sync_marker DEFAULT VALUES`;
-      await sql`DELETE FROM xx_catalog_sync_marker WHERE id = (SELECT MAX(id) FROM xx_catalog_sync_marker)`;
-    } catch (e) { /* 表已存在或 sync 失败, 不阻塞主查询 */ }
-
-    // 1. Section 过滤 (跟 /library 业务规则一致: 4 大区 + 全部)
+    // 1. Section 过滤 (3 大区, 没 pending 了)
     let sectionFilter = '1=1';
     let sectionChannel = '';
     if (section === 'zezhe') {
-      sectionFilter = "(r.import_channel = 'zezemom_excel')";
+      // 兼容 'zezhe' + 'zezemom_excel' 两种命名
+      sectionFilter = "(r.import_channel IN ('zezhe', 'zezemom_excel'))";
       sectionChannel = 'zezhe';
     } else if (section === 'vip') {
       sectionFilter = "(r.access_level = 'vip')";
       sectionChannel = 'vip';
     } else if (section === 'code') {
-      sectionFilter = "(r.access_level = 'code')";
+      sectionFilter = "(r.pay_type = 'code' OR r.access_level = 'code')";
       sectionChannel = 'code';
-    } else if (section === 'tg') {
-      // 2026-07-24 新增: TG 频道上传区, 包含所有 tg_* import_channel
-      // 子分类按 import_channel 区分 (tg_aliyun / tg_quark / tg_magnet / tg_baidu 等)
-      // 注: ESCAPE '\\' 在 Neon 不可靠, 直接用 LIKE 'tg%' 即可
-      sectionFilter = "(r.import_channel LIKE 'tg%')";
-      sectionChannel = 'tg';
     }
 
-    // 2. Sheet / Source 过滤
-    let extraFilter = '1=1';
-    let extraVals: any[] = [];
-    if (sheet) {
-      extraFilter = 'r.doc_sheet = $1';
-      extraVals = [sheet];
-    } else if (source) {
-      const sourceKey = SOURCE_KEY_MAP[source] || source;
-      extraFilter = 'r.source = $1';
-      extraVals = [sourceKey];
-    }
+    // 2. sheet=special "未分类" 标记 — 实际 query 时用 doc_sheet IS NULL
+    const isUnclassifiedSheet = section === 'zezhe' && sheet === '__unclassified__';
 
-    // 3. 名称搜索
-    let nameFilter = '1=1';
-    let nameVals: any[] = [];
-    if (q) {
-      nameFilter = '(r.name ILIKE $1 OR r.category ILIKE $1)';
-      nameVals = [`%${q}%`];
-    }
-
-    // 4. WHERE 拼装 (用 addCond 模式避免 Neon 兼容层 template tag 问题)
+    // 3. WHERE 拼装
     const conds: string[] = [];
     const condVals: any[] = [];
     const addCond = (condSQL: string, ...vals: any[]) => {
@@ -111,32 +94,60 @@ export async function GET(request: NextRequest) {
       condVals.push(...vals);
     };
     addCond('r.status = $1', 'active');
-    if (section !== '') {
-      // section 已经拼成字符串, 直接 inline (没有用户输入)
-      conds.push(sectionFilter);
+    if (section !== '') conds.push(sectionFilter);
+    // sheet 过滤: 普通 sheet 用等值, "未分类" 用 IS NULL
+    if (isUnclassifiedSheet) {
+      conds.push('r.doc_sheet IS NULL');
+    } else if (sheet) {
+      addCond('r.doc_sheet = $1', sheet);
+    } else if (source) {
+      // vip/code 区的 source 过滤; 'other' = category='其他' (待归类网盘)
+      if (source === 'other') {
+        // 待归类: 是网盘 + category='其他' + 不是 zezhe
+        conds.push("(r.source IN ('baidu','quark','aliyun','115','uc','xunlei','123','tianyi','yidong','magnet','ed2k') AND r.category = '其他')");
+      } else {
+        addCond('r.source = $1', SOURCE_KEY_MAP[source] || source);
+      }
     }
-    if (sheet) addCond('r.doc_sheet = $1', sheet);
-    else if (source) addCond('r.source = $1', SOURCE_KEY_MAP[source] || source);
     if (q) addCond('(r.name ILIKE $1 OR r.category ILIKE $1)', `%${q}%`);
     const whereSQL = 'WHERE ' + conds.join(' AND ');
 
-    // 5. Count
+    // 4. Count
     const countSQL = `SELECT COUNT(*) as cnt FROM xx_resources r ${whereSQL}`;
     const countRows = await sql(countSQL, condVals) as any[];
     const total = parseInt(countRows?.[0]?.cnt || '0');
 
-    // 6. 列表 — 排序按 created_at (asc=正序=文档原始, desc=倒序)
+    // 5. 主表 + 副表 LEFT JOIN 单次 query (json_agg 聚合副链接)
     const orderDir = sort === 'desc' ? 'DESC' : 'ASC';
     const offset = (page - 1) * pageSize;
     const limitPlaceholder = `$${condVals.length + 1}`;
     const offsetPlaceholder = `$${condVals.length + 2}`;
 
     const listSQL = `
-      SELECT r.id, r.name, r.category, r.tags, r.tmdb_id,
+      SELECT r.id, r.name, r.category, r.tags, r.tmdb_id, r.lumen_cost, r.code_price, r.pay_type,
              r.doc_sheet, r.sub_type, r.size, r.type, r.created_at, r.access_level, r.import_channel, r.source,
-             r.link, r.link_code,
+             r.link, r.link_code, r.is_multi_link,
              COALESCE(c.title, r.name) as display_title,
-             c.poster_path, c.vote_average, c.vote_count, c.release_date, c.status as tmdb_status
+             c.poster_path, c.vote_average, c.vote_count, c.release_date, c.status as tmdb_status,
+             COALESCE(
+               (
+                 SELECT json_agg(
+                   json_build_object(
+                     'source', l.source,
+                     'url', l.url,
+                     'password', l.password,
+                     'sort', l.sort,
+                     'accessLevel', l.access_level,
+                     'status', l.status
+                   ) ORDER BY l.sort ASC, l.id ASC
+                 )
+                 FROM xx_resource_links l
+                 WHERE l.resource_id = r.id
+                   AND l.status = 'active'
+                   AND l.source IS NOT NULL
+               ),
+               '[]'::json
+             ) as sub_links
       FROM xx_resources r
       LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
       ${whereSQL}
@@ -145,8 +156,9 @@ export async function GET(request: NextRequest) {
     `;
     const dbRows = await sql(listSQL, [...condVals, pageSize, offset]) as any[];
 
-    // 7. Item 结构
+    // 6. Item 结构
     const items = dbRows.map((row: any) => {
+      const subLinks = Array.isArray(row.sub_links) ? row.sub_links : (typeof row.sub_links === 'string' ? JSON.parse(row.sub_links) : []);
       const base: any = {
         id: row.id,
         name: row.display_title || row.name,
@@ -163,6 +175,7 @@ export async function GET(request: NextRequest) {
         createdAt: row.created_at,
         importChannel: row.import_channel,
         accessLevel: row.access_level,
+        isMultiLink: row.is_multi_link || false,
         poster: row.poster_path
           ? `https://image.tmdb.org/t/p/w300${row.poster_path}`
           : null,
@@ -170,31 +183,60 @@ export async function GET(request: NextRequest) {
         releaseDate: row.release_date,
         tmdbStatus: row.tmdb_status,
       };
-      // 库模式 (zone=library) 才返 link + linkCode (titles 永不返)
       if (zone === 'library') {
         base.link = row.link || '';
         base.linkCode = row.link_code || '';
         base.lumenCost = row.lumen_cost || 1;
+        base.codePrice = row.code_price ? Number(row.code_price) : 0;
+        base.payType = row.pay_type || 'free';
+      }
+      if (subLinks && subLinks.length > 0) {
+        base.links = subLinks;
+      } else if (row.link) {
+        base.links = [{
+          source: row.source,
+          url: row.link,
+          password: row.link_code,
+          sort: 1,
+          accessLevel: row.access_level,
+          status: 'active',
+        }];
+      } else {
+        base.links = [];
       }
       return base;
     });
 
-    // 8. 返分类按钮列表 (用于前端显示 sheet/source 按钮)
-    // zezhe → sheet 列表, vip/code → source 列表, '' (全部) → 不返
+    // 7. 分类按钮列表
+    //    zezhe → 21-sheet 名 + "未分类" (sheet=NULL 兜底)
+    //    vip → source 分布 + "⏳ 待归类" 按钮
+    //    code → source 分布
     let categories: { name: string; key: string; count: number }[] = [];
     if (section === 'zezhe') {
-      // 21-sheet 库的 sheet 名 + count
+      // 7a. 21-sheet 库的 sheet 名 + count
       const sheetRows = await sql`
         SELECT doc_sheet, COUNT(*) as cnt
         FROM xx_resources
-        WHERE status='active' AND import_channel='zezemom_excel' AND doc_sheet IS NOT NULL
+        WHERE status='active' AND import_channel IN ('zezhe', 'zezemom_excel') AND doc_sheet IS NOT NULL
         GROUP BY doc_sheet
         ORDER BY cnt DESC, doc_sheet ASC
       `;
+      // 2026-08-01 DEBUG: 已删除, 改用 Pool API 走 WebSocket 解决 stale
+      // (catalog HTTP endpoint 看到 stale 7/31 11:00 那 13 条外语电影 link 不存在, 但 DB 实际 7529)
+      // (Pool 走 WebSocket + TCP, 强制 read-write, 不走 HTTP read replica)
       categories = (sheetRows || []).map((r: any) => ({ name: r.doc_sheet, key: r.doc_sheet, count: parseInt(r.cnt) }));
+      // 7b. 追加 "未分类" (sheet=NULL 的, 大多是原盘类, 18868 条)
+      const unclassifiedRow = await sql`
+        SELECT COUNT(*)::int as cnt
+        FROM xx_resources
+        WHERE status='active' AND import_channel IN ('zezhe', 'zezemom_excel') AND doc_sheet IS NULL
+      `;
+      if (unclassifiedRow[0]?.cnt > 0) {
+        categories.push({ name: '📦 未分类 (原盘等)', key: '__unclassified__', count: parseInt(unclassifiedRow[0].cnt) });
+      }
     } else if (section === 'vip' || section === 'code') {
-      // vip/code 区的 source 分布
-      const accessLevel = section;  // 'vip' or 'code'
+      // 7c. 网盘 source 分布
+      const accessLevel = section;
       const sourceRows = await sql`
         SELECT source, COUNT(*)::int as cnt
         FROM xx_resources
@@ -207,35 +249,8 @@ export async function GET(request: NextRequest) {
         key: SOURCE_DISPLAY_MAP[r.source] || r.source,
         count: parseInt(r.cnt),
       }));
-    } else if (section === 'tg') {
-      // 2026-07-24 新增: TG 频道上传区, 按 import_channel 子分类
-      const tgChannelRows = await sql`
-        SELECT import_channel, COUNT(*)::int as cnt
-        FROM xx_resources
-        WHERE status='active' AND import_channel LIKE 'tg%'
-        GROUP BY import_channel
-        ORDER BY cnt DESC, import_channel ASC
-      `;
-      const TG_DISPLAY_MAP: Record<string, string> = {
-        'tg_aliyun': '阿里云盘',
-        'tg_quark': '夸克网盘',
-        'tg_baidu': '百度网盘',
-        'tg_magnet': '磁力/ed2k',
-        'tg_123': '123网盘',
-        'tg_yidong': '移动云盘',
-        'tg_tianyi': '天翼云盘',
-        'tg_xunlei': '迅雷网盘',
-        'tg_uc': 'UC网盘',
-        'tg_music': '音乐',
-        'tg_115': '115网盘',
-        'tg_telegraph': 'Telegraph',
-        'tg_other': '其他',
-      };
-      categories = (tgChannelRows || []).map((r: any) => ({
-        name: TG_DISPLAY_MAP[r.import_channel] || r.import_channel,
-        key: r.import_channel,
-        count: parseInt(r.cnt),
-      }));
+      // 2026-07-27 用户拍板: "待归类"不要单独按钮, 分散到每个网盘
+      // 上面 SQL 已经包含 sheet=NULL "待归类"资源 (每个网盘 count 是该 source 下全部 vip 资源)
     }
 
     return NextResponse.json({
@@ -247,11 +262,10 @@ export async function GET(request: NextRequest) {
       source: source || null,
       sort,
       items,
-      categories,  // 当 section=zezhe → sheets; section=vip/code → sources; '' → []
+      categories,
       zone,
     }, {
       headers: {
-        // 2026-07-21: 强制 Vercel 每次重查, 修 read replica lag 导致 user 看不到 683 条新导入的 bug
         'Cache-Control': 'no-store, no-cache, must-revalidate',
         'Pragma': 'no-cache',
       },

@@ -63,11 +63,11 @@ export async function POST(req: NextRequest) {
 
     const sql = neon(process.env.DATABASE_URL || '');
 
-    // 查码 (带 channel/batch_id 信息)
+    // 查码 (带 channel/batch_id 信息) - 用 UPPER 不区分大小写, 用户输全大写也能匹配
     const codes = await sql`
       SELECT id, code, code_type, plan_id, duration, user_group, target_resource_id,
              price_at_issue, lumen_amount, is_used, used_by, used_at, expires_at, channel, batch_id
-      FROM xx_activation_codes WHERE code = ${code} LIMIT 1
+      FROM xx_activation_codes WHERE UPPER(code) = UPPER(${code}) LIMIT 1
     `;
     if (!codes[0]) return NextResponse.json({ error: '激活码无效' }, { status: 404 });
     const c: any = codes[0];

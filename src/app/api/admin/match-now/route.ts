@@ -10,9 +10,11 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;  // spawn + 返回, 应该秒级
 
-const SCRIPT_PATH = '/app/scripts/match-direct.mjs';
-const LOG_FILE = '/app/logs/match.log';
-const PID_FILE = '/app/logs/match.pid';
+// 2026-07-25: NAS systemd 部署, 不是 Docker. 改用绝对路径
+const PROJECT_ROOT = process.env.ZZMM_PROJECT_ROOT || '/data_s001/docker/zzmm-search';
+const SCRIPT_PATH = `${PROJECT_ROOT}/scripts/match-direct.mjs`;
+const LOG_FILE = `${PROJECT_ROOT}/logs/match.log`;
+const PID_FILE = `${PROJECT_ROOT}/logs/match.pid`;
 
 function authAdmin(req: NextRequest) {
   let token: string | null = null;

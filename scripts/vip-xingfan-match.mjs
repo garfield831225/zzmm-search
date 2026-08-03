@@ -308,13 +308,11 @@ async function matchOne(resource) {
   }
 
   // 找最相似
-  // 2026-07-24 改: 如果所有 candidate score 都 < 0.4 (跨语言匹配), 信任 xingfan 搜索顺序, 用第一个
+  // 2026-07-24 改: 优先用 score, 跨语言 fallback 用 xingfan 第一个 (trust xingfan 搜索相关性)
   const scored = candidates
     .map((c) => ({ ...c, score: similarity(c.title, titleToSearch) }));
   let best = scored.sort((a, b) => b.score - a.score)[0];
   if (best.score < 0.4 && candidates.length > 0) {
-    // 跨语言 fallback: xingfan 自己知道相关性, 用第一个 candidate
-    // 但要排除纯数字/空的 title
     const firstValid = candidates.find((c) => c.title && c.title.length >= 2 && !/^\d+$/.test(c.title));
     if (firstValid) {
       best = { ...firstValid, score: 0.5 };
@@ -322,8 +320,8 @@ async function matchOne(resource) {
     }
   }
 
-  // 阈值: token 命中率 > 0.4 或 fallback 0.5
-  if (best.score < 0.4) return { status: 'low_score', score: best.score };
+  // 阈值: 0 优先入库 (2026-07-24 用户: 提前把所有能拿的视频链接都入库, 不挑)
+  if (best.score < 0 && candidates.length === 0) return { status: 'low_score', score: best.score };
 
   // 抓详情页拿 play_urls
   let eps;

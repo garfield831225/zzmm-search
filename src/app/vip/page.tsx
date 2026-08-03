@@ -1,279 +1,216 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
+import { useRouter, usePathname } from 'next/navigation';
+
+const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 
 interface VipItem {
-  id: number;
-  tmdbId: number;
-  mediaType: 'movie' | 'tv';
+  resourceId: number;
+  tmdbId: string;
+  tmdbType: 'movie' | 'tv' | null;
   title: string;
   originalTitle: string | null;
+  releaseDate: string;
+  posterPath: string | null;
   posterUrl: string | null;
-  backdropUrl: string | null;
   voteAverage: number | null;
-  voteCount: number;
-  releaseDate: string | null;
-  popularity: number;
-  genreIds: number[];
-  seasonCount: number | null;
-  episodeCount: number | null;
-  status: string | null;
-  hasLink: boolean;
-  link: {
-    id: number;
-    playUrl: string;
-    source: string;
-    season: number | null;
-    episode: number | null;
-    lastOkAt: string | null;
-  } | null;
+  overview: string | null;
+  source: string;
+  resourceCount: number;
+  accessLevel: string;
+  category: string;
 }
 
-interface ApiResp {
-  ok: boolean;
-  page: number;
-  pageSize: number;
-  total: number;
-  hasMore: boolean;
-  items: VipItem[];
-  error?: string;
-}
-
-type MediaTab = '' | 'movie' | 'tv';
-type SortKey = 'smart' | 'popular' | 'rating' | 'newest';
-
-const MEDIA_TABS: Array<{ key: MediaTab; label: string; icon: string }> = [
-  { key: '', label: '全部', icon: '🎬' },
-  { key: 'movie', label: '电影', icon: '🎥' },
-  { key: 'tv', label: '剧集', icon: '📺' },
-];
-
-const SORT_TABS: Array<{ key: SortKey; label: string; tip: string }> = [
-  { key: 'smart', label: '智能', tip: '有播放链接的优先' },
-  { key: 'popular', label: '热度', tip: 'TMDB popularity' },
-  { key: 'rating', label: '高评分', tip: 'TMDB 评分' },
-  { key: 'newest', label: '最新', tip: '上映日期' },
-];
+type Tab = 'all' | 'movie' | 'tv';
 
 export default function VipPage() {
-  const router = useRouter();
-  const [mediaType, setMediaType] = useState<MediaTab>('');
-  const [sort, setSort] = useState<SortKey>('smart');
+  const [tab, setTab] = useState<Tab>('all');
   const [items, setItems] = useState<VipItem[]>([]);
-  const [page, setPage] = useState(1);
-  const [authChecked, setAuthChecked] = useState(false);
-
-  // 2026-07-24: client-side 鉴权 - 没登录跳 /login?redirect=/vip
-  // 注: middleware 已经不放行 RSC fetch, 这里只防直接访问 HTML 的情况
-  useEffect(() => {
-    const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token');
-    if (!t) {
-      router.replace('/login?redirect=/vip');
-      return;
-    }
-    setAuthChecked(true);
-  }, [router]);
   const [total, setTotal] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const pathname = usePathname();
+  const hasLoadedRef = useRef(false);
 
-  const fetchPage = useCallback(async (pageToLoad: number, append: boolean) => {
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    try {
-      const params = new URLSearchParams({
-        page: String(pageToLoad),
-        pageSize: '48',
-        sort,
-      });
-      if (mediaType) params.set('mediaType', mediaType);
 
-      const resp = await fetch(`/api/vip?${params.toString()}`, {
-        credentials: 'include',
-        cache: 'no-store',
-      });
-      const data = (await resp.json()) as ApiResp;
-      if (!resp.ok || !data.ok) {
-        setError(data.error || `HTTP ${resp.status}`);
-        if (resp.status === 403) {
-          // 没权限, 回首页
-          setTimeout(() => router.push('/'), 1200);
+    const fetchData = async () => {
+      // 2026-08-03 修: 2 次 retry + 每次 12s timeout (之前 3 次无 timeout, Neon 卡死一直 loading)
+      for (let i = 0; i < 2; i++) {
+        if (cancelled) return;
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 20000);
+          const r = await fetch(`/api/vip?type=${tab}&pageSize=30&_t=${Date.now()}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-store', 'Pragma': 'no-cache' },
+            signal: ctrl.signal,
+          });
+          clearTimeout(timer);
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const d = await r.json();
+          if (cancelled) return;
+          setItems(d.items || []);
+          setTotal(d.total || 0);
+          setLoading(false);
+          setError(null);
+          hasLoadedRef.current = true;
+          return;
+        } catch (e: any) {
+          if (i === 1) {
+            if (!cancelled) {
+              setError(e?.message || '加载失败');
+              setLoading(false);
+            }
+          } else {
+            await new Promise(r => setTimeout(r, 800));
+          }
         }
-        return;
       }
-      setTotal(data.total);
-      setHasMore(data.hasMore);
-      setItems((prev) => (append ? [...prev, ...data.items] : data.items));
-    } catch (e: any) {
-      setError(e.message || '网络错误');
-    } finally {
-      setLoading(false);
-    }
-  }, [mediaType, sort, router]);
+    };
 
-  useEffect(() => {
-    if (!authChecked) return;
-    setItems([]);
-    setPage(1);
-    fetchPage(1, false);
-  }, [mediaType, sort, fetchPage, authChecked]);
-
-  const loadMore = () => {
-    if (loading || !hasMore) return;
-    const next = page + 1;
-    setPage(next);
-    fetchPage(next, true);
-  };
+    fetchData();
+    return () => { cancelled = true; };
+  }, [tab, pathname]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-black text-white">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* 标题区 */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-indigo-400 to-fuchsia-400 bg-clip-text text-transparent">
-            VIP 影视区
-          </h1>
-          <p className="text-sm text-white/40 mt-1">
-            {total > 0 ? `共 ${total.toLocaleString()} 条资源` : '暂无数据, 等待 TMDB 同步...'}
-            {items.filter((i) => i.hasLink).length > 0 && (
-              <span className="ml-2 text-indigo-300">
-                · {items.filter((i) => i.hasLink).length} 条可播放
-              </span>
-            )}
-          </p>
+    <div className="min-h-screen bg-[#0a0a0f] text-white">
+      {/* Header */}
+      <div className="sticky top-0 z-30 bg-gradient-to-b from-[#0a0a0f] to-[#0a0a0f]/95 backdrop-blur border-b border-white/5">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Link href="/" className="text-white/60 hover:text-white text-sm">← 返回首页</Link>
+            <h1 className="text-lg font-bold">💎 VIP 专区 (按上映时间近→远)</h1>
+          </div>
+          <div className="text-xs text-white/40">共 {total} 部 · access_level=vip</div>
         </div>
 
-        {/* 媒体类型切换 */}
-        <div className="flex flex-wrap gap-2 mb-4">
-          {MEDIA_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setMediaType(tab.key)}
-              className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                mediaType === tab.key
-                  ? 'bg-gradient-to-r from-indigo-500 to-fuchsia-500 text-white shadow-lg'
+        {/* Tabs */}
+        <div className="max-w-7xl mx-auto px-4 pb-3 flex gap-2">
+          {([
+            { k: 'all', n: `全部 (${total})` },
+            { k: 'movie', n: `电影` },
+            { k: 'tv', n: `剧集/动漫/综艺` },
+          ] as { k: Tab, n: string }[]).map(t => (
+            <button key={t.k}
+              onClick={() => setTab(t.k)}
+              className={`px-3 py-1.5 text-xs rounded-lg transition ${
+                tab === t.k
+                  ? 'bg-amber-600 text-white'
                   : 'bg-white/5 text-white/60 hover:bg-white/10'
-              }`}
-            >
-              <span className="mr-1">{tab.icon}</span>
-              {tab.label}
+              }`}>
+              {t.n}
             </button>
           ))}
         </div>
+      </div>
 
-        {/* 排序切换 */}
-        <div className="flex flex-wrap gap-2 mb-6">
-          {SORT_TABS.map((s) => (
-            <button
-              key={s.key}
-              onClick={() => setSort(s.key)}
-              title={s.tip}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                sort === s.key
-                  ? 'bg-white/15 text-white border border-white/20'
-                  : 'bg-white/[0.03] text-white/40 hover:text-white/70 border border-white/[0.05]'
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-
-        {/* 错误 */}
-        {error && (
-          <div className="mb-4 px-4 py-3 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-200 text-sm">
-            {error}
+      {/* Grid */}
+      <div className="max-w-7xl mx-auto px-4 py-4">
+        {loading && items.length === 0 ? (
+          <div className="text-center text-white/40 py-16">加载中...</div>
+        ) : error && items.length === 0 ? (
+          <div className="text-center text-red-400 py-16">
+            <div>❌ 加载失败: {error}</div>
+            <button onClick={() => setTab(tab)} className="mt-3 px-4 py-1.5 bg-amber-600 rounded text-sm">重试</button>
+          </div>
+        ) : items.length === 0 ? (
+          <div className="text-center text-white/40 py-16">暂无数据</div>
+        ) : (
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-2">
+            {items.map(item => (
+              <VipCard key={`${item.tmdbType}-${item.tmdbId}`} item={item} />
+            ))}
           </div>
         )}
 
-        {/* 列表 */}
-        {items.length === 0 && !loading ? (
-          <div className="flex flex-col items-center justify-center py-32 text-white/30">
-            <div className="text-6xl mb-4">🎬</div>
-            <p className="text-lg font-bold">还没有数据</p>
-            <p className="text-sm mt-2 text-center max-w-md">
-              同步脚本跑起来后会陆续有数据。<br />
-              第一次入库预计 3000 条 (今晚)。
-            </p>
+        {loading && items.length > 0 && (
+          <div className="fixed top-0 left-0 right-0 h-0.5 bg-amber-500/50 z-50">
+            <div className="h-full bg-amber-500 animate-pulse" style={{ width: '60%' }}></div>
           </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              {items.map((it) => (
-                <a
-                  key={`${it.id}-${it.mediaType}`}
-                  href={`/vip/${it.id}`}
-                  className="group block"
-                >
-                  <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 ring-1 ring-white/[0.06] group-hover:ring-indigo-400/40 transition-all">
-                    {it.posterUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={it.posterUrl}
-                        alt={it.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-4xl text-white/20">
-                        {it.mediaType === 'movie' ? '🎥' : '📺'}
-                      </div>
-                    )}
+        )}
 
-                    {/* 类型角标 */}
-                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-black/60 backdrop-blur-sm text-white/80">
-                      {it.mediaType === 'movie' ? '电影' : '剧集'}
-                    </div>
-
-                    {/* 播放链接角标 */}
-                    {it.hasLink && (
-                      <div className="absolute top-2 right-2 px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-gradient-to-r from-emerald-500 to-teal-500 text-white">
-                        ▶ 可播
-                      </div>
-                    )}
-
-                    {/* 评分 */}
-                    {it.voteAverage && it.voteAverage > 0 && (
-                      <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-md text-[10px] font-extrabold text-amber-300 bg-black/60 backdrop-blur-sm flex items-center gap-0.5">
-                        <span>★</span>
-                        {it.voteAverage.toFixed(1)}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="mt-2">
-                    <p className="text-sm font-bold text-white/90 truncate group-hover:text-indigo-300 transition-colors">
-                      {it.title}
-                    </p>
-                    <p className="text-[11px] text-white/35 truncate">
-                      {it.releaseDate?.slice(0, 4) || '—'}
-                      {it.mediaType === 'tv' && it.episodeCount && ` · 共 ${it.episodeCount} 集`}
-                      {it.originalTitle && it.originalTitle !== it.title && (
-                        <span className="ml-1 text-white/25">/ {it.originalTitle.slice(0, 20)}</span>
-                      )}
-                    </p>
-                  </div>
-                </a>
-              ))}
-            </div>
-
-            {/* 加载更多 */}
-            {hasMore && (
-              <div className="mt-8 text-center">
-                <button
-                  onClick={loadMore}
-                  disabled={loading}
-                  className="px-6 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 text-sm font-bold border border-white/10 disabled:opacity-50"
-                >
-                  {loading ? '加载中...' : `加载更多 (还有 ${total - items.length} 条)`}
-                </button>
-              </div>
-            )}
-          </>
+        {error && items.length > 0 && (
+          <div className="fixed top-14 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-red-500/90 text-white text-xs rounded z-50">
+            刷新失败: {error} (显示上次数据)
+          </div>
         )}
       </div>
     </div>
   );
+}
+
+function VipCard({ item }: { item: VipItem }) {
+  const router = useRouter();
+  const onClick = () => {
+    if (item.tmdbType === 'movie' || item.tmdbType === 'tv') {
+      router.push(`/tmdb/${item.tmdbType}/${item.tmdbId}`);
+    } else {
+      router.push(`/library?id=${item.resourceId}`);
+    }
+  };
+
+  return (
+    <div
+      onClick={onClick}
+      className="group cursor-pointer relative overflow-hidden rounded-md bg-white/5 hover:bg-white/10 transition"
+    >
+      {/* Poster */}
+      <div className="aspect-[2/3] bg-gradient-to-br from-amber-900/30 to-yellow-900/30 relative">
+        {item.posterUrl ? (
+          <img
+            src={item.posterUrl}
+            alt={item.title}
+            className="w-full h-full object-cover"
+            loading="lazy"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-white/20 text-2xl">🎬</div>
+        )}
+
+        {/* 角标: 类型 + 多网盘 + VIP */}
+        <div className="absolute top-1 left-1 flex flex-col gap-0.5">
+          {item.tmdbType === 'tv' ? (
+            <span className="px-1 py-0.5 bg-cyan-600/90 text-[9px] rounded">剧集</span>
+          ) : item.tmdbType === 'movie' ? (
+            <span className="px-1 py-0.5 bg-violet-600/90 text-[9px] rounded">电影</span>
+          ) : (
+            <span className="px-1 py-0.5 bg-white/20 text-[9px] rounded">未分类</span>
+          )}
+          {item.resourceCount > 1 && (
+            <span className="px-1 py-0.5 bg-amber-500/90 text-black text-[9px] rounded font-semibold">📦 {item.resourceCount} 网盘</span>
+          )}
+          <span className="px-1 py-0.5 bg-gradient-to-r from-amber-500 to-yellow-500 text-black text-[9px] rounded font-bold">💎 VIP</span>
+        </div>
+
+        {/* 评分 */}
+        {item.voteAverage && item.voteAverage > 0 && (
+          <div className="absolute top-1 right-1 px-1 py-0.5 bg-black/70 text-amber-400 text-[9px] rounded">
+            ⭐ {item.voteAverage.toFixed(1)}
+          </div>
+        )}
+      </div>
+
+      {/* Info */}
+      <div className="p-1.5">
+        <div className="text-[11px] font-semibold truncate" title={item.title}>{item.title}</div>
+        <div className="text-[9px] text-white/40 mt-0.5 flex items-center gap-1">
+          <span>📅 {item.releaseDate}</span>
+          {item.source && (
+            <span className="px-1 bg-amber-500/20 text-amber-300 rounded text-[8px]">{cleanSource(item.source)}</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function cleanSource(s: string) {
+  return s?.replace(/ \[deleted\]$/, '') || '';
 }

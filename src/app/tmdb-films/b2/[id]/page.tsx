@@ -129,7 +129,7 @@ export default function B2DetailPage() {
             <p className="text-sm text-white/60 mb-5">此资源来自其他渠道（不是泽泽妈妈文档导入），需要购买 VIP 会员才能打开或复制</p>
             <div className="flex gap-2">
               <button onClick={() => setShowVip(false)} className="flex-1 py-2.5 bg-white/10 rounded-xl text-sm">关闭</button>
-              <Link href="/shop" className="flex-1 py-2.5 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl text-sm font-medium">购买 VIP</Link>
+              <Link href="/upgrade" className="flex-1 py-2.5 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl text-sm font-medium">购买 VIP</Link>
             </div>
           </div>
         </div>

@@ -213,40 +213,56 @@ export async function GET(request: NextRequest) {
       WHEN c.release_date < CURRENT_DATE::text THEN 0
       ELSE 1
     END)`;
-    const orderClause = sort === 'added_time'
-      ? `has_tmdb DESC, ${dateWeight}, r.created_at DESC`
+    // 2026-07-27: 外层 orderClause 改用 alias (subquery 暴露的列), 不能引用 c / 内层表达式
+    const innerOrderClause = sort === 'added_time'
+      ? `has_tmdb DESC, ${dateWeight}, created_at DESC`
       : sort === 'import_time_asc'
-        ? `r.created_at ASC, r.id ASC`
+        ? `created_at ASC, id ASC`
         : sort === 'hot'
-          ? `has_tmdb DESC, (COALESCE(r.view_count, 0) + COALESCE(NULLIF(c.vote_count, '')::int, 0) / 100) DESC, ${dateWeight}`
+          ? `has_tmdb DESC, (COALESCE(view_count, 0) + COALESCE(vote_count_int, 0) / 100) DESC, ${dateWeight}`
           : sort === 'rating'
-            ? `has_tmdb DESC, c.vote_average DESC NULLS LAST, COALESCE(NULLIF(c.vote_count, '')::int, 0) DESC, ${dateWeight}`
+            ? `has_tmdb DESC, vote_average_num DESC NULLS LAST, COALESCE(vote_count_int, 0) DESC, ${dateWeight}`
             : sort === 'cover_first'
-              ? `has_cover DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`
-              : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, r.created_at DESC`;
+              ? `has_cover DESC, ${dateWeight}, sort_date DESC NULLS LAST, created_at DESC`
+              : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, created_at DESC`;
+    // 外层 (subquery 外) 只能用 subquery 暴露的列, 用 alias 替代
+    const orderClause = innerOrderClause
+      .replace(new RegExp(dateWeight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 'date_weight');
     const offset = (page - 1) * pageSize;
 
     // ─── Count ────────────────────────────────────────────────────────────────
-    const countSQL = `SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id ${whereSQL}`;
+    // 2026-07-27: 改成 distinct count (按 tmdb_id), 跟 fetch 同步, 否则 total 跟 items 数对不上
+    // 2026-07-29: 改用 COALESCE(tmdb_id, 'id_'||id) - 没 tmdb_id 的资源按 id 独立, 否则 1 万条非影视资源被合并成 1 条
+    const countSQL = `SELECT COUNT(DISTINCT COALESCE(NULLIF(r.tmdb_id, ''), 'id_' || r.id::text)) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id ${whereSQL}`;
     const countRows = await sql(countSQL, condVals) as any[];
     const total = parseInt(countRows?.[0]?.cnt || '0');
 
     // ─── Fetch page ─────────────────────────────────────────────────────────
+    // 2026-07-27: SQL 层 dedup by tmdb_id (用 ROW_NUMBER() PARTITION BY)
+    // 旧逻辑: 拿 30 条 + 应用层 dedup 剩 17 条, 用户每页额定 30 实际只看到十几
+    // 新逻辑: 内层 ROW_NUMBER 按 tmdb_id 分组取第一, 外层 ORDER BY + LIMIT 真拿到 30 部不同电影
     const limitPlaceholder = `$${condVals.length + 1}`;
     const offsetPlaceholder = `$${condVals.length + 2}`;
     const listSQL = `
-      SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.view_count, r.created_at,
-             r.doc_sheet, r.sub_type, r.lumen_cost,
-             r.pay_type, r.code_price, r.lumen_cost, r.access_level, r.access_tier,
-             r.import_channel,
-             COALESCE(c.release_date, r.created_at::text) as sort_date,
-             ${dateWeight} as date_weight,
-             CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb,
-             CASE WHEN EXISTS (SELECT 1 FROM xx_music_cache m WHERE m.resource_id = r.id)
-                   OR EXISTS (SELECT 1 FROM xx_sports_cache s WHERE s.resource_id = r.id)
-                  THEN 1 ELSE 0 END as has_cover
-      FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
-      ${whereSQL}
+      SELECT * FROM (
+        SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.created_at,
+               r.doc_sheet, r.sub_type, r.lumen_cost,
+               r.pay_type, r.code_price, r.lumen_cost, r.access_level, r.access_tier,
+               r.import_channel,
+               r.view_count as view_count,
+               NULLIF(c.vote_count, '')::int as vote_count_int,
+               NULLIF(c.vote_average, '')::numeric as vote_average_num,
+               COALESCE(c.release_date, r.created_at::text) as sort_date,
+               ${dateWeight} as date_weight,
+               CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb,
+               CASE WHEN EXISTS (SELECT 1 FROM xx_music_cache m WHERE m.resource_id = r.id)
+                     OR EXISTS (SELECT 1 FROM xx_sports_cache s WHERE s.resource_id = r.id)
+                    THEN 1 ELSE 0 END as has_cover,
+               ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(r.tmdb_id, ''), 'id_' || r.id::text) ORDER BY created_at DESC, id ASC) as rn
+        FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
+        ${whereSQL}
+      ) sub
+      WHERE rn = 1
       ORDER BY ${orderClause}
       LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}
     `;
@@ -263,7 +279,8 @@ export async function GET(request: NextRequest) {
     let tmdbMap = new Map<string, any>();
     const missingTmdbIds: string[] = [];
     if (allTmdbIds.length > 0) {
-      const ids = await sql`SELECT * FROM xx_tmdb_cache WHERE tmdb_id = ANY(${allTmdbIds})`;
+      // 2026-07-31: 加 expires_at 过滤 - 35 天过期的 cache 视为失效, 走 /search 兜底
+      const ids = await sql`SELECT * FROM xx_tmdb_cache WHERE tmdb_id = ANY(${allTmdbIds}) AND expires_at > NOW()`;
       tmdbMap = new Map((ids || []).map((info: any) => [info?.tmdb_id, info]));
       allTmdbIds.forEach(id => { if (!tmdbMap.has(id)) missingTmdbIds.push(id); });
     }
@@ -337,6 +354,125 @@ export async function GET(request: NextRequest) {
       } catch { /* 未登录或无效 token */ }
     }
 
+    // 2026-07-27: 二次查同 tmdb_id 的所有 link (合并多连接到一个 item)
+    // 用户痛点: dedup by tmdb_id 后只显示 1 个 link, 实际 600+ link 全藏起来
+    // 这里按 source 优先级 + created_at 排序, 卡片用前 8 个, modal 用完整列表
+    const tmdbIds = Array.from(new Set(dbRows.map((r: any) => r.tmdb_id).filter(Boolean)));
+    let tmdbLinksMap = new Map<string, any[]>();
+    // source 优先级: 115 > 夸克 > 百度 > 阿里 > 磁力 > ed2k > 其他 (2026-07-31 提到外层供副表 push 用)
+    const SOURCE_PRIORITY: Record<string, number> = {
+      '115': 1, '115网盘': 1,
+      'quark': 2, '夸克网盘': 2,
+      'baidu': 3, '百度网盘': 3,
+      'ali': 4, 'aliyun': 4, '阿里云盘': 4,
+      'magnet': 5, '磁力链接': 5,
+      'ed2k': 6, 'ed2k链接': 6,
+    };
+    if (tmdbIds.length > 0) {
+      try {
+        // 2026-07-31: DISTINCT ON (tmdb_id, source, link) 去重 - 同 tmdb + source + link 只保留 MIN(id)
+        //   之前 ORDER BY tmdb_id, created_at DESC 拉 500 条会出现同 link 多次 (TG 重复抓/老 import 重复)
+        const allTmdbLinkRows = await sql`
+          SELECT DISTINCT ON (tmdb_id, source, link)
+                 id, tmdb_id, source, link, link_code, access_level, import_channel, size, name, created_at
+          FROM xx_resources
+          WHERE tmdb_id = ANY(${tmdbIds})
+            AND link IS NOT NULL AND link != ''
+            AND status = 'active'
+            AND source NOT LIKE '% [deleted]'  -- 2026-07-31 修: 排除软删 link (DELETE 端点 source 加 [deleted] 后缀但 link 保留)
+          ORDER BY tmdb_id, source, link, id ASC
+          LIMIT 500
+        ` as any[];
+        const sortFn = (a: any, b: any) => {
+          const sa = SOURCE_PRIORITY[a.source] || 99;
+          const sb = SOURCE_PRIORITY[b.source] || 99;
+          if (sa !== sb) return sa - sb;
+          // 剧集 link 按 season/episode 升序 (2026-07-31 副表支持)
+          if (a.fromSubTable && b.fromSubTable) {
+            if (a.season !== b.season) return a.season - b.season;
+            if (a.episode !== b.episode) return a.episode - b.episode;
+          }
+          // 优先级相同时按 created_at DESC (新上传在前)
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        };
+        for (const r of allTmdbLinkRows) {
+          if (!tmdbLinksMap.has(r.tmdb_id)) tmdbLinksMap.set(r.tmdb_id, []);
+          tmdbLinksMap.get(r.tmdb_id)!.push({
+            id: r.id,
+            source: r.source,
+            url: r.link,
+            password: r.link_code || '',
+            size: r.size || '',
+            accessLevel: r.access_level || 'basic',
+            importChannel: r.import_channel || '',
+            // 2026-07-31: 给 modal 详情页用 (显示"1080P 2集"等)
+            resourceName: r.name || '',
+            sort: SOURCE_PRIORITY[r.source] || 99,
+            status: 'active',
+            createdAt: r.created_at,
+          });
+        }
+        // 每个 tmdb 的 link 内部排序 (source 优先级 + 新上传优先)
+        Array.from(tmdbLinksMap.entries()).forEach(([tid, arr]) => {
+          arr.sort(sortFn);
+        });
+      } catch (e) { /* ignore */ }
+
+      // 2026-07-31: 补查副表 xx_resource_links (剧集多集 link 在副表, 主表 link='')
+      // 2026-07-31: DISTINCT ON (tmdb_id, source, url) 去重 - 同 tmdb + source + url 只保留 MIN(id)
+      try {
+        const subLinkRows = await sql`
+          SELECT DISTINCT ON (r.tmdb_id, l.source, l.url)
+                 l.id, l.resource_id, l.source, l.url, l.password, l.season, l.episode, l.access_level, l.status,
+                 r.tmdb_id, r.name as resource_name, r.import_channel, r.size
+          FROM xx_resource_links l
+          JOIN xx_resources r ON l.resource_id = r.id
+          WHERE r.tmdb_id = ANY(${tmdbIds})
+            AND l.status = 'active'
+            AND l.url IS NOT NULL AND l.url != ''
+            AND r.status = 'active'
+          ORDER BY r.tmdb_id, l.source, l.url, l.id ASC
+          LIMIT 1000
+        ` as any[];
+        for (const r of subLinkRows) {
+          if (!tmdbLinksMap.has(r.tmdb_id)) tmdbLinksMap.set(r.tmdb_id, []);
+          tmdbLinksMap.get(r.tmdb_id)!.push({
+            id: r.id,
+            source: r.source,
+            url: r.url,
+            password: r.password || '',
+            size: r.size || '',
+            accessLevel: r.access_level || 'basic',
+            importChannel: r.import_channel || '',
+            resourceName: r.resource_name || '',
+            sort: SOURCE_PRIORITY[r.source] || 99,
+            status: 'active',
+            createdAt: new Date().toISOString(),
+            // 2026-07-31: 剧集标记
+            season: r.season || 0,
+            episode: r.episode || 0,
+            fromSubTable: true,
+          });
+        }
+      } catch (e) { /* ignore */ }
+
+      // 2026-07-31: 跨主副表最终去重 - 同 (source, url) 只保留 id 最小 (最早入库)
+      //   SQL DISTINCT ON 已经分别去重主表和副表, 但主表 link 跟副表 url 可能同值
+      //   用户报"很多 115 链接相同都放上去了" - 这步彻底解决
+      for (const [tid, arr] of Array.from(tmdbLinksMap.entries())) {
+        const linkMap = new Map<string, any>();
+        for (const l of arr) {
+          const key = `${l.source || ''}|${l.url || ''}`;
+          if (!key.includes('|') || !l.url) continue;
+          const existing = linkMap.get(key);
+          if (!existing || l.id < existing.id) {
+            linkMap.set(key, l);
+          }
+        }
+        tmdbLinksMap.set(tid, Array.from(linkMap.values()));
+      }
+    }
+
     // ─── Map results ────────────────────────────────────────────────────────
     const TV_CATS_FILTER = new Set(['连载', '剧集', '动漫', '综艺', '少儿频道', '纪录片']);
     const MOVIE_CATS_FILTER = new Set(['电影', '华语电影', '外语电影', '动画电影', '演唱会', 'REMUX', '系列电影']);
@@ -380,6 +516,10 @@ export async function GET(request: NextRequest) {
         coverCache: !item.tmdb_id ? (coverCacheMap.get(item.id) || null) : null,
         sportsCover: item.category === '体育' ? (sportsCoverMap.get(item.id) || null) : null,
         links: hasSubLinks ? subLinks : (item.link ? [{ source: item.source, url: item.link, password: item.link_code, sort: 1, accessLevel: item.access_level, status: 'active' }] : []),
+        // 2026-07-27: 同 tmdb_id 的所有 link (前 8 个 source 优先级, modal 完整列表用)
+        // 解决 dedup by tmdb_id 后只显示 1 个 link, 实际 600+ 全藏起来的问题
+        tmdbLinks: tmdbLinksMap.get(item.tmdb_id) || [],
+        tmdbLinkCount: (tmdbLinksMap.get(item.tmdb_id) || []).length,
       };
     });
 

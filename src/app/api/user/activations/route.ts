@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
+import { neon, neonConfig } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
 
 export const dynamic = 'force-dynamic';
+// 2026-08-01: 加 fetchOptions no-store (修 memory #9 stale cache)
+neonConfig.fetchConnectionCache = false;
+
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
 export async function GET(req: NextRequest) {
@@ -16,7 +19,7 @@ export async function GET(req: NextRequest) {
     const payload = jwt.verify(token, JWT_SECRET) as any;
     const userId = String(payload.id);
 
-    const sql = neon(process.env.DATABASE_URL || '');
+    const sql = neon(process.env.DATABASE_URL || '', { fetchOptions: { cache: 'no-store' } });
     const rows = await sql`
       SELECT id, code, code_type, plan_id, duration, channel, batch_id, price_at_issue, used_at
       FROM xx_activation_codes

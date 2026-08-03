@@ -447,7 +447,7 @@ function VipPromptModal({ onClose }: { onClose: () => void }) {
             className="flex-1 py-2.5 bg-white/10 rounded-xl text-sm font-medium"
           >关闭</button>
           <Link
-            href="/shop"
+            href="/upgrade"
             className="flex-1 py-2.5 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl text-sm font-medium"
           >购买 VIP</Link>
         </div>
@@ -513,7 +513,7 @@ function WatchSection({ tmdbId, type, title }: { tmdbId: string; type: string; t
               <div className="text-sm text-white/50 mt-0.5">{error.msg}</div>
             </div>
           </div>
-          <Link href="/shop" className="px-4 py-2 bg-gradient-to-r from-violet-600 to-pink-600 rounded-lg text-sm font-medium">
+          <Link href="/upgrade" className="px-4 py-2 bg-gradient-to-r from-violet-600 to-pink-600 rounded-lg text-sm font-medium">
             购买 VIP
           </Link>
         </div>

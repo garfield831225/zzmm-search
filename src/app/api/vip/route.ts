@@ -1,144 +1,117 @@
-// 2026-07-24 zzmm-vip 影视区 - 列表 API
-// 鉴权: 必须 basic/vip/admin (走 JWT payload.group, 跟 middleware 一致)
-// 排序: 有播放链接的优先, 再按 popularity desc
+// 2026-08-03: P4 vip 专区 API
+//   - access_level='vip' 已匹配 tmdbid 的资源
+//   - CTE + ROW_NUMBER() 拿 1 个 resource + 总数 (DISTINCT ON subquery 在 Neon 12s 超时)
+//   - 按 release_date DESC 排序 (近→远)
+//   - type 过滤: 'all' / 'movie' / 'tv'
+
 import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
-import jwt from 'jsonwebtoken';
+import { neon, neonConfig } from '@neondatabase/serverless';
 
+neonConfig.fetchConnectionCache = false;
+
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+export const maxDuration = 30;
 
-const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
-const ALLOWED = new Set(['basic', 'vip', 'admin']);
-
-function getGroup(req: NextRequest): string | null {
-  const auth = req.headers.get('authorization');
-  const token = auth?.startsWith('Bearer ')
-    ? auth.replace('Bearer ', '')
-    : req.cookies.get('zzmm_token')?.value || req.cookies.get('token')?.value;
-  if (!token) return null;
-  try {
-    const payload = jwt.verify(token, JWT_SECRET) as any;
-    return payload?.group || null;
-  } catch {
-    return null;
-  }
-}
-
-const TMDB_IMG = 'https://image.tmdb.org/t/p';
+const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 
 export async function GET(req: NextRequest) {
-  const group = getGroup(req);
-  if (!group || !ALLOWED.has(group)) {
-    return NextResponse.json({ error: '无权访问' }, { status: 403 });
-  }
+  const sql = neon(process.env.DATABASE_URL || '', {
+    fetchOptions: { cache: 'no-store' },
+  });
 
-  const url = new URL(req.url);
-  const mediaType = url.searchParams.get('mediaType') || '';   // '' | 'movie' | 'tv'
-  const hasLink = url.searchParams.get('hasLink');              // '1' = 只看有链接
-  const sort = url.searchParams.get('sort') || 'smart';         // 'smart' | 'popular' | 'rating' | 'newest'
-  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
-  const pageSize = Math.min(100, Math.max(1, parseInt(url.searchParams.get('pageSize') || '48', 10)));
-  const offset = (page - 1) * pageSize;
+  const sp = req.nextUrl.searchParams;
+  const type = (sp.get('type') || 'all').toLowerCase();
+  const page = parseInt(sp.get('page') || '1');
+  const pageSize = Math.min(parseInt(sp.get('pageSize') || '60'), 100);
 
   try {
-    const sql = neon(process.env.DATABASE_URL || '');
+    const isMovie = type === 'movie';
+    const isTv = type === 'tv';
+    const isAll = type === 'all';
 
-    // 数字参数手工拼 (避免 $1 顺序错乱 + 跟现有代码风格一致)
-    // 注意: pageSize/offset 是数字, 已经 parseInt, 直接拼安全
-    // mediaType 是字符串白名单, 拼字符串安全
-    const safeMediaType = (mediaType === 'movie' || mediaType === 'tv') ? mediaType : '';
-    const onlyLinked = hasLink === '1';
-
-    const conds: string[] = [];
-    if (safeMediaType) conds.push(`r.media_type = '${safeMediaType}'`);
-    if (onlyLinked) conds.push(`l.id IS NOT NULL`);
-    const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
-
-    let orderBy = '';
-    switch (sort) {
-      case 'popular':
-        orderBy = 'r.popularity DESC NULLS LAST';
-        break;
-      case 'rating':
-        orderBy = 'r.vote_score DESC NULLS LAST, r.vote_count DESC';
-        break;
-      case 'newest':
-        orderBy = 'COALESCE(r.release_date, r.first_air_date) DESC NULLS LAST';
-        break;
-      case 'smart':
-      default:
-        orderBy = '(l.id IS NOT NULL) DESC, r.popularity DESC NULLS LAST';
-    }
-
-    // 主页 + 数量 一次拿 (更省一次 round-trip)
-    const query = `
+    // 2026-08-03 改: CTE + ROW_NUMBER() 拿 1 个 resource + count
+    const rows = await sql`
+      WITH ranked AS (
+        SELECT
+          r.id as resource_id,
+          r.tmdb_id,
+          r.source,
+          r.category,
+          r.access_level,
+          t.title as tmdb_title,
+          t.title_zh,
+          t.original_title,
+          t.release_date as release_date,
+          t.tmdb_type,
+          t.poster_path,
+          t.vote_average,
+          t.overview,
+          ROW_NUMBER() OVER (PARTITION BY r.tmdb_id ORDER BY r.id ASC) as rn,
+          count(*) OVER (PARTITION BY r.tmdb_id) as resource_count
+        FROM xx_resources r
+        JOIN xx_tmdb_cache t ON t.tmdb_id = r.tmdb_id
+        WHERE r.access_level='vip'
+          AND r.status='active'
+          AND r.tmdb_id IS NOT NULL
+          AND r.tmdb_id != ''
+          AND r.tmdb_id NOT IN ('NOMATCH', 'SKIP')
+          AND t.release_date IS NOT NULL
+          AND (${isAll} OR t.tmdb_type = ${type})
+      )
       SELECT
-        r.id, r.tmdb_id, r.media_type, r.title, r.original_title,
-        r.poster_path, r.backdrop_path, r.vote_average, r.vote_count,
-        r.release_date, r.first_air_date, r.popularity, r.genre_ids,
-        r.season_count, r.episode_count, r.status, r.updated_at,
-        l.id AS link_id, l.play_url, l.source AS link_source,
-        l.status AS link_status, l.last_ok_at,
-        l.season AS link_season, l.episode AS link_episode,
-        COUNT(*) OVER() AS _total
-      FROM xx_vip_resources r
-      LEFT JOIN xx_vip_links l
-        ON l.id = (
-          SELECT id FROM xx_vip_links
-          WHERE resource_id = r.id AND status = 'ok'
-          ORDER BY last_ok_at DESC NULLS LAST, id ASC
-          LIMIT 1
-        )
-      ${where}
-      ORDER BY ${orderBy}
-      LIMIT ${pageSize} OFFSET ${offset}
+        resource_id, tmdb_id, source, category, access_level,
+        tmdb_title, title_zh, original_title, release_date, tmdb_type,
+        poster_path, vote_average, overview, resource_count
+      FROM ranked
+      WHERE rn = 1
+      ORDER BY release_date DESC
+      LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
     `;
 
-    const rows = await sql(query) as any[];
-    const total = rows.length > 0 ? Number(rows[0]._total) : 0;
+    const totalRow = await sql`
+      SELECT count(DISTINCT r.tmdb_id) as cnt
+      FROM xx_resources r
+      JOIN xx_tmdb_cache t ON t.tmdb_id = r.tmdb_id
+      WHERE r.access_level='vip'
+        AND r.status='active'
+        AND r.tmdb_id IS NOT NULL
+        AND r.tmdb_id != ''
+        AND r.tmdb_id NOT IN ('NOMATCH', 'SKIP')
+        AND t.release_date IS NOT NULL
+        AND (${isAll} OR t.tmdb_type = ${type})
+    `;
+    const total = parseInt(totalRow[0]?.cnt || '0');
+
+    const items = rows.map((r: any) => ({
+      resourceId: r.resource_id,
+      tmdbId: r.tmdb_id,
+      tmdbType: r.tmdb_type,
+      title: r.title_zh || r.tmdb_title,
+      originalTitle: r.original_title,
+      releaseDate: r.release_date,
+      posterPath: r.poster_path,
+      posterUrl: r.poster_path ? `${TMDB_IMAGE_BASE}${r.poster_path}` : null,
+      voteAverage: r.vote_average ? parseFloat(r.vote_average) : null,
+      overview: r.overview,
+      source: r.source,
+      resourceCount: parseInt(r.resource_count || '1'),
+      accessLevel: r.access_level,
+      category: r.category,
+    }));
 
     return NextResponse.json({
-      ok: true,
+      total,
       page,
       pageSize,
-      total,
-      hasMore: offset + rows.length < total,
-      items: rows.map((r) => ({
-        id: Number(r.id),
-        tmdbId: Number(r.tmdb_id),
-        mediaType: r.media_type,
-        title: r.title,
-        originalTitle: r.original_title,
-        posterUrl: r.poster_path ? `${TMDB_IMG}/w500${r.poster_path}` : null,
-        backdropUrl: r.backdrop_path ? `${TMDB_IMG}/w1280${r.backdrop_path}` : null,
-        voteAverage: r.vote_average ? Number(r.vote_average) : null,
-        voteCount: r.vote_count ? Number(r.vote_count) : 0,
-        releaseDate: r.release_date || r.first_air_date || null,
-        popularity: r.popularity ? Number(r.popularity) : 0,
-        genreIds: r.genre_ids || [],
-        seasonCount: r.season_count ? Number(r.season_count) : null,
-        episodeCount: r.episode_count ? Number(r.episode_count) : null,
-        status: r.status,
-        hasLink: !!r.link_id,
-        link: r.link_id
-          ? {
-              id: Number(r.link_id),
-              playUrl: r.play_url,
-              source: r.link_source,
-              season: r.link_season,
-              episode: r.link_episode,
-              lastOkAt: r.last_ok_at,
-            }
-          : null,
-      })),
+      type,
+      items,
     }, {
       headers: {
         'Cache-Control': 'no-store, no-cache, must-revalidate',
-        'Pragma': 'no-cache',
       },
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message || '查询失败' }, { status: 500 });
+    return NextResponse.json({ error: e.message?.slice(0, 200) }, { status: 500 });
   }
 }

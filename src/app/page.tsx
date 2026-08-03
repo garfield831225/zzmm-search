@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv, Shield } from 'lucide-react';
+import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv, Shield, Crown, User, Gift, Sparkles } from 'lucide-react';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
@@ -14,9 +14,17 @@ const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '夸克�
 const REGIONS = ['全部', '大陆', '欧美', '日韩', '港澳台'];
 const YEARS = ['全部', '2026', '2025', '2024', '2023', '2022', '2021', '2020', '2010-2019', '2000-2009'];
 
+// 2026-08-02: 后端 admin/links DELETE 给主表 source 加 ' [deleted]' 后缀标记软删的链接
+//   (避免清 link 字段撞 xx_resources_link_name_unique)
+//   前端展示时要去掉这个后缀, 不然用户看到 "aliyun [deleted]" 这种怪标签
+function cleanSource(s: string | undefined | null): string {
+  if (!s) return '';
+  return String(s).replace(/ \[deleted\]$/, '');
+}
+
 interface DownloadToast {
   id: number;
-  type: 'success' | 'cooldown' | 'limit' | 'banned' | 'error';
+  type: 'success' | 'cooldown' | 'limit' | 'banned' | 'error' | 'warning';  // 2026-07-26 + warning (replica lag 提示)
   message: string;
 }
 
@@ -66,6 +74,9 @@ interface ResourceItem {
   accessLevel?: string;  // 2026-06-25 兼容旧 access_level 字段
   importChannel?: string;  // 2026-07-14 泽泽妈专属标识
   links?: Array<{ source: string; url: string; password: string; sort: number; accessLevel?: string; status?: string }>;  // 2026-07-17 1对N 多链接
+  // 2026-07-27: 同 tmdb_id 的所有 link (dedup 之前的所有版本, 按 source 优先级 + 新上传排序)
+  tmdbLinks?: Array<{ id: number; source: string; url: string; password: string; size: string; accessLevel: string; sort: number; status: string; createdAt: string }>;
+  tmdbLinkCount?: number;  // 总数, 卡片可显示 "+N" 徽章
 }
 
 interface SearchResponse {
@@ -244,10 +255,12 @@ export default function HomePage() {
       // 2026-06-26: 传 Bearer token 让 search API 识别 admin/basic/vip user_group, 否则永远 0 条
       // 2026-07-20: cache: 'no-store' + ts= 强制绕开浏览器 + Vercel Edge + Next.js fetch cache
       // (修了万米危机"还在"的 bug, 真实 DB 已是 0 但浏览器 cache 还在)
-      const token = localStorage.getItem('token') || '';
+      // 2026-07-25: zzmm_token 是 httpOnly cookie 同步到 localStorage 的字段名, 必须 fallback
+      const token = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || localStorage.getItem('adminToken') || '';
       params.set('_t', Date.now().toString());
       const res = await fetch(`/api/search?${params}`, {
         cache: 'no-store',
+        credentials: 'include',  // 2026-07-25: 带 cookie 鉴权 (server 端 JWT 解码)
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       const data: SearchResponse = await res.json();
@@ -343,10 +356,12 @@ export default function HomePage() {
   };
 
   // 2026-07-15: VIP 锁 - basic 用户看非 zezhe 资源时禁止打开 (前端展示锁)
+  // 2026-07-27: 兼容 zezhe + zezemom_excel 两种命名 (历史上有混用)
+  const isZezheChannel = (ch?: string) => ch === 'zezhe' || ch === 'zezemom_excel';
   const isVipLocked = (item: ResourceItem): boolean => {
     if (!user) return false;
     if (user.group !== 'basic') return false;  // 只有 basic 用户才会被锁
-    if (item.importChannel === 'zezemom_excel') return false;  // 泽泽妈永远不锁
+    if (isZezheChannel(item.importChannel)) return false;  // 泽泽妈永远不锁
     if (item.accessLevel === 'code') return false;  // 单资源付费走流明解锁
     return true;  // 其他都锁
   };
@@ -363,16 +378,37 @@ export default function HomePage() {
     if (item.tmdbId) {
       setDetailLoading(true);
       try {
-        const [relRes, credRes] = await Promise.all([
+        const tmdbTypeGuess = item.category === '连载' || item.category === '剧集' || item.category === '动漫' || item.category === '综艺' ? 'tv' : 'movie';
+        // 2026-07-31: 加 /api/resource/links-by-tmdb 拿同剧所有 link (按源优先级 + 最新置顶)
+        const [relRes, credRes, linksRes] = await Promise.all([
           fetch(`/api/resource/${item.id}/related`),
-          fetch(`/api/admin/tmdb-credits?tmdbId=${item.tmdbId}&type=${item.category === '连载' || item.category === '剧集' || item.category === '动漫' || item.category === '综艺' ? 'tv' : 'movie'}`),
+          fetch(`/api/admin/tmdb-credits?tmdbId=${item.tmdbId}&type=${tmdbTypeGuess}`),
+          fetch(`/api/resource/links-by-tmdb?tmdb_id=${encodeURIComponent(item.tmdbId)}`),
         ]);
         const relData = await relRes.json();
         const credData = await credRes.json();
+        const linksData = await linksRes.json();
         setRelatedItems(relData.items || []);
         setTmdbType(relData.tmdbType || 'movie');
         if (credData.director || credData.cast) {
           setTmdbCredits(credData);
+        }
+        // 2026-07-31: 用 links-by-tmdb API 覆盖 selectedItem.tmdbLinks (按源优先级 + 最新置顶)
+        if (linksData.links && Array.isArray(linksData.links) && linksData.links.length > 0) {
+          setSelectedItem(prev => prev ? {
+            ...prev,
+            tmdbLinks: linksData.links.map((l: any) => ({
+              id: l.id,
+              source: l.source,
+              url: l.url,
+              password: l.password,
+              size: l.size,
+              accessLevel: l.accessLevel,
+              importChannel: l.importChannel,
+              resourceName: l.name,
+              createdAt: l.createdAt,
+            }))
+          } : prev);
         }
       } catch {}
       setDetailLoading(false);
@@ -380,8 +416,14 @@ export default function HomePage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-white">
+    <div className="min-h-screen bg-[#0a0a0f] text-white relative">
+      {/* 2026-07-25: 顶部 hero 光晕 (深空黑 + 紫粉 radial gradient, 克制版) */}
+      <div className="absolute inset-0 pointer-events-none opacity-30" style={{
+        backgroundImage: 'radial-gradient(circle at 20% 0%, rgba(99, 102, 241, 0.12) 0%, transparent 45%), radial-gradient(circle at 80% 0%, rgba(168, 85, 247, 0.10) 0%, transparent 50%), radial-gradient(circle at 50% 50%, rgba(236, 72, 153, 0.05) 0%, transparent 60%)'
+      }} />
+      <div className="relative z-0">
       {/* 2026-06-04: 强制激活守卫 — 已登录但未激活任何资源 */}
+      {/* 2026-07-29: 新规则 - 注册默认 basic, 不会再触发此守卫. 仅作防御保留给历史 user 账户 */}
       {mounted && mustActivate && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
           <motion.div
@@ -389,18 +431,18 @@ export default function HomePage() {
             className="w-full max-w-md bg-[#12121a] rounded-2xl p-8 border border-white/10 shadow-2xl"
           >
             <div className="text-center mb-6">
-              <div className="text-5xl mb-3">🔒</div>
-              <h2 className="text-2xl font-bold mb-2">需要激活</h2>
-              <p className="text-sm text-white/60">输入激活码后才能进入资源库</p>
+              <div className="text-5xl mb-3">💎</div>
+              <h2 className="text-2xl font-bold mb-2">升级 VIP 享受全部资源</h2>
+              <p className="text-sm text-white/60">基础资源可正常浏览，VIP 资源需升级会员后解锁</p>
             </div>
             <button
               onClick={() => router.push('/activate')}
               className="w-full py-3 bg-gradient-to-r from-violet-600 to-pink-600 rounded-xl font-semibold hover:opacity-90 transition"
             >
-              🎫 立即激活
+              💎 升级 VIP
             </button>
             <button
-              onClick={() => router.push('/shop')}
+              onClick={() => router.push('/upgrade')}
               className="w-full mt-3 py-3 bg-white/5 hover:bg-white/10 rounded-xl text-sm transition"
             >
               🛒 没有激活码？去购买
@@ -418,7 +460,7 @@ export default function HomePage() {
         </div>
       )}
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-[#0a0a0f]/95 backdrop-blur-md border-b border-white/5">
+      <header className="sticky top-0 z-40 bg-[#0a0a0f]/70 backdrop-blur-xl border-b border-white/[0.06]">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
@@ -430,10 +472,29 @@ export default function HomePage() {
                 <p className="text-xs text-white/40">共 {total.toLocaleString()} 条资源 · 当前显示 {items.length} 条</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap justify-end">
               {user ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap justify-end">
                   <span className="px-3 py-1.5 bg-violet-600/30 rounded-lg text-sm text-violet-300">{user.username}</span>
+                  {/* 2026-07-29: 个人中心入口 (所有已登录用户) */}
+                  <Link href="/profile" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-cyan-500/20 to-blue-500/20 hover:from-cyan-500/40 hover:to-blue-500/40 rounded-lg text-sm transition-all duration-200 text-cyan-200 hover:shadow-[0_0_12px_rgba(34,211,238,0.4)] hover:scale-105 border border-cyan-400/30">
+                    <User size={14} className="transition-transform group-hover:scale-110" />
+                    <span>个人中心</span>
+                  </Link>
+                  {/* 2026-07-29: VIP 影视区入口 (basic/vip/admin 都能看见, basic 点进去看升级提示) */}
+                  {['basic', 'vip', 'admin'].includes(user?.group || '') && (
+                    <Link href="/vip" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-pink-500/20 hover:from-amber-500/40 hover:to-pink-500/40 rounded-lg text-sm transition-all duration-200 text-amber-200 hover:shadow-[0_0_12px_rgba(245,158,11,0.4)] hover:scale-105 border border-amber-400/30">
+                      <Crown size={14} className="transition-transform group-hover:scale-110" />
+                      <span>VIP 影视区</span>
+                    </Link>
+                  )}
+                  {/* 2026-07-31: VIP 影视 2 区入口 (basic 进跳 /upgrade, vip/admin 直接进 /lovemovie 镜像站) */}
+                  {['basic', 'vip', 'admin'].includes(user?.group || '') && (
+                    <Link href="/lovemovie" target="_blank" rel="noopener" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 hover:from-violet-500/40 hover:to-fuchsia-500/40 rounded-lg text-sm transition-all duration-200 text-violet-200 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105 border border-violet-400/30">
+                      <Sparkles size={14} className="transition-transform group-hover:scale-110" />
+                      <span>VIP 影视 2 区</span>
+                    </Link>
+                  )}
                   {/* 2026-07-15 隐藏: 用户要求不要显示 TMDB 影视区 + VIP 观影区 入口
                   <Link href="/tmdb-films" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/20 hover:bg-pink-600/50 rounded-lg text-sm transition-all duration-200 text-pink-300 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
                     <Film size={14} className="transition-transform group-hover:scale-110" />
@@ -454,8 +515,8 @@ export default function HomePage() {
                   </Link>
                   <button onClick={handleLogout} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">退出</button>
                   <Link href="/activate" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/30 hover:bg-pink-600/60 rounded-lg text-sm transition-all duration-200 text-pink-200 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
-                    <ShoppingCart size={14} className="transition-transform group-hover:scale-110" />
-                    <span>购物车</span>
+                    <Gift size={14} className="transition-transform group-hover:scale-110" />
+                    <span>兑换中心</span>
                   </Link>
                   {user?.group === 'admin' && (
                     <a href="/admin" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 rounded-lg text-sm font-medium transition-all duration-200 text-white hover:shadow-[0_0_12px_rgba(139,92,246,0.5)] hover:scale-105 border border-violet-400/40">
@@ -475,8 +536,8 @@ export default function HomePage() {
                     <span>文档资源库</span>
                   </Link>
                   <Link href="/activate" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/30 hover:bg-pink-600/60 rounded-lg text-sm transition-all duration-200 text-pink-200 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
-                    <ShoppingCart size={14} className="transition-transform group-hover:scale-110" />
-                    <span>购物车</span>
+                    <Gift size={14} className="transition-transform group-hover:scale-110" />
+                    <span>兑换中心</span>
                   </Link>
                   <Link href="/login" className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">登录 / 注册</Link>
                 </div>
@@ -484,14 +545,14 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Search */}
+          {/* Search - 2026-07-25 改: 玻璃态输入框 */}
           <div className="relative flex gap-2">
             <input type="text" value={query} onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') fetchItems(1); }}
               placeholder="输入片名、类型、分类搜索..."
-              className="flex-1 bg-white/5 border border-white/10 rounded-xl px-5 py-3 pl-12 text-white placeholder-white/30 focus:outline-none focus:border-violet-500/50 focus:ring-2 focus:ring-violet-500/20 transition" />
+              className="flex-1 bg-white/[0.03] border border-white/[0.06] rounded-xl px-5 py-3 pl-12 text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/15 focus:bg-white/[0.05] transition backdrop-blur-sm" />
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none">🔍</span>
-            <button onClick={() => fetchItems(1)} className="px-5 py-3 bg-violet-600 hover:bg-violet-500 rounded-xl text-white font-medium transition shrink-0">搜索</button>
+            <button onClick={() => fetchItems(1)} className="px-5 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:opacity-90 rounded-xl text-white font-medium transition shrink-0 shadow-[0_0_12px_rgba(168,85,247,0.2)]">搜索</button>
           </div>
 
           {/* 2026-07-20: 显示重复切换 + 按 TMDB 分组按钮 (搜出多条同名时显示) */}
@@ -537,16 +598,17 @@ export default function HomePage() {
           )}
 
           {/* 2026-06-10: 新用户引导卡 - 仅未登录显示 */}
+          {/* 2026-07-29: 邀请码 = basic, 不用再"激活", 2 步上手 */}
           {mounted && !user && (
             <div className="mt-3 bg-gradient-to-r from-violet-500/10 to-pink-500/10 border border-violet-500/30 rounded-xl p-4 flex items-center gap-3 flex-wrap">
               <div className="flex-shrink-0 text-3xl">🎬</div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold mb-0.5">新人 3 步上手指南</div>
-                <div className="text-xs text-white/60">① 注册账号 → ② 闲鱼/微店买 VIP 激活码 → ③ 兑换看全站资源</div>
+                <div className="text-sm font-semibold mb-0.5">新人 2 步上手指南</div>
+                <div className="text-xs text-white/60">① 邀请码注册即为基础会员，可浏览全站资源 ② 想要 VIP 资源可去闲鱼选套餐</div>
               </div>
               <div className="flex gap-2 flex-wrap">
                 <Link href="/register" className="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs font-medium whitespace-nowrap">1️⃣ 注册</Link>
-                <Link href="/activate" className="px-3 py-1.5 bg-pink-600 hover:bg-pink-500 rounded-lg text-xs font-medium whitespace-nowrap">3️⃣ 兑换码</Link>
+                <Link href="/upgrade" className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:opacity-90 rounded-lg text-xs font-medium whitespace-nowrap">2️⃣ 闲鱼逛逛</Link>
               </div>
             </div>
           )}
@@ -554,41 +616,49 @@ export default function HomePage() {
           {mounted && user && !['vip', 'admin'].includes(user.group) && (
             <div className="mt-3 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/30 rounded-xl p-3 flex items-center gap-3 flex-wrap">
               <div className="text-2xl">⭐</div>
-              <div className="flex-1 min-w-0 text-sm">开通 VIP 解锁 <b className="text-amber-300">TMDB 8万+ 资源</b> + <b className="text-pink-300">VIP视频区6平台</b></div>
-              <Link href="/activate" className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 rounded-lg text-xs font-medium whitespace-nowrap">🎫 开通 VIP</Link>
+              <div className="flex-1 min-w-0 text-sm">升级 VIP 解锁 <b className="text-amber-300">VIP 影视资源</b> + <b className="text-pink-300">9大云盘非影视区</b></div>
+              <Link href="/upgrade" className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 rounded-lg text-xs font-medium whitespace-nowrap">🛒 闲鱼选购</Link>
             </div>
           )}
 
-          {/* Filter Bar */}
-          <div className="flex flex-col gap-2 mt-4">
+          {/* Filter Bar - 2026-07-25 改: 玻璃态 pill + 紫粉渐变激活态 (克制版) */}
+          <div className="flex flex-col gap-1.5 mt-4 p-2 rounded-2xl bg-white/[0.02] border border-white/[0.04] backdrop-blur-sm">
             {/* 分类 */}
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
               {CATEGORIES.map((cat) => (
                 <button key={cat} onClick={() => setCategory(cat)}
-                  className={`px-4 py-1.5 rounded-full text-sm whitespace-nowrap transition shrink-0 ${category === cat ? 'bg-violet-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{cat}</button>
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition shrink-0 ${category === cat
+                    ? 'bg-gradient-to-r from-violet-500/25 to-fuchsia-500/25 text-white border border-violet-400/40 shadow-[0_0_12px_rgba(168,85,247,0.15)]'
+                    : 'bg-white/[0.03] text-white/55 hover:text-white/85 hover:bg-white/[0.06] border border-transparent'}`}>{cat}</button>
               ))}
             </div>
             {/* 来源 */}
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
               {SOURCES.map((src) => (
                 <button key={src} onClick={() => setSource(src)}
-                  className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition shrink-0 ${source === src ? 'bg-pink-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{src}</button>
+                  className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${source === src
+                    ? 'bg-gradient-to-r from-pink-500/25 to-rose-500/25 text-white border border-pink-400/40'
+                    : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{src}</button>
               ))}
             </div>
             {/* 地区 */}
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-              <span className="text-xs text-white/30 self-center mr-1 shrink-0">地区</span>
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+              <span className="text-[10px] text-white/30 self-center mr-0.5 shrink-0 tracking-wider">地区</span>
               {REGIONS.map((r) => (
                 <button key={r} onClick={() => setRegion(r)}
-                  className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition shrink-0 ${region === r ? 'bg-orange-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{r}</button>
+                  className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${region === r
+                    ? 'bg-gradient-to-r from-orange-500/25 to-amber-500/25 text-white border border-orange-400/40'
+                    : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{r}</button>
               ))}
             </div>
             {/* 年份 */}
-            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-              <span className="text-xs text-white/30 self-center mr-1 shrink-0">年份</span>
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+              <span className="text-[10px] text-white/30 self-center mr-0.5 shrink-0 tracking-wider">年份</span>
               {YEARS.map((y) => (
                 <button key={y} onClick={() => setYear(y)}
-                  className={`px-3 py-1 rounded-full text-xs whitespace-nowrap transition shrink-0 ${year === y ? 'bg-cyan-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{y}</button>
+                  className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${year === y
+                    ? 'bg-gradient-to-r from-cyan-500/25 to-teal-500/25 text-white border border-cyan-400/40'
+                    : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{y}</button>
               ))}
             </div>
           </div>
@@ -596,24 +666,30 @@ export default function HomePage() {
       </header>
 
       {/* Content */}
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        {/* Sort & Size Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4 px-1">
+      <main className="max-w-7xl mx-auto px-4 py-6 relative">
+        {/* Sort & Size Bar - 2026-07-25 改: 玻璃态 + 紫粉激活 */}
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-5 px-2">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-white/40">排序</span>
-            <div className="flex gap-1">
+            <span className="text-[10px] text-white/40 tracking-wider uppercase">Sort</span>
+            <div className="flex gap-1 p-1 rounded-xl bg-white/[0.02] border border-white/[0.05]">
               <button onClick={() => setSort('release_date')}
-                className={`px-3 py-1 rounded-full text-xs transition ${sort === 'release_date' ? 'bg-violet-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>🎬 上映</button>
+                className={`px-3 py-1 rounded-lg text-xs transition ${sort === 'release_date'
+                  ? 'bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 text-white shadow-[0_0_8px_rgba(168,85,247,0.2)]'
+                  : 'text-white/50 hover:text-white/85'}`}>🎬 上映</button>
               <button onClick={() => setSort('added_time')}
-                className={`px-3 py-1 rounded-full text-xs transition ${sort === 'added_time' ? 'bg-violet-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>📅 上架</button>
+                className={`px-3 py-1 rounded-lg text-xs transition ${sort === 'added_time'
+                  ? 'bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 text-white shadow-[0_0_8px_rgba(168,85,247,0.2)]'
+                  : 'text-white/50 hover:text-white/85'}`}>📅 上架</button>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-xs text-white/40 hidden sm:inline">每页</span>
-            <div className="flex gap-1">
+            <span className="text-[10px] text-white/40 hidden sm:inline tracking-wider uppercase">Per Page</span>
+            <div className="flex gap-1 p-1 rounded-xl bg-white/[0.02] border border-white/[0.05]">
               {[30, 90, 150].map((s) => (
-                  <button key={s} onClick={() => { latestRef.current = { ...latestRef.current, pageSize: s }; setPageSize(s); }}
-                  className={`px-3 py-1 rounded-full text-xs transition ${pageSize === s ? 'bg-pink-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>{s}</button>
+                <button key={s} onClick={() => { latestRef.current = { ...latestRef.current, pageSize: s }; setPageSize(s); }}
+                  className={`px-3 py-1 rounded-lg text-xs transition ${pageSize === s
+                    ? 'bg-gradient-to-r from-pink-500/30 to-rose-500/30 text-white shadow-[0_0_8px_rgba(236,72,153,0.2)]'
+                    : 'text-white/50 hover:text-white/85'}`}>{s}</button>
               ))}
             </div>
           </div>
@@ -626,7 +702,7 @@ export default function HomePage() {
             // 显示最新一条 + "+N 集"徽章
             const groupableCats = ['连载', '剧集', '动漫', '综艺'];
             const seen = new Set<string>();
-            const displayItems: Array<ResourceItem & { _extraCount?: number; _allIds?: number[] }> = [];
+            const displayItems: Array<ResourceItem & { _extraCount?: number; _allIds?: number[]; _displayLinks?: any[] }> = [];
             for (const item of items) {
               if (item.tmdbId && groupableCats.includes(item.category)) {
                 const key = `${item.category}:${item.tmdbId}`;
@@ -638,9 +714,15 @@ export default function HomePage() {
                 );
                 const extraCount = group.length - 1;
                 const allIds = group.map(i => i.id);
-                displayItems.push({ ...item, _extraCount: extraCount, _allIds: allIds });
+                // 2026-07-27: 同 tmdb_id 的所有 link (前 8 个 source 优先级)
+                const tmdbLinks = (item as any).tmdbLinks || [];
+                const _displayLinks = tmdbLinks.length > 0 ? tmdbLinks : (item.links || []);
+                displayItems.push({ ...item, _extraCount: extraCount, _allIds: allIds, _displayLinks });
               } else {
-                displayItems.push(item);
+                // 2026-07-27: 同 tmdb_id 兜底
+                const tmdbLinks = (item as any).tmdbLinks || [];
+                const _displayLinks = tmdbLinks.length > 0 ? tmdbLinks : (item.links || []);
+                displayItems.push({ ...item, _displayLinks });
               }
             }
             return displayItems;
@@ -649,10 +731,11 @@ export default function HomePage() {
             const allIds = (item as any)._allIds || [item.id];
             return (
             <motion.div key={item.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              className="group cursor-pointer" onClick={() => handleItemClick(item)}
+              className="group cursor-pointer rounded-2xl bg-white/[0.02] border border-white/[0.05] backdrop-blur-sm p-2 transition-all duration-300 hover:border-violet-400/40 hover:bg-white/[0.04] hover:shadow-[0_0_24px_rgba(168,85,247,0.12)]"
+              onClick={() => handleItemClick(item)}
             >
               {/* Poster */}
-              <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-3">
+              <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-2.5">
                 {item.tmdb?.poster_path ? (
                   <img src={`${TMDB_IMAGE_BASE}${item.tmdb.poster_path}`} alt={item.name}
                     className="w-full h-full object-cover transition group-hover:scale-105"
@@ -687,16 +770,16 @@ export default function HomePage() {
                 {/* Source Badge */}
                 <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
                   {/* 2026-07-15 泽泽妈专属标识 (import_channel='zezemom_excel') - 修正: 实际值是 'zezemom_excel' 不是 'zezhe' */}
-                  {item.importChannel === 'zezemom_excel' && (
+                  {isZezheChannel(item.importChannel) && (
                     <span className="px-2 py-0.5 bg-gradient-to-r from-rose-500 to-pink-500 text-white text-xs rounded font-medium shadow-sm flex items-center gap-1">
                       <span>👑</span><span>泽泽妈</span>
                     </span>
                   )}
-                  <span className="px-2 py-0.5 bg-pink-600/80 text-xs rounded">{item.source}</span>
+                  <span className="px-2 py-0.5 bg-pink-600/80 text-xs rounded">{cleanSource(item.source)}</span>
                   {/* 2026-07-15 修正: 资源 access_level='basic' 不一定都是泽泽妈 - 脏数据 (baidu/quark) 也被标了 basic
                       应该按 import_channel='zezemom_excel' 判定, 才是真泽泽妈文档 */}
                   {/* 2026-07-15 VIP 锁: basic 用户看非 zezhe 资源时显示锁 (前端展示, 不卡后端) */}
-                  {user?.group === 'basic' && item.importChannel !== 'zezemom_excel' && item.accessLevel !== 'code' && (
+                  {user?.group === 'basic' && !isZezheChannel(item.importChannel) && item.accessLevel !== 'code' && (
                     <span className="px-2 py-0.5 bg-gradient-to-r from-amber-500 to-orange-500 text-black text-xs rounded font-medium flex items-center gap-1">
                       <span>🔒</span><span>VIP 锁</span>
                     </span>
@@ -711,7 +794,7 @@ export default function HomePage() {
                       💎 单资源付费
                     </span>
                   )}
-                  {item.importChannel === 'zezemom_excel' && (
+                  {isZezheChannel(item.importChannel) && (
                     <span className="px-2 py-0.5 bg-sky-500/30 border border-sky-500/40 text-sky-300 text-xs rounded">
                       📚 泽泽妈文档
                     </span>
@@ -753,38 +836,101 @@ export default function HomePage() {
               </div>
 
               {/* Info */}
-              <div className="space-y-1">
-                <h3 className="font-medium text-sm line-clamp-2 leading-tight">{item.name}</h3>
-                <div className="flex items-center gap-2 text-xs text-white/40">
+              <div className="space-y-1 px-0.5">
+                <h3 className="font-medium text-[13px] line-clamp-2 leading-tight text-white/90 group-hover:text-white transition">{item.name}</h3>
+                <div className="flex items-center gap-2 text-[10px] text-white/40">
                   <span>{item.category}</span>
                   {item.size && <span>📦 {item.size}</span>}
                 </div>
-                {/* 2026-07-17: 1对N 多链接 - 卡片下网盘图标排 (副表读) */}
-                {item.links && item.links.length > 0 && (
+                {/* 2026-07-24: 1对N 多链接 - 卡片下网盘可点击图标 (按 sort 排序, 第一个高亮) */}
+                {/* 2026-07-27: 用 _displayLinks (tmdbLinks 优先, 1对N 副表兜底) */}
+                {/* 2026-07-29: 加 link 级别权限 - basic 用户只能开 zezhe link, 其他 link 锁住 */}
+                {(item as any)._displayLinks && (item as any)._displayLinks.length > 0 && (
                   <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                    {item.links.slice(0, 8).map((l, idx) => (
-                      <span key={idx} className={`px-1.5 py-0.5 text-[10px] rounded font-medium ${
-                        l.source === 'magnet' || l.source === 'ed2k'
-                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
-                          : l.source === '115'
-                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                            : 'bg-white/5 text-white/60 border border-white/10'
-                      }`}>
-                        {l.source === 'magnet' || l.source === 'ed2k' ? '🧲' :
-                         l.source === '115' ? '📦' :
-                         l.source === 'baidu' ? '🅱️' :
-                         l.source === 'quark' ? '🍊' :
-                         l.source === 'aliyun' ? '☁️' :
-                         l.source === 'xunlei' ? '⚡' :
-                         l.source === '123' ? '1️⃣' :
-                         l.source === 'uc' ? '🅿️' :
-                         l.source === 'tianyi' ? '☂️' :
-                         l.source === 'yidong' ? '📱' : '🔗'} {l.source}
-                      </span>
-                    ))}
-                    {item.links.length > 8 && (
-                      <span className="text-[10px] text-white/40">+{item.links.length - 8}</span>
+                    {(item as any)._displayLinks.slice(0, 8).map((l: any, idx: number) => {
+                      const isMagnetLink = l.source === 'magnet' || l.source === 'ed2k';
+                      // 2026-07-29: link 级别权限 - vip/admin 全开, basic 只开 zezhe link
+                      const linkAllowed = (user?.group === 'vip' || user?.group === 'admin') ||
+                        (l.accessLevel === 'code') ||  // 单资源付费 (流明解锁)
+                        (l.importChannel === 'zezhe' || l.importChannel === 'zezemom_excel');
+                      return (
+                        <button
+                          key={idx}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!linkAllowed) {
+                              addCopyToast('🔒 VIP 渠道链接，basic 用户不可打开，请升级 VIP');
+                              return;
+                            }
+                            if (isMagnetLink) handleCopyLink(l.url, e);
+                            else handleDirectOpen(l.url, e);
+                          }}
+                          className={`px-1.5 py-0.5 text-[10px] rounded font-medium cursor-pointer transition-all hover:scale-105 ${
+                            !linkAllowed
+                              ? 'bg-white/5 text-white/30 border border-white/10 opacity-50 cursor-not-allowed'
+                              : idx === 0
+                              ? 'bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 text-white border border-violet-400/50 ring-1 ring-violet-300/30'
+                              : isMagnetLink
+                                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                                : l.source === '115'
+                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                  : 'bg-white/5 text-white/60 border border-white/10'
+                          }`}
+                          title={!linkAllowed
+                            ? `🔒 ${l.source} (VIP 渠道, 需升级 VIP 才能打开)`
+                            : `${l.source}${l.password ? ` · 提取码: ${l.password}` : ''} · 点击${isMagnetLink ? '复制' : '打开'}`}
+                        >
+                          {!linkAllowed ? '🔒' :
+                           l.source === 'magnet' || l.source === 'ed2k' ? '🧲' :
+                           l.source === '115' ? '📦' :
+                           l.source === 'baidu' ? '🅱️' :
+                           l.source === 'quark' ? '🍊' :
+                           l.source === 'aliyun' ? '☁️' :
+                           l.source === 'xunlei' ? '⚡' :
+                           l.source === '123' ? '1️⃣' :
+                           l.source === 'uc' ? '🅿️' :
+                           l.source === 'tianyi' ? '☂️' :
+                           l.source === 'yidong' ? '📱' : '🔗'} {l.source}
+                          {linkAllowed && idx === 0 && <span className="ml-0.5 text-[8px]">★</span>}
+                        </button>
+                      );
+                    })}
+                    {(item as any)._displayLinks.length > 8 && (
+                      <span className="text-[10px] text-white/40">+{(item as any)._displayLinks.length - 8}</span>
                     )}
+                    {/* 2026-07-24: 一键开全部 (>=2 个非磁力链接才显示) */}
+                    {/* 2026-07-29: 只 basic 看 zezhe link + vip/admin 看全部. basic "开全部" 只开 zezhe */}
+                    {(() => {
+                      const allLinks = ((item as any)._displayLinks || []).filter((l: any) => l.source !== 'magnet' && l.source !== 'ed2k');
+                      // basic 只看有权开 (zezhe), vip/admin 看全部
+                      const allowedLinks = (user?.group === 'vip' || user?.group === 'admin')
+                        ? allLinks
+                        : allLinks.filter((l: any) => l.importChannel === 'zezhe' || l.importChannel === 'zezemom_excel' || l.accessLevel === 'code');
+                      return allowedLinks.length >= 2 && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            // 依次 window.open (0.5s 间隔避开浏览器拦截)
+                            allowedLinks.forEach((l: any, i: number) => {
+                              setTimeout(() => {
+                                if (l.password) {
+                                  const ok = window.confirm(
+                                    `🔗 ${l.source} 链接 (提取码: ${l.password})\n\n确定打开？`
+                                  );
+                                  if (ok) window.open(l.url, '_blank', 'noopener');
+                                } else {
+                                  window.open(l.url, '_blank', 'noopener');
+                                }
+                              }, i * 500);
+                            });
+                          }}
+                          className="px-1.5 py-0.5 text-[10px] rounded font-medium cursor-pointer transition-all hover:scale-105 bg-gradient-to-r from-violet-500/40 to-fuchsia-500/40 text-white border border-violet-400/60 ring-1 ring-violet-300/40"
+                          title={`一键打开所有允许的网盘链接 (${allowedLinks.length} 个)`}
+                        >
+                          🚀 开全部 ({allowedLinks.length})
+                        </button>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -873,91 +1019,11 @@ export default function HomePage() {
                   <div className="flex items-start justify-between mb-5">
                     <h2 className="text-xl font-bold leading-tight pr-4">{selectedItem.name}</h2>
                     <div className="flex items-center gap-1 shrink-0">
-                      {isAdmin && (
-                        <>
-                          <button
-                            onClick={async (e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              if (!confirm(`🗑️ 软删整个资源 (含所有链接)?\n\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}\n来源: ${selectedItem.source}\n链接: ${selectedItem.links?.length || 0} 条\n\n软删 = status='deleted', 可恢复\n不影响其他同名资源`)) return;
-                              const token = getToken();
-                              if (!token) {
-                                addToast('error', '❌ 未登录或 token 失效');
-                                return;
-                              }
-                              console.log('[DELETE resource] sending', { resourceId: selectedItem.id });
-                              const r = await fetch(`/api/admin/resources/${selectedItem.id}`, {
-                                method: 'DELETE',
-                                headers: { Authorization: 'Bearer ' + token },
-                              });
-                              const d = await r.json();
-                              console.log('[DELETE resource] response', r.status, d);
-                              if (d.ok) {
-                                addToast('success', `🗑️ 已软删 (${d.subLinks} 条链接, 资源可恢复)`);
-                                setSelectedItem(null);
-                                setTimeout(() => fetchItems(1), 500);
-                              } else if (r.status === 401) {
-                                addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
-                              } else if (r.status === 403) {
-                                addToast('error', `❌ 403 需要 admin 权限`);
-                              } else if (r.status === 404) {
-                                addToast('error', `❌ 404 资源不存在`);
-                              } else {
-                                addToast('error', `❌ ${r.status} ${d.error || '删除失败'}`);
-                              }
-                            }}
-                            className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded text-xs font-medium"
-                            title="软删: status='deleted', 可恢复">
-                            🗑️ 软删
-                          </button>
-                          <button
-                            onClick={async (e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              // 三级确认, 防止误操作
-                              if (!confirm(`🔥 硬删整个资源?\n\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}\n\n⚠️ 物理删除: 数据从数据库清空, 不可恢复\n⚠️ 同时级联删除 xx_resource_links / xx_link_feedback / xx_publish_log 全部关联行`)) return;
-                              if (!confirm(`🔥 真的要硬删?\n\n最后一次确认: 删除后无法恢复!\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}`)) return;
-                              const hardConfirm = prompt(`输入资源 ID ${selectedItem.id} 确认硬删:`);
-                              if (hardConfirm !== String(selectedItem.id)) {
-                                addToast('error', '❌ 硬删已取消 (ID 不匹配)');
-                                return;
-                              }
-                              const token = getToken();
-                              if (!token) {
-                                addToast('error', '❌ 未登录或 token 失效');
-                                return;
-                              }
-                              console.log('[DELETE resource hard] sending', { resourceId: selectedItem.id });
-                              const r = await fetch(`/api/admin/resources/${selectedItem.id}?hard=true`, {
-                                method: 'DELETE',
-                                headers: { Authorization: 'Bearer ' + token },
-                              });
-                              const d = await r.json();
-                              console.log('[DELETE resource hard] response', r.status, d);
-                              if (d.ok) {
-                                const cascaded = d.cascaded ? ` (副表 ${d.cascaded.xx_resource_links} 链接, ${d.cascaded.xx_link_feedback} 反馈)` : '';
-                                addToast('success', `🔥 已硬删, 不可恢复${cascaded}`);
-                                setSelectedItem(null);
-                                setTimeout(() => fetchItems(1), 500);
-                              } else if (r.status === 401) {
-                                addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
-                              } else if (r.status === 403) {
-                                addToast('error', `❌ 403 需要 admin 权限`);
-                              } else if (r.status === 404) {
-                                addToast('error', `❌ 404 资源不存在`);
-                              } else {
-                                addToast('error', `❌ ${r.status} ${d.error || '硬删失败'}`);
-                              }
-                            }}
-                            className="px-2 py-1 bg-red-700/30 hover:bg-red-700/50 text-red-200 rounded text-xs font-bold border border-red-500/30"
-                            title="硬删: 物理删除, 不可恢复">
-                            🔥 硬删
-                          </button>
-                        </>
-                      )}
                       <button onClick={() => setSelectedItem(null)} className="p-1.5 hover:bg-white/10 rounded-lg transition text-white/40 hover:text-white">✕</button>
                     </div>
                   </div>
+                  {/* 2026-07-31: admin 顶部 banner 已移除 (用户选 3 = 折叠到右上"管理员选项"), 整资源操作移到下方折叠区 */}
+
                   {/* ── TMDB Info Section ── */}
                   {selectedItem.tmdb && (
                     <div className="mb-5 space-y-4">
@@ -1043,7 +1109,7 @@ export default function HomePage() {
                       {/* Basic info row */}
                       <div className="flex flex-wrap gap-2 text-sm">
                         <span className="px-2 py-1 bg-violet-600/30 rounded text-violet-300">{selectedItem.category}</span>
-                        <span className="px-2 py-1 bg-pink-600/30 rounded text-pink-300">{selectedItem.source}</span>
+                        <span className="px-2 py-1 bg-pink-600/30 rounded text-pink-300">{cleanSource(selectedItem.source)}</span>
                         {selectedItem.type && <span className="px-2 py-1 bg-white/10 rounded text-white/60">{selectedItem.type}</span>}
                         {selectedItem.size && <span className="px-2 py-1 bg-white/10 rounded text-white/50">📦 {selectedItem.size}</span>}
                       </div>
@@ -1051,163 +1117,218 @@ export default function HomePage() {
                   )}
 
                   <div className="space-y-4">
-                    <h3 className="font-semibold text-base text-white/80">📎 资源链接</h3>
-                    <div className="space-y-2">
-                      <div className="text-xs text-white/40 mb-1">📌 当前版本</div>
-                      {/* 2026-07-17: 1对N 多链接 — 副表读, 按 sort 排 (1=115 优先) */}
-                      {selectedItem.links && selectedItem.links.length > 0 ? (
-                        selectedItem.links.map((l, idx) => {
-                          const isMagnet = l.source === 'magnet' || l.source === 'ed2k';
-                          return (
-                            <div key={idx}>
-                              {isMagnet ? (
-                                <button onClick={(e) => { e.preventDefault(); handleCopyLink(l.url, e); }}
-                                  className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left">
-                                  <div className="flex items-center gap-3">
-                                    <span className="text-xl">🧲</span>
-                                    <div>
-                                      <div className="font-medium">{l.source === 'magnet' ? '磁力链接' : 'ED2K链接'}</div>
-                                      <div className="text-sm text-cyan-400 truncate max-w-[200px]">{(l.url || '').slice(0, 40)}...</div>
-                                    </div>
-                                  </div>
-                                  <span className="px-3 py-1 bg-cyan-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">📋 复制</span>
-                                </button>
-                              ) : (
-                                <button onClick={(e) => { e.preventDefault(); handleDirectOpen(l.url, e); }}
-                                  className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left">
-                                  <div className="flex items-center gap-3">
-                                    <span className="text-xl">
-                                      {l.source === '115' ? '📦' :
-                                       l.source === 'baidu' ? '🅱️' :
-                                       l.source === 'quark' ? '🍊' :
-                                       l.source === 'aliyun' ? '☁️' :
-                                       l.source === 'xunlei' ? '⚡' :
-                                       l.source === '123' ? '1️⃣' :
-                                       l.source === 'uc' ? '🅿️' :
-                                       l.source === 'tianyi' ? '☂️' :
-                                       l.source === 'yidong' ? '📱' : '🔗'}
-                                    </span>
-                                    <div>
-                                      <div className="font-medium">{l.source}</div>
-                                      <div className="text-sm text-white/50">{l.password ? `提取码：${l.password}` : '无需提取码'}</div>
-                                    </div>
-                                  </div>
-                                  <span className="px-3 py-1 bg-violet-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">🔗 打开</span>
-                                </button>
-                              )}
-                              {/* 2026-07-17 admin 改/删 + 用户失效反馈按钮 (每个链接旁) */}
-                              {isAdmin && (
-                                <div className="flex gap-1 mt-1">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold text-base text-white/80">
+                        📎 资源链接{(() => {
+                          const count = selectedItem.tmdbLinks?.length || selectedItem.links?.length || 0;
+                          return count > 0 ? <span className="ml-2 text-xs text-white/40">({count})</span> : null;
+                        })()}
+                      </h3>
+                      {isAdmin && (selectedItem.tmdbLinks?.length || 0) > 0 && (
+                        <details className="relative text-xs">
+                          <summary className="px-2 py-1 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-400/30 rounded text-violet-200 cursor-pointer list-none">⚙️ 管理员选项 ({selectedItem.tmdbLinks?.length})</summary>
+                          <div className="absolute right-0 top-full mt-1 bg-[#12121a] border border-white/10 rounded-lg p-2 z-20 min-w-[280px] max-h-[60vh] overflow-y-auto shadow-xl">
+                            <button onClick={async () => {
+                              if (!confirm(`确认把当前资源所有 link 标记为软删?\n资源 ID: ${selectedItem.id}\n名称: ${selectedItem.name}`)) return;
+                              const token = getToken();
+                              if (!token) { addToast('error', '❌ 未登录或 token 失效'); return; }
+                              const r = await fetch(`/api/admin/resources/${selectedItem.id}?hard=false`, {
+                                method: 'DELETE',
+                                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }
+                              });
+                              const d = await r.json();
+                              if (d.ok) { addToast('success', '🗑️ 资源已软删'); setSelectedItem(null); fetchItems(1); }
+                              else addToast('error', `❌ ${d.error || '失败'}`);
+                            }} className="w-full text-left text-xs px-2 py-1 hover:bg-white/10 rounded text-amber-300">🗑️ 软删整个资源</button>
+                            <button onClick={async () => {
+                              if (!confirm(`硬删? 这个会真的从 DB 删!\n资源 ID: ${selectedItem.id}`)) return;
+                              if (!confirm(`🔥 真的硬删? 不可恢复!`)) return;
+                              const hardConfirm = prompt(`输入资源 ID ${selectedItem.id} 确认硬删:`);
+                              if (hardConfirm !== String(selectedItem.id)) { addToast('error', '❌ 已取消'); return; }
+                              const token = getToken();
+                              if (!token) { addToast('error', '❌ 未登录或 token 失效'); return; }
+                              const r = await fetch(`/api/admin/resources/${selectedItem.id}?hard=true`, {
+                                method: 'DELETE',
+                                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }
+                              });
+                              const d = await r.json();
+                              if (d.ok) { addToast('success', '💀 硬删成功'); setSelectedItem(null); fetchItems(1); }
+                              else addToast('error', `❌ ${d.error || '失败'}`);
+                            }} className="w-full text-left text-xs px-2 py-1 hover:bg-white/10 rounded text-red-300">💀 硬删资源 (不可恢复)</button>
+                            <div className="text-xs text-white/40 mt-2 mb-1 px-1 border-t border-white/10 pt-2">📎 按 link 改/删 ({selectedItem.tmdbLinks?.length})</div>
+                            <div className="space-y-0.5">
+                              {(selectedItem.tmdbLinks || []).map((l: any) => (
+                                <div key={`admin-${l.id}-${l.source}`} className="flex items-center gap-1 px-1 py-0.5 hover:bg-white/5 rounded text-[10px]">
+                                  <span className="truncate flex-1 min-w-0" title={l.resourceName || l.url || ''}>
+                                    {l.source} #{l.id} {l.size ? `· ${l.size}` : ''}
+                                  </span>
                                   <button onClick={async (e) => {
                                     e.preventDefault();
-                                    const newUrl = prompt(`改 ${l.source} 链接 URL:\n(资源 ID: ${selectedItem.id})`, l.url);
+                                    e.stopPropagation();
+                                    const newUrl = prompt(`改 URL:\n(${l.source} #${l.id})`, l.url);
                                     if (!newUrl || newUrl === l.url) return;
                                     const token = getToken();
-                                    if (!token) {
-                                      addToast('error', '❌ 未登录或 token 失效, 请重新登录');
-                                      return;
-                                    }
-                                    console.log('[PATCH link] sending', { resourceId: selectedItem.id, source: l.source, url: newUrl?.slice(0, 50) });
+                                    if (!token) { addToast('error', '❌ 未登录'); return; }
                                     const r = await fetch('/api/admin/links', {
                                       method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-                                      body: JSON.stringify({ resourceId: selectedItem.id, source: l.source, url: newUrl, password: l.password })
+                                      body: JSON.stringify({ resourceId: l.id, source: l.source, url: newUrl, password: l.password })
                                     });
                                     const d = await r.json();
-                                    console.log('[PATCH link] response', r.status, d);
                                     if (d.ok) {
                                       addToast('success', '✅ 已更新');
-                                      // 本地更新链接
-                                      setSelectedItem(prev => prev ? { ...prev, links: prev.links?.map(x => x.source === l.source ? { ...x, url: newUrl } : x) } : prev);
-                                      // 2026-07-20: 改完触发首页重新拉数据, 跟 library/titles 同步
+                                      setSelectedItem(prev => prev ? { ...prev, tmdbLinks: prev.tmdbLinks?.map(x => x.id === l.id && x.source === l.source ? { ...x, url: newUrl } : x) } : prev);
                                       setTimeout(() => fetchItems(1), 500);
-                                    } else if (r.status === 401) {
-                                      addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
-                                    } else if (r.status === 403) {
-                                      addToast('error', `❌ 403 需要 admin 权限`);
-                                    } else if (r.status === 404) {
-                                      addToast('error', `❌ 404 ${d.error} — 这条链接可能已经被删`);
-                                    } else {
-                                      addToast('error', `❌ ${r.status} ${d.error || '更新失败'}`);
-                                    }
-                                  }} className="text-xs px-2 py-0.5 bg-white/5 hover:bg-white/10 rounded text-white/60">✏️ 改</button>
+                                    } else addToast('error', `❌ ${r.status} ${d.error || '更新失败'}`);
+                                  }} className="px-1 hover:bg-white/10 rounded text-white/60 hover:text-white shrink-0" title="改 URL">✏️</button>
                                   <button onClick={async (e) => {
                                     e.preventDefault();
-                                    if (!confirm(`删除 ${l.source} 链接?\n资源 ID: ${selectedItem.id}\n来源: ${l.source}\nURL: ${l.url?.slice(0, 50)}...`)) return;
+                                    e.stopPropagation();
+                                    if (!confirm(`删除 ${l.source} link?\n资源 ID: ${l.id}`)) return;
                                     const token = getToken();
-                                    if (!token) {
-                                      addToast('error', '❌ 未登录或 token 失效, 请重新登录');
-                                      return;
-                                    }
-                                    try {
-                                      console.log('[DELETE link] sending', { resourceId: selectedItem.id, source: l.source, url: l.url?.slice(0, 50) });
-                                      const r = await fetch('/api/admin/links', {
-                                        method: 'DELETE',
-                                        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-                                        body: JSON.stringify({ resourceId: selectedItem.id, source: l.source })
-                                      });
-                                      const d = await r.json();
-                                      console.log('[DELETE link] response', r.status, d);
-                                      if (d.ok) {
-                                        addToast('success', d.resourceDeleted ? '🗑️ 已删除 (资源无链接, 已软删)' : '🗑️ 已删除');
-                                        setSelectedItem(prev => prev ? { ...prev, links: prev.links?.filter(x => x.source !== l.source) } : prev);
-                                        // 2026-07-20: 删完触发首页重新拉数据, 跟 library/titles 同步
-                                        setTimeout(() => fetchItems(1), 500);
-                                      } else if (r.status === 401) {
-                                        addToast('error', `❌ 401 token 无效 — 重新登录后再试`);
-                                      } else if (r.status === 403) {
-                                        addToast('error', `❌ 403 需要 admin 权限`);
-                                      } else if (r.status === 404) {
-                                        addToast('error', `❌ 404 ${d.error} — 这条链接可能已经被别人删了, 刷新页面`);
-                                      } else {
-                                        addToast('error', `❌ ${r.status} ${d.error || '删除失败'}`);
-                                      }
-                                    } catch (err: any) {
-                                      console.error('[DELETE link] err', err);
-                                      addToast('error', '❌ 网络错误: ' + err.message);
-                                    }
-                                  }} className="text-xs px-2 py-0.5 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded">🗑️ 删</button>
+                                    if (!token) { addToast('error', '❌ 未登录'); return; }
+                                    const r = await fetch('/api/admin/links', {
+                                      method: 'DELETE', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+                                      body: JSON.stringify({ resourceId: l.id, source: l.source })
+                                    });
+                                    const d = await r.json();
+                                    if (d.ok) {
+                                      addToast('success', '🗑️ 已删除');
+                                      setSelectedItem(prev => prev ? { ...prev, tmdbLinks: prev.tmdbLinks?.filter(x => !(x.id === l.id && x.source === l.source)) } : prev);
+                                      setTimeout(() => fetchItems(1), 500);
+                                    } else addToast('error', `❌ ${r.status} ${d.error || '删除失败'}`);
+                                  }} className="px-1 hover:bg-red-500/20 rounded text-red-300 hover:text-red-200 shrink-0" title="删 link">🗑️</button>
                                 </div>
-                              )}
-                              {!isAdmin && user && (
-                                <button onClick={async (e) => {
-                                  e.preventDefault();
-                                  const reason = prompt('反馈原因 (失效/限速/密码错/内容错/其他):', '失效');
-                                  if (!reason) return;
-                                  const comment = prompt('备注 (可选):') || '';
-                                  const r = await fetch('/api/feedback', {
-                                    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
-                                    body: JSON.stringify({ resourceId: selectedItem.id, source: l.source, reason, comment })
-                                  });
-                                  const d = await r.json();
-                                  if (d.ok) addToast('success', '✅ 反馈已提交');
-                                  else addToast('error', '❌ ' + (d.error || '提交失败'));
-                                }} className="text-xs mt-1 px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 rounded">⚠️ 失效反馈</button>
-                              )}
+                              ))}
                             </div>
-                          );
-                        })
-                      ) : (
-                        // fallback 老字段
-                        isMagnetOrEd2k(selectedItem.link) ? (
-                          <button onClick={(e) => { e.preventDefault(); handleCopyLink(selectedItem.link, e); }}
-                            className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left">
-                            <div className="flex items-center gap-3"><span className="text-xl">🔗</span>
-                              <div><div className="font-medium">{selectedItem.source}</div><div className="text-sm text-cyan-400">磁力/ED2K链接，点击复制</div></div>
-                            </div>
-                            <span className="px-3 py-1 bg-cyan-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">📋 复制</span>
-                          </button>
-                        ) : (
-                          <button onClick={(e) => { e.preventDefault(); handleDirectOpen(selectedItem.link, e); }}
-                            className="w-full flex items-center justify-between p-4 bg-white/5 hover:bg-white/10 rounded-xl transition group text-left">
-                            <div className="flex items-center gap-3"><span className="text-xl">🔗</span>
-                              <div><div className="font-medium">{selectedItem.source}</div>
-                                <div className="text-sm text-white/50">{extractCodeFromUrl(selectedItem.link) ? `提取码：${extractCodeFromUrl(selectedItem.link)}` : '无需提取码'}</div>
-                              </div>
-                            </div>
-                            <span className="px-3 py-1 bg-violet-600 rounded-lg text-sm opacity-0 group-hover:opacity-100 transition shrink-0">🔗 打开</span>
-                          </button>
-                        )
+                          </div>
+                        </details>
                       )}
+                    </div>
+                    {(() => {
+                      // 2026-07-31: 用 tmdbLinks (同剧所有 link) 替代 links (单资源)
+                      const allLinks: any[] = (selectedItem.tmdbLinks && selectedItem.tmdbLinks.length > 0)
+                        ? selectedItem.tmdbLinks
+                        : (selectedItem.links || []).map((l: any) => ({ ...l, resourceName: selectedItem.name, size: selectedItem.size, createdAt: '' }));
+                      if (allLinks.length === 0) {
+                        return (
+                          <div className="px-4 py-6 rounded-xl bg-white/5 text-white/40 text-center text-sm">
+                            暂无播放链接, 等待匹配脚本
+                          </div>
+                        );
+                      }
+                      const SOURCE_DISPLAY: Record<string, string> = {
+                        '115': '115网盘', 'baidu': '百度网盘', 'quark': '夸克网盘',
+                        'aliyun': '阿里云盘', 'xunlei': '迅雷网盘', '123': '123网盘',
+                        'uc': 'UC网盘', 'tianyi': '天翼云盘', 'yidong': '移动云盘',
+                      };
+                      const SOURCE_ICON: Record<string, string> = {
+                        '115': '📦', 'baidu': '🅱️', 'quark': '🍊', 'aliyun': '☁️',
+                        'xunlei': '⚡', '123': '1️⃣', 'uc': '🅿️', 'tianyi': '☂️', 'yidong': '📱',
+                      };
+                      // 按 source 分组
+                      const netdiskGroups = new Map<string, any[]>();
+                      const magnetLinks: any[] = [];
+                      const ed2kLinks: any[] = [];
+                      for (const l of allLinks) {
+                        const src = l.source;
+                        if (src === 'magnet' || src === '磁力链接') magnetLinks.push(l);
+                        else if (src === 'ed2k' || src === 'ed2k链接') ed2kLinks.push(l);
+                        else {
+                          if (!netdiskGroups.has(src)) netdiskGroups.set(src, []);
+                          netdiskGroups.get(src)!.push(l);
+                        }
+                      }
+                      // 渲染一个 link 卡片 (admin 改/删根据用户选择, 折叠到右上"管理员选项"下, 这里不放)
+                      const renderLinkCard = (l: any, isMagnet: boolean) => {
+                        const src = l.source;
+                        const icon = isMagnet ? (src === 'ed2k' || src === 'ed2k链接' ? '📎' : '🧲') : (SOURCE_ICON[src] || '🔗');
+                        const sourceName = isMagnet ? (src === 'ed2k' || src === 'ed2k链接' ? 'ED2K 链接' : '磁力链接') : (SOURCE_DISPLAY[src] || src);
+                        // 2026-07-31: link 级别鉴权 - 跟卡片版一致 (basic 用户只看 zezhe 渠道 link)
+                        const linkAllowed = isAdmin
+                          || user?.group === 'vip'
+                          || l.accessLevel === 'code'  // 单资源付费 (流明解锁)
+                          || isZezheChannel(l.importChannel);
+                        // 提取 resource 名字 [xxx] 标签
+                        let nameLabel = '';
+                        if (l.resourceName) {
+                          const m = l.resourceName.match(/\[([^\]]+)\]/g);
+                          if (m) nameLabel = m.join(' ').replace(/\[/g, '').replace(/\]/g, '');
+                        }
+                        return (
+                          <div key={`${src}-${l.id}-${(l.url || '').slice(0, 30)}`}>
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                if (!linkAllowed) {
+                                  addCopyToast('🔒 VIP 渠道链接，basic 用户不可打开，请升级 VIP');
+                                  return;
+                                }
+                                isMagnet ? handleCopyLink(l.url, e) : handleDirectOpen(l.url, e);
+                              }}
+                              className={`w-full flex items-center justify-between p-3 sm:p-4 rounded-xl transition group text-left ${
+                                linkAllowed ? 'bg-white/5 hover:bg-white/10' : 'bg-white/[0.02] opacity-60 cursor-not-allowed'
+                              }`}
+                            >
+                              <span className="flex items-center gap-3 min-w-0 flex-1">
+                                <span className="text-xl shrink-0">{linkAllowed ? icon : '🔒'}</span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="font-medium flex items-center gap-2 flex-wrap">
+                                    <span>{sourceName}</span>
+                                    {nameLabel && <span className="text-xs px-1.5 py-0.5 bg-violet-500/20 text-violet-200 rounded">{nameLabel}</span>}
+                                    {l.size && <span className="text-xs text-white/40">📦 {l.size}</span>}
+                                    {!linkAllowed && <span className="text-xs px-1.5 py-0.5 bg-amber-500/30 text-amber-200 rounded">VIP</span>}
+                                  </span>
+                                  <span className="block text-xs text-white/50 truncate mt-0.5">
+                                    {isMagnet
+                                      ? <span className="text-cyan-400">{(l.url || '').slice(0, 60)}...</span>
+                                      : (l.password ? `提取码：${l.password}` : '无需提取码')}
+                                  </span>
+                                </span>
+                              </span>
+                              <span className={`px-2.5 py-1 rounded-lg text-sm shrink-0 ${linkAllowed ? 'opacity-0 group-hover:opacity-100 ' : ''}${isMagnet ? 'bg-cyan-600' : 'bg-violet-600'}`}>
+                                {linkAllowed ? (isMagnet ? '📋 复制' : '🔗 打开') : '🔒 VIP'}
+                              </span>
+                            </button>
+                            {/* 2026-07-31: admin 改/删按钮已合并到右上"管理员选项"折叠区, 这里不再 inline */}
+                            {!isAdmin && user && linkAllowed && (
+                              <button onClick={async (e) => {
+                                e.preventDefault();
+                                const reason = prompt('反馈原因 (失效/限速/密码错/内容错/其他):', '失效');
+                                if (!reason) return;
+                                const r = await fetch('/api/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() }, body: JSON.stringify({ resourceId: l.id, source: src, reason }) });
+                                const d = await r.json();
+                                if (d.ok) addToast('success', '✅ 反馈已提交');
+                              }} className="text-xs ml-11 mt-1 px-2 py-0.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 rounded">⚠️ 失效反馈</button>
+                            )}
+                          </div>
+                        );
+                      };
+                      // 渲染分组
+                      return (
+                        <div className="space-y-4">
+                          {Array.from(netdiskGroups.entries()).map(([src, links]) => (
+                            <div key={src} className="space-y-2">
+                              <div className="text-xs text-white/60 font-medium px-1">
+                                {SOURCE_ICON[src] || '🔗'} {SOURCE_DISPLAY[src] || src} <span className="text-white/30">({links.length})</span>
+                              </div>
+                              {links.map((l) => renderLinkCard(l, false))}
+                            </div>
+                          ))}
+                          {magnetLinks.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="text-xs text-white/60 font-medium px-1">🧲 磁力链接 <span className="text-white/30">({magnetLinks.length})</span></div>
+                              {magnetLinks.map((l) => renderLinkCard(l, true))}
+                            </div>
+                          )}
+                          {ed2kLinks.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="text-xs text-white/60 font-medium px-1">📎 ED2K 链接 <span className="text-white/30">({ed2kLinks.length})</span></div>
+                              {ed2kLinks.map((l) => renderLinkCard(l, true))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                       {/* 2026-06-03 单资源付费 - 解锁按钮 */}
                       {selectedItem.payType === 'code' && !selectedItem.unlocked && (
@@ -1230,7 +1351,6 @@ export default function HomePage() {
                           ✓ 您已解锁此资源
                         </div>
                       )}
-                    </div>
 
                     {relatedItems.length > 0 && tmdbType === 'tv' ? (
                       <div className="space-y-2">
@@ -1330,8 +1450,8 @@ export default function HomePage() {
         <AnimatePresence>
           {downloadToasts.map((toast) => (
             <motion.div key={toast.id} initial={{ opacity: 0, x: 80, scale: 0.8 }} animate={{ opacity: 1, x: 0, scale: 1 }} exit={{ opacity: 0, x: 80, scale: 0.8 }}
-              className={`px-5 py-3 rounded-xl text-sm font-medium shadow-lg flex items-center gap-2 min-w-[220px] ${toast.type === 'success' ? 'bg-green-600/90 text-white' : toast.type === 'cooldown' ? 'bg-orange-600/90 text-white' : toast.type === 'limit' ? 'bg-blue-600/90 text-white' : toast.type === 'banned' ? 'bg-red-700/90 text-white' : 'bg-red-600/90 text-white'}`}>
-              <span>{toast.type === 'success' ? '✓' : toast.type === 'cooldown' ? '⏳' : toast.type === 'limit' ? '📊' : toast.type === 'banned' ? '🚫' : '✕'}</span>
+              className={`px-5 py-3 rounded-xl text-sm font-medium shadow-lg flex items-center gap-2 min-w-[220px] ${toast.type === 'success' ? 'bg-green-600/90 text-white' : toast.type === 'cooldown' ? 'bg-orange-600/90 text-white' : toast.type === 'limit' ? 'bg-blue-600/90 text-white' : toast.type === 'banned' ? 'bg-red-700/90 text-white' : toast.type === 'warning' ? 'bg-amber-500/90 text-black' : 'bg-red-600/90 text-white'}`}>
+              <span>{toast.type === 'success' ? '✓' : toast.type === 'cooldown' ? '⏳' : toast.type === 'limit' ? '📊' : toast.type === 'banned' ? '🚫' : toast.type === 'warning' ? '⚠️' : '✕'}</span>
               {toast.message}
             </motion.div>
           ))}
@@ -1428,6 +1548,7 @@ export default function HomePage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
