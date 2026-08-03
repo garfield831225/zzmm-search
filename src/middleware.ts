@@ -172,6 +172,20 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // 2026-08-04: /titles 进入前验证码门 (静态密码 2015)
+  // - ⚠️ 必须放在 PUBLIC_PATHS 检查之前, 否则 /titles 被白名单提前放行, 验证码失效
+  // - middleware 检查 cookie `titles_2015=1`, 没值就 redirect 到 /titles-verify
+  // - /titles-verify page 验证后 setCookie (7 天) + 跳回 /titles
+  // - /api/titles 等 API 不走验证码 (程序调用不需要)
+  if (pathname === '/titles' || pathname.startsWith('/titles?')) {
+    const hasCookie = request.cookies.get('titles_2015')?.value === '1';
+    if (!hasCookie) {
+      const verifyUrl = new URL('/titles-verify', request.url);
+      verifyUrl.searchParams.set('redirect', pathname);
+      return NextResponse.redirect(verifyUrl);
+    }
+  }
+
   // 白名单：静态资源 + 公开页面
   for (const path of PUBLIC_PATHS) {
     if (pathname.startsWith(path)) {
@@ -210,20 +224,6 @@ export async function middleware(request: NextRequest) {
   // 2026-08-03: 改成 startsWith('/vip') 容错 /vip** 这种用户误输入 URL (之前 startsWith('/vip/') 漏掉)
   if (pathname.startsWith('/vip')) {
     return NextResponse.next();
-  }
-
-  // 2026-08-04: /titles 进入前验证码门 (静态密码 2015)
-  // - middleware 检查 cookie `titles_2015=1`, 没值就 redirect 到 /titles-verify
-  // - /titles-verify page 验证后 setCookie (7 天) + 跳回 /titles
-  // - /api/titles 等 API 不走验证码 (程序调用不需要)
-  // - ⚠️ 只挡 /titles 页面本身, 不影响 /titles 内 fetch 的 API
-  if (pathname === '/titles' || pathname.startsWith('/titles?')) {
-    const hasCookie = request.cookies.get('titles_2015')?.value === '1';
-    if (!hasCookie) {
-      const verifyUrl = new URL('/titles-verify', request.url);
-      verifyUrl.searchParams.set('redirect', pathname);
-      return NextResponse.redirect(verifyUrl);
-    }
   }
 
   // 检查登录 cookie
