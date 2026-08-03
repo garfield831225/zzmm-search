@@ -127,6 +127,7 @@ const PUBLIC_PATHS = [
   '/api/admin/diag-route-source', // 2026-07-18 临时诊断: 查 search API 部署源码
   '/api/admin/trigger-match',    // 2026-07-18 admin 强制触发 match-task (绕过 read replica lag)
   '/titles',                     // 2026-07-18 独立目录页 (无登录, 纯目录浏览, 无导航入口)
+  '/titles-verify',              // 2026-08-04 /titles 进入前验证码门 (输入 2015)
   '/api/admin/seed-multi-link-demo', // 2026-07-17 diag: 给老资源加示例多网盘链接
   '/api/admin/test-unnest',       // 2026-07-17 调试 UNNEST (已删, 白名单保留无影响)
   '/api/admin/diag-admin-group',  // 2026-07-16 查 admin 用户真实 group
@@ -146,6 +147,7 @@ const PUBLIC_PATHS = [
   '/api/vip',
   // 2026-08-03 P5.1: 主题专区 (公开浏览, admin CRUD 鉴权在路由内)
   '/api/themes',
+  '/themes',
   '/api/admin/themes',  // P5.2 admin 主题 CRUD, 鉴权在 route.ts 内
   // 2026-08-03 P5.3: 主题内容管理 (admin, 鉴权在 route.ts 内)
   '/api/admin/tmdb-search',
@@ -208,6 +210,20 @@ export async function middleware(request: NextRequest) {
   // 2026-08-03: 改成 startsWith('/vip') 容错 /vip** 这种用户误输入 URL (之前 startsWith('/vip/') 漏掉)
   if (pathname.startsWith('/vip')) {
     return NextResponse.next();
+  }
+
+  // 2026-08-04: /titles 进入前验证码门 (静态密码 2015)
+  // - middleware 检查 cookie `titles_2015=1`, 没值就 redirect 到 /titles-verify
+  // - /titles-verify page 验证后 setCookie (7 天) + 跳回 /titles
+  // - /api/titles 等 API 不走验证码 (程序调用不需要)
+  // - ⚠️ 只挡 /titles 页面本身, 不影响 /titles 内 fetch 的 API
+  if (pathname === '/titles' || pathname.startsWith('/titles?')) {
+    const hasCookie = request.cookies.get('titles_2015')?.value === '1';
+    if (!hasCookie) {
+      const verifyUrl = new URL('/titles-verify', request.url);
+      verifyUrl.searchParams.set('redirect', pathname);
+      return NextResponse.redirect(verifyUrl);
+    }
   }
 
   // 检查登录 cookie
