@@ -1,8 +1,13 @@
-// 2026-08-03: P4 vip 专区 API
-//   - access_level='vip' 已匹配 tmdbid 的资源
-//   - CTE + ROW_NUMBER() 拿 1 个 resource + 总数 (DISTINCT ON subquery 在 Neon 12s 超时)
-//   - 按 release_date DESC 排序 (近→远)
-//   - type 过滤: 'all' / 'movie' / 'tv'
+// 2026-08-04: P9.4 /api/vip 列表只返有 playerla 视频源的 vip 资源
+//   - 2026-08-04 血教训: 12.9 万 vip 资源中只有 111 个有 xx_vip_links.ok link (覆盖率 0.086%)
+//   - 用户原话"我是看视频的专区你给我弄成什么了" - 必须先保证列表里点开就有视频
+//   - 用 EXISTS 过滤掉没 playerla iframe / m3u8 的资源
+//   - 111 个先用着, 等同步脚本覆盖率上去了自动扩大
+//
+// 关联链:
+//   xx_resources.tmdb_id (新表, 12.9 万 vip 资源)
+//   → xx_vip_resources.tmdb_id (老表, 2 万条)
+//   → xx_vip_links.resource_id (links 表, status='ok' AND play_url IS NOT NULL = 111 个)
 
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
@@ -30,7 +35,10 @@ export async function GET(req: NextRequest) {
     const isTv = type === 'tv';
     const isAll = type === 'all';
 
-    // 2026-08-03 改: CTE + ROW_NUMBER() 拿 1 个 resource + count
+    // 2026-08-04 P9.4 改: 加 EXISTS 子句只返有 playerla 视频源的 vip 资源
+    //   - xx_vip_links.status='ok' AND play_url IS NOT NULL 的资源
+    //   - JOIN xx_vip_resources 按 tmdb_id 关联
+    //   - xx_vip_resources.tmdb_id 是 integer, r.tmdb_id 是 text, 必须 ::int cast
     const rows = await sql`
       WITH ranked AS (
         SELECT
@@ -58,6 +66,13 @@ export async function GET(req: NextRequest) {
           AND r.tmdb_id NOT IN ('NOMATCH', 'SKIP')
           AND t.release_date IS NOT NULL
           AND (${isAll} OR t.tmdb_type = ${type})
+          AND EXISTS (
+            SELECT 1 FROM xx_vip_links l
+            JOIN xx_vip_resources v ON l.resource_id = v.id
+            WHERE v.tmdb_id = r.tmdb_id::int
+              AND l.status = 'ok'
+              AND l.play_url IS NOT NULL
+          )
       )
       SELECT
         resource_id, tmdb_id, source, category, access_level,
@@ -80,6 +95,13 @@ export async function GET(req: NextRequest) {
         AND r.tmdb_id NOT IN ('NOMATCH', 'SKIP')
         AND t.release_date IS NOT NULL
         AND (${isAll} OR t.tmdb_type = ${type})
+        AND EXISTS (
+          SELECT 1 FROM xx_vip_links l
+          JOIN xx_vip_resources v ON l.resource_id = v.id
+          WHERE v.tmdb_id = r.tmdb_id::int
+            AND l.status = 'ok'
+            AND l.play_url IS NOT NULL
+        )
     `;
     const total = parseInt(totalRow[0]?.cnt || '0');
 
