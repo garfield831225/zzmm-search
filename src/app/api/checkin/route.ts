@@ -2,36 +2,21 @@
 //   - POST /api/checkin   每天 1 次, basic 1-5 积分 / vip/admin 8-20 积分
 //   - 写 xx_point_logs (type='checkin') + 更新 xx_user_points.points
 //   - ⚠️ 积分 = 独立系统, 跟流明 (xx_user_lumen) 分开! 任何时候都不要混!
+//
+// 2026-08-05 P10: 改用 getFreshUser() (DB 真实 user_group + lazy check 过期 VIP 降级)
+//   - 之前用 payload.user_group (从 token 读), 旧 token 30 天有效, 过期 VIP 仍享 VIP 权益
+//   - 血的教训 #26: lysq/lysg VIP 过期 4 天还能签到拿 8-20 积分
+//   - 现在每次签到都查 DB 拿最新 user_group, 过期 VIP 自动 lazy check 降级
 
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
-import { jwtVerify } from 'jose';
+import { getFreshUser } from '@/lib/auth';
 
 neonConfig.fetchConnectionCache = false;
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
-
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'cLWhs2015');
-
-async function getUser(request: NextRequest): Promise<{ id: number; group: string; username: string } | null> {
-  const auth = request.headers.get('authorization');
-  if (auth?.startsWith('Bearer ')) {
-    try {
-      const { payload } = await jwtVerify(auth.slice(7), JWT_SECRET);
-      return { id: Number(payload.id), group: String(payload.user_group || payload.group || ''), username: String(payload.username || '') };
-    } catch {}
-  }
-  const cookieToken = request.cookies.get('zzmm_token')?.value || request.cookies.get('token')?.value;
-  if (cookieToken) {
-    try {
-      const { payload } = await jwtVerify(cookieToken, JWT_SECRET);
-      return { id: Number(payload.id), group: String(payload.user_group || payload.group || ''), username: String(payload.username || '') };
-    } catch {}
-  }
-  return null;
-}
 
 function randInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -42,7 +27,7 @@ function isVip(group: string): boolean {
 }
 
 export async function POST(request: NextRequest) {
-  const user = await getUser(request);
+  const user = await getFreshUser(request);
   if (!user) return NextResponse.json({ error: '需要登录' }, { status: 401 });
 
   try {
@@ -99,7 +84,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  const user = await getUser(request);
+  const user = await getFreshUser(request);
   if (!user) return NextResponse.json({ error: '需要登录' }, { status: 401 });
 
   try {
