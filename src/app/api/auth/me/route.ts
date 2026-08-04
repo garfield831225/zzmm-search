@@ -48,6 +48,28 @@ export async function GET(req: NextRequest) {
     if (u?.created_at) u.created_at = parseNeonTime(u.created_at);
     if (u?.last_login) u.last_login = parseNeonTime(u.last_login);
 
+    // 2026-08-04 P8: VIP 过期 lazy check (idempotent, 跟 cron 端点逻辑一致)
+    //   - user_group='vip' AND status='active' AND expire_at < now() → 降级 basic
+    //   - 写 lumen_logs 流水
+    //   - 每次 /api/auth/me 都检查, 防止 cron 没跑时用户还在用 VIP 权限
+    //   - 单点登录: 新 last_login 强制旧 token 失效, 用户重新登录会拿到 basic token
+    if (u?.user_group === 'vip' && u?.status === 'active' && u?.expire_at) {
+      const expireMs = new Date(u.expire_at).getTime();
+      if (expireMs < Date.now()) {
+        // 过期了, 降级
+        try {
+          await sql`UPDATE xx_users SET user_group = 'basic' WHERE id = ${u.id} AND user_group = 'vip'`;
+          await sql`
+            INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description, created_at)
+            VALUES (${u.id}, 0, 0, 'expire', NULL, ${`VIP 过期降级 basic (lazy check, expire_at=${u.expire_at})`}, NOW())
+          `;
+          u.user_group = 'basic';
+        } catch (e: any) {
+          console.error('[auth/me] lazy expire check failed:', e.message);
+        }
+      }
+    }
+
     return NextResponse.json({
       user: u,
       // 2026-07-16: 同时回 token, 让前端能存到 localStorage (修 redirect loop)
