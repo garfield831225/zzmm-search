@@ -1,8 +1,8 @@
 'use client';
-// 2026-08-04: 首页 4ktop 风格模块行
-//   - 模块标题 + emoji + "更多" 链接
-//   - 横向滚动卡片 12 张 (mobile 4, tablet 6, desktop 12)
-//   - 复用卡片样式 (跟 /upcoming /basic /vip /themes 页面一致)
+// 2026-08-04 P9.3: 卡片 onClick 路由修复
+//   - VIP 资源 (accessLevel==='vip' 或 importChannel 是 zezhe) → 跳 /vip/[id] 业务页 (playerla + m3u8 视频播放)
+//   - 其他资源 → 跳 /tmdb/[type]/[tmdbId] 通用详情页 (下载链接 + 解锁)
+//   - it.id 来自 /api/upcoming|basic|vip 列表的 resourceId (xx_resources.id 主键)
 
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
@@ -143,8 +143,16 @@ export default function HomeSection({ title, titleEn, emoji, href, items, accent
                 transition={{ delay: i * 0.02, duration: 0.3 }}
                 className="flex-shrink-0 w-[140px] sm:w-[160px] cursor-pointer group/card"
                 onClick={() => {
-                  if (it.tmdbId) {
-                    location.href = `/upcoming/${it.id}`;
+                  // 2026-08-04 P9.3: VIP 资源跳 /vip/[id] 业务页 (playerla + m3u8 视频)
+                  //   - 用户原话: "我是看视频的专区你给我弄成什么了"
+                  //   - /vip/[id] 才是真正放 playerla iframe / m3u8 的视频页
+                  //   - 通用 /tmdb/[type]/[id] 是下载链接列表, 不能播
+                  // 判定: accessLevel==='vip' 或 importChannel 是 zezhe 系列 → VIP 专区资源
+                  const isVipResource = it.accessLevel === 'vip' || it.importChannel === 'zezhe' || it.importChannel === 'zezemom_excel';
+                  if (isVipResource && it.id) {
+                    location.href = `/vip/${it.id}`;
+                  } else if (it.tmdbId && it.tmdbType) {
+                    location.href = `/tmdb/${it.tmdbType}/${it.tmdbId}`;
                   } else {
                     location.href = `/titles`;
                   }

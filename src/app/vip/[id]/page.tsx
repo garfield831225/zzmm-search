@@ -1,4 +1,8 @@
 'use client';
+// 2026-08-04 P9.3: linkMode 适配 (player / download / none)
+//   - player: 走 PlayerStage 视频播放器 (playerla iframe + m3u8 真链)
+//   - download: 走 DownloadPanel 下载按钮列表 (网盘分享, 不能 iframe 嵌)
+//   - none: 显示"暂无播放链接"提示
 
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -19,6 +23,8 @@ interface VipLink {
   episodeTitle: string | null;
   playUrl: string;
   lastOkAt: string | null;
+  password?: string | null;  // 2026-08-04 P9.3: download 模式显示提取码
+  mode?: 'player' | 'download';  // 2026-08-04 P9.3: link 来源模式
   m3u8Urls?: { source: string; url: string; expires_at: string | null }[] | null;  // 2026-07-24 备份真链
 }
 
@@ -69,6 +75,9 @@ export default function VipDetailPage() {
   const [links, setLinks] = useState<VipLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // 2026-08-04 P9.3: linkMode 决定是放视频还是显示下载按钮
+  //   - 'player' | 'download' | 'none'
+  const [linkMode, setLinkMode] = useState<'player' | 'download' | 'none'>('none');
   // 2026-07-24: 当前选中的集数 / 视频 URL (inline iframe 播放)
   const [selectedLinkId, setSelectedLinkId] = useState<number | null>(null);
 
@@ -102,6 +111,7 @@ export default function VipDetailPage() {
         const data = await resp.json();
         setResource(data.resource);
         setLinks(data.links || []);
+        setLinkMode(data.linkMode || (data.links?.length > 0 ? 'player' : 'none'));
       } catch (e: any) {
         if (!cancelled) setError(e.message || '网络错误');
       } finally {
@@ -238,10 +248,29 @@ export default function VipDetailPage() {
           </div>
         </div>
 
-        {/* 2026-07-24: 多源播放器 (优先 m3u8 真链 + hls.js, fallback playerla iframe) */}
-        {selectedLink && (
+        {/* 2026-08-04 P9.3: 视频区按 linkMode 分支
+            - 'player' 模式: 多源播放器 (m3u8 优先 + playerla iframe fallback)
+            - 'download' 模式: 下载按钮列表 (网盘分享, 不能 iframe 嵌)
+            - 'none' 模式: 暂无播放链接, 提示用户 */}
+        {linkMode === 'player' && selectedLink && (
           <div className="mt-8 rounded-2xl overflow-hidden bg-black ring-1 ring-white/10 shadow-2xl">
             <PlayerStage link={selectedLink} title={resource.title} />
+          </div>
+        )}
+
+        {linkMode === 'download' && (
+          <DownloadPanel links={links} title={resource.title} />
+        )}
+
+        {linkMode === 'none' && (
+          <div className="mt-8 px-6 py-10 rounded-2xl bg-white/[0.03] border border-white/[0.06] text-center">
+            <div className="text-5xl mb-3 opacity-50">🎬</div>
+            <h3 className="text-base font-bold text-white/80 mb-2">暂无播放链接</h3>
+            <p className="text-sm text-white/40 max-w-md mx-auto leading-relaxed">
+              该资源还未匹配到视频源<br />
+              同步脚本在跑, 请稍候再试
+            </p>
+            <a href="/vip" className="inline-block mt-4 text-xs text-indigo-300 hover:underline">← 返回列表</a>
           </div>
         )}
 
@@ -438,5 +467,84 @@ function M3u8Player({ url, onError }: { url: string; onError: () => void }) {
       playsInline
       autoPlay
     />
+  );
+}
+
+// 2026-08-04 P9.3: download 模式组件
+//   - 资源只有网盘分享 (aliyun/baidu/quark) 没有 playerla iframe 时走这里
+//   - 显示下载按钮, 让用户点开对应网盘
+//   - 不能 iframe 嵌网盘, 会崩
+function DownloadPanel({ links, title }: { links: VipLink[]; title: string }) {
+  const [copied, setCopied] = useState<number | null>(null);
+
+  const handleCopy = async (text: string, id: number) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(id);
+      setTimeout(() => setCopied(null), 1500);
+    } catch {}
+  };
+
+  const sourceIcon = (s: string) => {
+    if (s?.includes('aliyun') || s?.includes('alipan')) return '☁️ 阿里云盘';
+    if (s?.includes('baidu')) return '📦 百度网盘';
+    if (s?.includes('quark')) return '⚡ 夸克网盘';
+    if (s?.includes('115')) return '💾 115 网盘';
+    if (s?.includes('magnet')) return '🧲 磁力链接';
+    if (s?.includes('ed2k')) return '🔗 ed2k 链接';
+    return s || '下载链接';
+  };
+
+  return (
+    <div className="mt-8 rounded-2xl bg-gradient-to-br from-indigo-500/[0.08] via-fuchsia-500/[0.06] to-amber-500/[0.05] border border-white/[0.08] p-6 sm:p-8">
+      <div className="flex items-center gap-3 mb-5">
+        <div className="text-2xl">📥</div>
+        <div>
+          <h2 className="text-lg font-bold text-white">下载链接</h2>
+          <p className="text-xs text-white/40 mt-0.5">该资源暂未匹配到在线视频源, 请使用网盘下载</p>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {links.map((l) => {
+          const isDownloadable = l.playUrl && (l.playUrl.startsWith('http') || l.playUrl.startsWith('magnet:') || l.playUrl.startsWith('ed2k:'));
+          return (
+            <div key={l.id} className="flex items-center gap-3 p-3 sm:p-4 rounded-xl bg-black/30 hover:bg-black/50 transition border border-white/[0.04]">
+              <div className="text-sm font-semibold text-white/80 min-w-[100px]">
+                {sourceIcon(l.source)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs text-white/50 truncate font-mono">
+                  {l.playUrl || '(无链接)'}
+                </div>
+                {l.password && (
+                  <div className="text-[11px] text-amber-300/80 mt-0.5">提取码: {l.password}</div>
+                )}
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {l.playUrl && (
+                  <button
+                    onClick={() => handleCopy(l.playUrl, l.id)}
+                    className="px-3 py-1.5 text-xs bg-white/10 hover:bg-white/20 rounded-lg text-white/70 transition"
+                  >
+                    {copied === l.id ? '✓ 已复制' : '复制'}
+                  </button>
+                )}
+                {isDownloadable && (
+                  <a
+                    href={l.playUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 text-xs bg-gradient-to-r from-indigo-500 to-fuchsia-500 hover:opacity-90 rounded-lg text-white font-medium transition"
+                  >
+                    打开
+                  </a>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
