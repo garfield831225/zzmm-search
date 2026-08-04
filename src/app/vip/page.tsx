@@ -394,15 +394,10 @@ function VipPageInner() {
 }
 
 function VipCard({ item }: { item: VipItem }) {
-  // 2026-08-04: 适配新 API 字段 - 跳转到详情页
-  //   - tmdbType='movie'/'tv' → /tmdb/[type]/[tmdbId]
-  //   - 其他 → /library?id=resourceId (但是新 API 没 link 字段, 暂时跳 library 列表)
-  let href = '/';
-  if (item.tmdbType === 'movie' || item.tmdbType === 'tv') {
-    href = `/tmdb/${item.tmdbType}/${item.tmdbId}`;
-  } else {
-    href = `/library?id=${item.resourceId}`;
-  }
+  // 2026-08-04: VIP 影视区是看视频的专区, 跳 /vip/[id] 走 playerla 视频播放页
+  //   - resourceId 是 xx_resources.id 主键
+  //   - /vip/[id] 页面会拿 id 查资源 + 渲染 playerla iframe + 选 source
+  const href = `/vip/${item.resourceId}`;
 
   return (
     <a href={href} className="group block">
