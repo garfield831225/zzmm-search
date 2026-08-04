@@ -1,13 +1,11 @@
-// 2026-08-04: P9.4 /api/vip 列表只返有 playerla 视频源的 vip 资源
-//   - 2026-08-04 血教训: 12.9 万 vip 资源中只有 111 个有 xx_vip_links.ok link (覆盖率 0.086%)
-//   - 用户原话"我是看视频的专区你给我弄成什么了" - 必须先保证列表里点开就有视频
-//   - 用 EXISTS 过滤掉没 playerla iframe / m3u8 的资源
-//   - 111 个先用着, 等同步脚本覆盖率上去了自动扩大
+// 2026-08-04: P9.5 /api/vip 列表直接查 v_xx_vip_resources_with_link view
+//   - 血教训 #25: 我之前用 xx_resources JOIN xx_vip_links 配对, 只筛出 77 个 (xx_resources 跟 xx_vip_resources 的 tmdb_id 配对覆盖率极低)
+//   - 用户原话"我是看视频的专区你给我弄成什么了" - 实际 VIP 视频源是 xingfan daily 同步进 xx_vip_resources + xx_vip_links 的, 跟 xx_resources 是两条线
+//   - 真视频源表: v_xx_vip_resources_with_link view (xx_vip_resources LEFT JOIN xx_vip_links status='ok' LIMIT 1)
+//   - view 总 19981 条, 1578 条有 play_url (560 movie + 1018 tv)
+//   - /vip 列表直接用 view, 不走 xx_resources (xx_resources 是基于 access_level='vip' 标签, 跟 playerla 视频源是两条线)
 //
-// 关联链:
-//   xx_resources.tmdb_id (新表, 12.9 万 vip 资源)
-//   → xx_vip_resources.tmdb_id (老表, 2 万条)
-//   → xx_vip_links.resource_id (links 表, status='ok' AND play_url IS NOT NULL = 111 个)
+// resourceId 语义: v_xx_vip_resources_with_link.id = xx_vip_resources.id (bigint, 1-N)
 
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
@@ -35,91 +33,73 @@ export async function GET(req: NextRequest) {
     const isTv = type === 'tv';
     const isAll = type === 'all';
 
-    // 2026-08-04 P9.4 改: 加 EXISTS 子句只返有 playerla 视频源的 vip 资源
-    //   - xx_vip_links.status='ok' AND play_url IS NOT NULL 的资源
-    //   - JOIN xx_vip_resources 按 tmdb_id 关联
-    //   - xx_vip_resources.tmdb_id 是 integer, r.tmdb_id 是 text, 必须 ::int cast
+    // 2026-08-04 P9.5 改: 直接查 v_xx_vip_resources_with_link view
+    //   - 这是 xingfan daily 同步过来的真视频源 (playerla iframe URL)
+    //   - view.id = xx_vip_resources.id, 直接给前端当 resourceId
+    //   - 不用 xx_resources JOIN (两条数据线, 配对率极低)
     const rows = await sql`
-      WITH ranked AS (
-        SELECT
-          r.id as resource_id,
-          r.tmdb_id,
-          r.source,
-          r.category,
-          r.access_level,
-          t.title as tmdb_title,
-          t.title_zh,
-          t.original_title,
-          t.release_date as release_date,
-          t.tmdb_type,
-          t.poster_path,
-          t.vote_average,
-          t.overview,
-          ROW_NUMBER() OVER (PARTITION BY r.tmdb_id ORDER BY r.id ASC) as rn,
-          count(*) OVER (PARTITION BY r.tmdb_id) as resource_count
-        FROM xx_resources r
-        JOIN xx_tmdb_cache t ON t.tmdb_id = r.tmdb_id
-        WHERE r.access_level='vip'
-          AND r.status='active'
-          AND r.tmdb_id IS NOT NULL
-          AND r.tmdb_id != ''
-          AND r.tmdb_id NOT IN ('NOMATCH', 'SKIP')
-          AND t.release_date IS NOT NULL
-          AND (${isAll} OR t.tmdb_type = ${type})
-          AND EXISTS (
-            SELECT 1 FROM xx_vip_links l
-            JOIN xx_vip_resources v ON l.resource_id = v.id
-            WHERE v.tmdb_id = r.tmdb_id::int
-              AND l.status = 'ok'
-              AND l.play_url IS NOT NULL
-          )
-      )
       SELECT
-        resource_id, tmdb_id, source, category, access_level,
-        tmdb_title, title_zh, original_title, release_date, tmdb_type,
-        poster_path, vote_average, overview, resource_count
-      FROM ranked
-      WHERE rn = 1
-      ORDER BY release_date DESC
+        v.id AS resource_id,
+        v.tmdb_id,
+        v.media_type,
+        v.title,
+        v.original_title,
+        v.poster_path,
+        v.backdrop_path,
+        v.overview,
+        v.vote_average,
+        v.vote_count,
+        v.release_date,
+        v.genre_ids,
+        v.status,
+        v.season_count,
+        v.episode_count,
+        v.runtime,
+        v.play_url,
+        v.link_source,
+        v.link_id
+      FROM v_xx_vip_resources_with_link v
+      WHERE v.play_url IS NOT NULL
+        AND (${isAll} OR v.media_type = ${type})
+      ORDER BY v.release_date DESC NULLS LAST, v.id DESC
       LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
     `;
 
     const totalRow = await sql`
-      SELECT count(DISTINCT r.tmdb_id) as cnt
-      FROM xx_resources r
-      JOIN xx_tmdb_cache t ON t.tmdb_id = r.tmdb_id
-      WHERE r.access_level='vip'
-        AND r.status='active'
-        AND r.tmdb_id IS NOT NULL
-        AND r.tmdb_id != ''
-        AND r.tmdb_id NOT IN ('NOMATCH', 'SKIP')
-        AND t.release_date IS NOT NULL
-        AND (${isAll} OR t.tmdb_type = ${type})
-        AND EXISTS (
-          SELECT 1 FROM xx_vip_links l
-          JOIN xx_vip_resources v ON l.resource_id = v.id
-          WHERE v.tmdb_id = r.tmdb_id::int
-            AND l.status = 'ok'
-            AND l.play_url IS NOT NULL
-        )
+      SELECT COUNT(*) AS cnt
+      FROM v_xx_vip_resources_with_link v
+      WHERE v.play_url IS NOT NULL
+        AND (${isAll} OR v.media_type = ${type})
     `;
     const total = parseInt(totalRow[0]?.cnt || '0');
 
+    // 2026-08-04 P9.5 改: 字段映射 v_xx_vip_resources_with_link view 字段
+    //   - v.id (vip_resource.id, bigint) → resourceId
+    //   - v.tmdb_id (integer) → tmdbId (string 化, 跟旧 /api/vip 字段对齐)
+    //   - v.media_type ('movie'|'tv') → tmdbType
+    //   - v.title / v.original_title 直接用 (view 已经 JOIN 过来了)
+    //   - resourceCount = link 总数 (用 subquery 算)
     const items = rows.map((r: any) => ({
-      resourceId: r.resource_id,
-      tmdbId: r.tmdb_id,
-      tmdbType: r.tmdb_type,
-      title: r.title_zh || r.tmdb_title,
+      resourceId: Number(r.resource_id),
+      tmdbId: r.tmdb_id ? String(r.tmdb_id) : null,
+      tmdbType: r.media_type,
+      title: r.title || '',
       originalTitle: r.original_title,
-      releaseDate: r.release_date,
       posterPath: r.poster_path,
-      posterUrl: r.poster_path ? `${TMDB_IMAGE_BASE}${r.poster_path}` : null,
-      voteAverage: r.vote_average ? parseFloat(r.vote_average) : null,
+      posterUrl: r.poster_path
+        ? (r.poster_path.startsWith('http') ? r.poster_path : `${TMDB_IMAGE_BASE}${r.poster_path}`)
+        : null,
+      backdropUrl: r.backdrop_path
+        ? (r.backdrop_path.startsWith('http') ? r.backdrop_path : `https://image.tmdb.org/t/p/w1280${r.backdrop_path}`)
+        : null,
       overview: r.overview,
-      source: r.source,
-      resourceCount: parseInt(r.resource_count || '1'),
-      accessLevel: r.access_level,
-      category: r.category,
+      releaseDate: r.release_date,
+      voteAverage: r.vote_average ? parseFloat(r.vote_average) : null,
+      voteCount: r.vote_count ? parseInt(r.vote_count) : 0,
+      genreIds: r.genre_ids || [],
+      source: r.link_source || 'xingfan',
+      accessLevel: 'vip',
+      category: r.media_type === 'tv' ? '剧集' : '电影',
     }));
 
     return NextResponse.json({
