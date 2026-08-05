@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv, Shield, Crown, User, Gift, Sparkles, ChevronRight } from 'lucide-react';
 import HomeBanner from '@/components/home/Banner';
 import HomeSection, { type SectionItem } from '@/components/home/Section';
+import TrailerRow from '@/components/home/TrailerRow';
 import { tmdbPoster, tmdbBackdrop, tmdbProfile, TMDB_FALLBACK } from '@/lib/tmdb-image';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
@@ -735,6 +736,9 @@ export default function HomePage() {
       <div className="max-w-7xl mx-auto px-4 pt-6">
         {/* 1. 顶部 banner 轮播 */}
         <HomeBanner />
+
+        {/* 1.5 2026-08-05 P11: TMDB 最新预告片区 (横幅下面) */}
+        <TrailerRow />
 
         {/* 2. 最新上映模块 */}
         <div className="mt-6">
