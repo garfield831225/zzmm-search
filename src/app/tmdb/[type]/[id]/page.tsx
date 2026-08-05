@@ -49,6 +49,7 @@ interface TmdbCredits {
   cast: CastMember[];
   crew: CrewMember[];
   backdrop_path: string | null;
+  poster_path: string | null;  // 2026-08-05: 详情页海报
   overview: string | null;
   tagline: string | null;
   genres: string[];
@@ -110,14 +111,18 @@ export default function TmdbDetailPage() {
   const voteAverage = credits?.vote_average ? parseFloat(credits.vote_average) : 0;
   const voteCount = credits?.vote_count ? parseInt(credits.vote_count) : 0;
   const cast = credits?.cast || [];
+  // 2026-08-05: poster_path 兼容: cache 老数据存相对路径, fresh 数据是全 URL
+  const posterUrl = credits?.poster_path
+    ? (credits.poster_path.startsWith('http') ? credits.poster_path : `https://image.zzmm-search.uk/t/p/w500${credits.poster_path}`)
+    : null;
 
   return (
     <div className="min-h-screen bg-black text-white">
       {/* 顶部 backdrop */}
       {backdrop && (
         <div className="relative h-[40vh] w-full overflow-hidden">
-          <img src={backdrop} alt="" className="w-full h-full object-cover opacity-50" loading="eager" decoding="async" />
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/60 to-black" />
+          <img src={backdrop} alt="" className="w-full h-full object-cover opacity-80" loading="eager" decoding="async" />
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/40 to-black" />
         </div>
       )}
 
@@ -129,11 +134,20 @@ export default function TmdbDetailPage() {
 
         {/* 上半部: TMDB 数据 (海报/标题/简介/演员) */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          {/* 海报占位 */}
+          {/* 海报 (从 credits.poster_path 拿) */}
           <div className="md:col-span-1">
-            <div className="aspect-[2/3] bg-gradient-to-br from-purple-900/30 to-blue-900/30 rounded-lg flex items-center justify-center border border-gray-800">
-              {type === 'movie' ? <Film size={64} className="text-gray-600" /> : <Tv size={64} className="text-gray-600" />}
-              <div className="absolute mt-32 text-xs text-gray-500">TMDB #{tmdbId}</div>
+            <div className="aspect-[2/3] bg-gradient-to-br from-purple-900/30 to-blue-900/30 rounded-lg overflow-hidden border border-gray-800 relative">
+              {posterUrl ? (
+                <img src={posterUrl} alt={title}
+                  className="w-full h-full object-cover"
+                  loading="eager" decoding="async"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+              ) : (
+                <>
+                  {type === 'movie' ? <Film size={64} className="text-gray-600 absolute inset-0 m-auto" /> : <Tv size={64} className="text-gray-600 absolute inset-0 m-auto" />}
+                  <div className="absolute bottom-3 left-0 right-0 text-center text-xs text-gray-500">TMDB #{tmdbId}</div>
+                </>
+              )}
             </div>
           </div>
 

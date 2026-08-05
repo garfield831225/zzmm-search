@@ -162,6 +162,8 @@ const PUBLIC_PATHS = [
   // 2026-08-05: /api/tmdb-resources + /api/tmdb-credits 详情页用, 路由内 getUserGroup 走 cookie 鉴权, 无 token 返 'user' 公开浏览
   '/api/tmdb-resources',
   '/api/tmdb-credits',
+  // 2026-08-05: 详情页公开浏览 (有 cookie 进, 无 cookie 走 'user' 权限)
+  '/tmdb',
 ];
 
 export async function middleware(request: NextRequest) {

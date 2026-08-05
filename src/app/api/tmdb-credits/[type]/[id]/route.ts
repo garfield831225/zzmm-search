@@ -90,7 +90,7 @@ export async function GET(req: Request, { params }: { params: { type: string; id
 
   try {
     // 1. 查 cache
-    const cached = await sql`SELECT credits, backdrop_path, overview, tagline, genres, title, original_title, vote_average, vote_count, credits_cached_at FROM xx_tmdb_cache WHERE tmdb_id = ${tmdbId} AND tmdb_type = ${type}`;
+    const cached = await sql`SELECT credits, backdrop_path, overview, tagline, genres, title, original_title, vote_average, vote_count, poster_path, credits_cached_at FROM xx_tmdb_cache WHERE tmdb_id = ${tmdbId} AND tmdb_type = ${type}`;
 
     if (cached[0]?.credits && cached[0]?.backdrop_path && !force) {
       // 全有 → 直接返
@@ -99,6 +99,7 @@ export async function GET(req: Request, { params }: { params: { type: string; id
         cast: cached[0].credits.cast || [],
         crew: cached[0].credits.crew || [],
         backdrop_path: cached[0].backdrop_path,
+        poster_path: cached[0].poster_path,  // 2026-08-05: 详情页海报用
         overview: cached[0].overview,
         tagline: cached[0].tagline,
         genres: cached[0].genres,
@@ -158,6 +159,7 @@ export async function GET(req: Request, { params }: { params: { type: string; id
       cast: credits?.cast || [],
       crew: credits?.crew || [],
       backdrop_path: backdrop,
+      poster_path: detail?.poster_path ? `${TMDB_IMG}/w500${detail.poster_path}` : (cached[0]?.poster_path || null),  // 2026-08-05: 详情页海报用
       overview,
       tagline,
       genres,
