@@ -13,7 +13,7 @@ const TMDB_KEYS = [
   '79e41efe870e60afb09b9de8baa47cf1',
 ];
 const TMDB_BASE = 'https://api.themoviedb.org/3';
-const TMDB_IMG = 'https://image.tmdb.org/t/p';
+const TMDB_IMG = 'https://image.zzmm-search.uk/t/p';  // 2026-08-05 step 2: CF Worker 反代
 
 class RateLimiter {
   private lastCalls = TMDB_KEYS.map(() => 0);

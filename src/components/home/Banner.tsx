@@ -24,7 +24,7 @@ interface BannerItem {
   source: string;
 }
 
-const TMDB_IMG = 'https://image.tmdb.org/t/p/w780';  // 2026-08-05: w1280→w780 节省 50% 流量
+const TMDB_IMG = 'https://image.zzmm-search.uk/t/p/w780';  // 2026-08-05: w1280→w780 节省 50% 流量 + CF Worker 反代
 
 export default function HomeBanner() {
   const [items, setItems] = useState<BannerItem[]>([]);

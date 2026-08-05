@@ -1,9 +1,9 @@
 // 2026-08-05: TMDB 图片 helper
 //   - 统一管理图片尺寸 (Section 卡片用 w342, Banner 用 w780, 演员头像用 w45)
-//   - 默认走 image.tmdb.org
-//   - step 2 配完 CF Worker 后, 把 BASE_URL 改成 image.zzmm-search.uk 即可换反代
+//   - 2026-08-05 step 2: BASE_URL 切到 image.zzmm-search.uk (CF Worker 反代, 解决 GFW + 30 天边缘缓存)
+//   - 旧 image.tmdb.org 在国内慢, CF 边缘节点直拉 TMDB 给用户, 速度 <100ms
 
-const BASE_URL = process.env.NEXT_PUBLIC_TMDB_IMG_BASE || 'https://image.tmdb.org/t/p';
+const BASE_URL = 'https://image.zzmm-search.uk/t/p';
 
 // TMDB 官方尺寸 (官方文档): https://developers.themoviedb.org/3/getting-started/images
 // poster: w92, w154, w185, w342, w500, w780, original
