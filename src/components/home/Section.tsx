@@ -166,6 +166,7 @@ export default function HomeSection({ title, titleEn, emoji, href, items, accent
                     className="w-full h-full object-cover group-hover/card:scale-105 transition duration-500"
                     onError={(e: any) => { e.target.src = TMDB_FALLBACK; }}
                     loading="lazy"
+                    decoding="async"
                   />
                   {/* 类型/年份标签 */}
                   <div className="absolute top-1.5 left-1.5 flex flex-col gap-1 items-start">

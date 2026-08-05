@@ -55,7 +55,7 @@ async function getCredits(type: 'movie' | 'tv', tmdbId: string) {
       id: c.id,
       name: c.name,
       character: c.character,
-      profile_path: c.profile_path ? `${TMDB_IMG}/w185${c.profile_path}` : null,
+      profile_path: c.profile_path ? `${TMDB_IMG}/w45${c.profile_path}` : null,  // 2026-08-05: w185→w45 演员头像小, 节省 75% 流量
       order: c.order,
     }));
 
@@ -66,7 +66,7 @@ async function getCredits(type: 'movie' | 'tv', tmdbId: string) {
       id: c.id,
       name: c.name,
       job: c.job,
-      profile_path: c.profile_path ? `${TMDB_IMG}/w185${c.profile_path}` : null,
+      profile_path: c.profile_path ? `${TMDB_IMG}/w45${c.profile_path}` : null,  // 2026-08-05: w185→w45
     }));
 
   return { cast, crew, cached_at: new Date().toISOString() };
@@ -120,7 +120,7 @@ export async function GET(req: Request, { params }: { params: { type: string; id
       return NextResponse.json({ error: 'TMDB fetch failed' }, { status: 502 });
     }
 
-    const backdrop = detail?.backdrop_path ? `${TMDB_IMG}/w1280${detail.backdrop_path}` : null;
+    const backdrop = detail?.backdrop_path ? `${TMDB_IMG}/w780${detail.backdrop_path}` : null;  // 2026-08-05: w1280→w780 backdrop
     const overview = detail?.overview || cached[0]?.overview || null;
     const tagline = detail?.tagline || cached[0]?.tagline || null;
     const genres = detail?.genres?.map((g: any) => g.name) || cached[0]?.genres || [];

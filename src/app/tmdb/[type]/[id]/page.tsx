@@ -116,7 +116,7 @@ export default function TmdbDetailPage() {
       {/* 顶部 backdrop */}
       {backdrop && (
         <div className="relative h-[40vh] w-full overflow-hidden">
-          <img src={backdrop} alt="" className="w-full h-full object-cover opacity-50" />
+          <img src={backdrop} alt="" className="w-full h-full object-cover opacity-50" loading="eager" decoding="async" />
           <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/60 to-black" />
         </div>
       )}
@@ -185,7 +185,7 @@ export default function TmdbDetailPage() {
                 <div key={c.id} className="text-center">
                   <div className="aspect-[2/3] bg-gray-900 rounded overflow-hidden mb-1">
                     {c.profile_path ? (
-                      <img src={c.profile_path} alt={c.name} className="w-full h-full object-cover" loading="lazy" />
+                      <img src={c.profile_path} alt={c.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-gray-700 text-2xl">👤</div>
                     )}

@@ -13,6 +13,9 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
+// 2026-08-05: 首页/详情页图片优化 — Section 卡片用 w342, Banner 用 w780
+const TMDB_IMAGE_BASE_W342 = 'https://image.tmdb.org/t/p/w342';
+const TMDB_IMAGE_BASE_W780 = 'https://image.tmdb.org/t/p/w780';
 
 export async function GET(req: NextRequest) {
   const sql = neon(process.env.DATABASE_URL || '', {
@@ -75,8 +78,8 @@ export async function GET(req: NextRequest) {
       releaseDate: r.release_date,
       posterPath: r.poster_path,
       backdropPath: r.backdrop_path,
-      posterUrl: r.poster_path ? `${TMDB_IMAGE_BASE}${r.poster_path}` : null,
-      backdropUrl: r.backdrop_path ? `${TMDB_IMAGE_BASE}${r.backdrop_path}` : null,
+      posterUrl: r.poster_path ? `${TMDB_IMAGE_BASE_W342}${r.poster_path}` : null,
+      backdropUrl: r.backdrop_path ? `${TMDB_IMAGE_BASE_W780}${r.backdrop_path}` : null,
       voteAverage: r.vote_average ? parseFloat(r.vote_average) : null,
       overview: r.overview,
       hasMatch: r.has_match,

@@ -7,9 +7,10 @@ import { useRouter } from 'next/navigation';
 import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv, Shield, Crown, User, Gift, Sparkles, ChevronRight } from 'lucide-react';
 import HomeBanner from '@/components/home/Banner';
 import HomeSection, { type SectionItem } from '@/components/home/Section';
+import { tmdbPoster, tmdbBackdrop, tmdbProfile, TMDB_FALLBACK } from '@/lib/tmdb-image';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
-const TMDB_IMAGE_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
+const TMDB_IMAGE_FALLBACK = TMDB_FALLBACK;
 
 const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频道', '综艺', '演唱会', '纪录片', '原盘', 'REMUX', '系列电影'];
 const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '夸克网盘', '磁力链接', 'ed2k链接'];
@@ -184,7 +185,7 @@ export default function HomePage() {
       id: it.id,
       tmdbId: it.tmdbId || it.tmdb_id,
       title: it.title || it.name || '',
-      posterUrl: it.posterUrl || it.poster_url || (it.posterPath ? `https://image.tmdb.org/t/p/w500${it.posterPath}` : '') || '',
+      posterUrl: it.posterUrl || it.poster_url || (it.posterPath ? tmdbPoster(it.posterPath, 'card') : '') || '',
       releaseDate: it.releaseDate || it.release_date,
       voteAverage: it.voteAverage ?? it.vote_average,
       source: it.source,
@@ -875,9 +876,10 @@ export default function HomePage() {
               {/* Poster */}
               <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-2.5">
                 {item.tmdb?.poster_path ? (
-                  <img src={`${TMDB_IMAGE_BASE}${item.tmdb.poster_path}`} alt={item.name}
+                  <img src={tmdbPoster(item.tmdb.poster_path, 'card')} alt={item.name}
                     className="w-full h-full object-cover transition group-hover:scale-105"
-                    onError={(e) => { (e.target as HTMLImageElement).src = TMDB_IMAGE_FALLBACK; }} />
+                    onError={(e) => { (e.target as HTMLImageElement).src = TMDB_FALLBACK; }}
+                    loading="lazy" decoding="async" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-violet-900/30 to-pink-900/30">🎬</div>
                 )}
@@ -1146,7 +1148,7 @@ export default function HomePage() {
                 <div className="w-full md:w-80 shrink-0">
                   <div className="aspect-[2/3] bg-white/5">
                     {selectedItem.tmdb?.poster_path ? (
-                      <img src={`${TMDB_IMAGE_BASE}${selectedItem.tmdb.poster_path}`} alt={selectedItem.name} className="w-full h-full object-cover" />
+                      <img src={tmdbPoster(selectedItem.tmdb.poster_path, 'large')} alt={selectedItem.name} className="w-full h-full object-cover" loading="lazy" decoding="async" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-6xl">🎬</div>
                     )}
@@ -1226,7 +1228,7 @@ export default function HomePage() {
                             {tmdbCredits.cast.slice(0, 15).map((c, i) => (
                               <div key={i} className="flex flex-col items-center shrink-0 w-16">
                                 <div className="w-12 h-12 rounded-full bg-white/10 overflow-hidden mb-1 flex items-center justify-center text-lg">
-                                  {c.profile_path ? <img src={c.profile_path} alt={c.name} className="w-full h-full object-cover" /> : '👤'}
+                                  {c.profile_path ? <img src={c.profile_path} alt={c.name} className="w-full h-full object-cover" loading="lazy" decoding="async" /> : '👤'}
                                 </div>
                                 <span className="text-xs text-white/70 text-center leading-tight truncate w-full">{c.name}</span>
                                 {c.character && <span className="text-xs text-white/30 text-center truncate w-full">{c.character}</span>}
