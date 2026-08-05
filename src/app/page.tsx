@@ -571,6 +571,10 @@ export default function HomePage() {
                     <Library size={14} className="transition-transform group-hover:scale-110" />
                     <span>文档资源库</span>
                   </Link>
+                  <Link href="/request" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-pink-500/20 hover:from-amber-500/40 hover:to-pink-500/40 rounded-lg text-sm transition-all duration-200 text-amber-200 hover:shadow-[0_0_12px_rgba(245,158,11,0.4)] hover:scale-105 border border-amber-400/30">
+                    <Sparkles size={14} className="transition-transform group-hover:scale-110" />
+                    <span>求片专区</span>
+                  </Link>
                   <button onClick={handleLogout} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">退出</button>
                   <Link href="/activate" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/30 hover:bg-pink-600/60 rounded-lg text-sm transition-all duration-200 text-pink-200 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
                     <Gift size={14} className="transition-transform group-hover:scale-110" />
@@ -592,6 +596,10 @@ export default function HomePage() {
                   <Link href="/library" className="group flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/20 hover:bg-violet-600/50 rounded-lg text-sm transition-all duration-200 text-violet-300 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105">
                     <Library size={14} className="transition-transform group-hover:scale-110" />
                     <span>文档资源库</span>
+                  </Link>
+                  <Link href="/request" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-pink-500/20 hover:from-amber-500/40 hover:to-pink-500/40 rounded-lg text-sm transition-all duration-200 text-amber-200 hover:shadow-[0_0_12px_rgba(245,158,11,0.4)] hover:scale-105 border border-amber-400/30">
+                    <Sparkles size={14} className="transition-transform group-hover:scale-110" />
+                    <span>求片专区</span>
                   </Link>
                   <Link href="/activate" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/30 hover:bg-pink-600/60 rounded-lg text-sm transition-all duration-200 text-pink-200 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
                     <Gift size={14} className="transition-transform group-hover:scale-110" />

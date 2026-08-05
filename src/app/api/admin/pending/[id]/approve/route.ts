@@ -1,12 +1,9 @@
 // 2026-08-03: P6.2 admin pending 通过审核
-//   - POST /api/admin/pending/[id]/approve
-//   - 流程:
-//     1) 读 pending record (links, type, name, tmdb_id, user_id, size/size_unit/note)
-//     2) 算积分 (按 type: 4K原盘/原盘=10, 4K/杜比视界=8, 1080P/720P/REMUX/低分辨率=5)
-//     3) INSERT xx_resources (active, 拿 pending.name 作 name, links[0] 作 link)
-//     4) UPDATE xx_pending_resources status='approved' + reviewed_at + reviewed_by
-//     5) UPSERT xx_user_points +amount
-//     6) INSERT xx_point_logs (type='upload_reward', amount, ref_id=pending_id)
+// 2026-08-05: 权限规则 (用户拍板)
+//   - admin/user 审核通过: 默认 vip 专属 (access_tier='vip', lumen_cost=0, vip + admin 能看, basic 不能看)
+//   - 如果同 tmdb_id 有 zezemom_excel / zezhe 已存在 (basic 文档) → 复用, 不新增 basic
+//   - 如果没有 zezemom 资源 → 新增一条 basic 链接 (access_tier='document', import_channel='zezhe_baseline') 保留"金标准"
+//   - 简化: 只插第 1 条 link (后续可扩展为 1 对 N, 用 xx_resource_links)
 
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
@@ -91,9 +88,18 @@ export async function POST(
     const tmdbType = (p as any).tmdb_type || 'movie';  // fallback 'movie' 防 pending 没匹配 upcoming
     const sizeText = p.size != null ? `${p.size} ${p.size_unit || 'GB'}` : null;
 
-    // 2) INSERT xx_resources (1 条对应 1 个 link, 多个 link 用同 name 多次插, 这里先取 links[0])
-    // 简化: 只插第 1 条 link (后续可扩展为 1 对 N, 用 xx_resource_links)
-    // 必传字段: type(从 xx_upcoming JOIN 拿), access_tier='document'(basic 可看), lumen_cost=0(免费), size(拼单位)
+    // 2) 检测: 同 tmdb_id + type 下是否已有 zezemom_excel / zezhe (basic 文档)
+    const zezemomRows = await sql`
+      SELECT id FROM xx_resources
+      WHERE tmdb_id = ${String(p.tmdb_id)} AND type = ${tmdbType}
+        AND import_channel IN ('zezhe', 'zezemom_excel')
+        AND status = 'active'
+      LIMIT 1
+    `;
+    const hasZezemom = zezemomRows.length > 0;
+
+    // 3) INSERT xx_resources (vip 链接)
+    // 必传: type, access_tier='vip'(vip+admin 可见), lumen_cost=0(免费), size
     const insertRes = await sql`
       INSERT INTO xx_resources (
         name, link, link_code, source, category, access_level,
@@ -104,12 +110,34 @@ export async function POST(
       VALUES (
         ${p.name}, ${firstLink}, '', ${source}, ${category}, ${accessLevel},
         'active', 'user_upload', ${String(p.tmdb_id)},
-        ${tmdbType}, 'document', 0, ${sizeText},
+        ${tmdbType}, 'vip', 0, ${sizeText},
         NOW(), NOW()
       )
       RETURNING id
     `;
     const newResourceId = insertRes[0].id;
+
+    // 4) 新增一条 basic 链接 (仅在 zezemom 同资源不存在时)
+    // 业务规则 (2026-08-05): 保留 vip 链接 + 新增 basic 链接 → basic 用户也能直接看
+    let basicResourceId: number | null = null;
+    if (!hasZezemom) {
+      const basicRes = await sql`
+        INSERT INTO xx_resources (
+          name, link, link_code, source, category, access_level,
+          status, import_channel, tmdb_id,
+          type, access_tier, lumen_cost, size,
+          created_at, updated_at
+        )
+        VALUES (
+          ${p.name}, ${firstLink}, '', ${source}, ${category}, 'basic',
+          'active', 'zezhe_baseline', ${String(p.tmdb_id)},
+          ${tmdbType}, 'document', 0, ${sizeText},
+          NOW(), NOW()
+        )
+        RETURNING id
+      `;
+      basicResourceId = basicRes[0]?.id || null;
+    }
 
     // 3) UPDATE pending status
     await sql`UPDATE xx_pending_resources SET status = 'approved', reviewed_at = NOW(), reviewed_by = ${a.userId} WHERE id = ${pendingId}::int`;
@@ -132,8 +160,12 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
-      message: `✅ 已通过, 资源入库 (id=${newResourceId}), +${points} 积分`,
+      message: hasZezemom
+        ? `✅ 已通过, vip 链接入库 (id=${newResourceId})${hasZezemom ? ', zezemom 已有 basic 资源复用' : ''}, +${points} 积分`
+        : `✅ 已通过, vip + basic 双入库 (vip id=${newResourceId}, basic id=${basicResourceId}), +${points} 积分`,
       resourceId: newResourceId,
+      basicResourceId,
+      hasZezemom,
       points,
     });
   } catch (e: any) {

@@ -8,6 +8,7 @@ import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { ChevronLeft, ChevronRight, Sparkles, Crown, Tag, Calendar } from 'lucide-react';
 import { motion } from 'framer-motion';
+import UploadButton from '@/components/UploadButton';
 
 export interface SectionItem {
   id: number;
@@ -158,6 +159,17 @@ export default function HomeSection({ title, titleEn, emoji, href, items, accent
                   }
                 }}
               >
+                {/* 2026-08-05: 上传按钮 (icon 模式) — 卡片右上角小图标 */}
+                {it.tmdbId && it.tmdbType && (
+                  <UploadButton
+                    tmdbId={it.tmdbId}
+                    tmdbType={it.tmdbType}
+                    tmdbTitle={it.title || '未知资源'}
+                    posterPath={(it as any).posterPath}
+                    releaseDate={it.releaseDate}
+                    mode="icon"
+                  />
+                )}
                 {/* 海报 */}
                 <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-1.5 ring-1 ring-white/5 group-hover/card:ring-violet-400/40 transition">
                   <img

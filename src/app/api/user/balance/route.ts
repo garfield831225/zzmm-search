@@ -36,12 +36,15 @@ export async function GET(req: NextRequest) {
 
   // 2026-08-01: 改回 neon() SDK + fetchOptions no-store (stats/dashboard 路由已验证 work)
   //   SQL 里加 ::text 强转, 避免 Neon serverless 返 raw Date 在 JSON 序列化时丢 tz
+  // 2026-08-05: 加 points 字段 (积分独立系统, 跟流明分开, memory #19)
   const rows = await sql`
     SELECT u.id, u.username, u.user_group,
            u.expire_at::text as expire_at,
-           COALESCE(l.balance, 0)::int as lumen_balance
+           COALESCE(l.balance, 0)::int as lumen_balance,
+           COALESCE(p.points, 0)::int as points
     FROM xx_users u
     LEFT JOIN xx_user_lumen l ON l.user_id = u.id
+    LEFT JOIN xx_user_points p ON p.user_id = u.id
     WHERE u.id = ${auth.userId} LIMIT 1
   ` as any[];
   if (!rows[0]) return NextResponse.json({ error: '用户不存在' }, { status: 404 });
@@ -59,5 +62,6 @@ export async function GET(req: NextRequest) {
     expire_at: expIso,
     vip_active: vipActive,
     lumen_balance: u.lumen_balance || 0,
+    points: u.points || 0,
   });
 }

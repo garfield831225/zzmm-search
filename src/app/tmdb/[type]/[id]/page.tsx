@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, Star, Copy, ExternalLink, Calendar, Globe, Film, Tv, Users, Lock, Play } from 'lucide-react';
 import { SOURCE_DICT, getSourceInfo } from '@/lib/sources';
+import UploadButton from '@/components/UploadButton';
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p';
 
@@ -186,6 +187,17 @@ export default function TmdbDetailPage() {
               <p className="text-gray-500 text-sm italic">暂无简介</p>
             )}
           </div>
+        </div>
+
+        {/* 2026-08-05: 上传按钮 (button 模式) — 详情页通用上传入口 */}
+        <div className="mb-6">
+          <UploadButton
+            tmdbId={tmdbId}
+            tmdbType={type as 'movie' | 'tv'}
+            tmdbTitle={title}
+            posterPath={credits?.poster_path ? (credits.poster_path.startsWith('http') ? credits.poster_path : `https://image.zzmm-search.uk/t/p/w500${credits.poster_path}`) : null}
+            mode="button"
+          />
         </div>
 
         {/* 演员表 */}

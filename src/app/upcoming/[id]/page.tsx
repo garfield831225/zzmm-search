@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, useParams, usePathname } from 'next/navigation';
+import { Copy, ExternalLink } from 'lucide-react';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 
@@ -73,6 +74,7 @@ export default function UpcomingDetailPage() {
   const [uploadNote, setUploadNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -334,7 +336,9 @@ export default function UpcomingDetailPage() {
             <div className="text-center text-white/30 py-6 text-xs bg-white/5 rounded-lg">还没资源, 上面传一个</div>
           ) : (
             <div className="space-y-2">
-              {approved.map(a => (
+              {approved.map(a => {
+                const copyText = a.linkCode ? `${a.link}\n提取码: ${a.linkCode}` : a.link;
+                return (
                 <div key={a.resourceId} className="bg-white/5 rounded px-3 py-2 flex items-center gap-3">
                   {a.source && (
                     <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-300 rounded text-xs flex-shrink-0">{a.source}</span>
@@ -343,9 +347,32 @@ export default function UpcomingDetailPage() {
                     <div className="text-sm truncate" title={a.name}>{a.name}</div>
                     <div className="text-[10px] text-white/40 font-mono truncate">{a.link}</div>
                   </div>
-                  <span className="text-[10px] text-white/40 flex-shrink-0">{a.category}</span>
+                  <span className="text-[10px] text-white/40 flex-shrink-0 hidden sm:inline">{a.category}</span>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(copyText);
+                        setCopiedId(a.resourceId);
+                        setTimeout(() => setCopiedId(null), 2000);
+                      } catch {}
+                    }}
+                    className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-xs flex items-center gap-1 flex-shrink-0"
+                    title="复制链接+提取码"
+                  >
+                    <Copy size={11} />
+                    {copiedId === a.resourceId ? '已复制' : '复制'}
+                  </button>
+                  <a
+                    href={a.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-1 bg-cyan-600 hover:bg-cyan-500 rounded text-xs flex items-center gap-1 flex-shrink-0"
+                  >
+                    <ExternalLink size={11} /> 打开
+                  </a>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
