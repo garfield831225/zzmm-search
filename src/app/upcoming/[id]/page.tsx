@@ -129,20 +129,23 @@ export default function UpcomingDetailPage() {
     setSubmitting(true);
     setSubmitMsg(null);
     try {
+      // 2026-08-05: size 入库前 .toFixed(2) 保留两位小数
+      const sizeNormalized = uploadSize ? parseFloat(uploadSize).toFixed(2) : '';
       const r = await fetch(`/api/upcoming/${id}/upload`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN()}` },
         body: JSON.stringify({
           type: uploadType,
           links: validLinks,
-          size: uploadSize || null,
-          size_unit: uploadSize ? uploadUnit : null,
+          size: sizeNormalized || null,
+          size_unit: sizeNormalized ? uploadUnit : null,
           note: uploadNote || null,
         }),
       });
       const d = await r.json();
       if (!r.ok) {
         setSubmitMsg('❌ ' + (d.error || `HTTP ${r.status}`));
+        setSubmitting(false);  // 2026-08-05: 失败立即解除 disabled, 之前 finally 之前 return 卡住
         return;
       }
       setSubmitMsg('✅ ' + d.message);
@@ -261,14 +264,14 @@ export default function UpcomingDetailPage() {
               {/* 大小 */}
               <div className="grid grid-cols-3 gap-2">
                 <div className="col-span-2">
-                  <label className="text-xs text-white/60">大小 (可选)</label>
+                  <label className="text-xs text-white/60">大小 (可选, 保留 2 位小数)</label>
                   <input
                     type="number"
-                    step="0.1"
+                    step="0.01"
                     min="0"
                     value={uploadSize}
                     onChange={e => setUploadSize(e.target.value)}
-                    placeholder="例: 4.5"
+                    placeholder="例: 4.50"
                     className="w-full mt-1 px-3 py-2 bg-black/40 border border-white/10 rounded text-sm"
                   />
                 </div>
@@ -363,7 +366,7 @@ export default function UpcomingDetailPage() {
                     <div className="flex items-center gap-2 mb-1">
                       <span className="px-2 py-0.5 bg-amber-500/30 text-amber-300 rounded text-xs">{p.type}</span>
                       <span className="text-[10px] text-white/40">{p.links.length} 个链接</span>
-                      {p.size && <span className="text-[10px] text-white/40">{p.size} {p.sizeUnit}</span>}
+                      {p.size && <span className="text-[10px] text-white/40">{Number(p.size).toFixed(2)} {p.sizeUnit}</span>}
                     </div>
                     <div className="text-[10px] text-white/40 font-mono truncate">{p.links.join(' | ')}</div>
                     {p.note && <div className="text-[10px] text-white/50 mt-0.5">📝 {p.note}</div>}

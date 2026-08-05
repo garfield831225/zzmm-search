@@ -147,9 +147,11 @@ export async function POST(
       });
     } else {
       // 普通用户: 进 pending
+      // 2026-08-05 修: xx_pending_resources.tmdb_id 是 integer 不是 text
+      // 之前用 ::text cast 错方向 → 报 "column tmdb_id is of type integer but expression is of type text"
       const insertRows = await sql`
         INSERT INTO xx_pending_resources (user_id, tmdb_id, name, type, links, size, size_unit, note, status, submitted_at)
-        VALUES (${user.id}, ${tmdb.tmdb_id}::text, ${name}, ${type}, ${JSON.stringify(links)}::jsonb, ${size || null}, ${size_unit || 'GB'}, ${note || null}, 'pending', NOW())
+        VALUES (${user.id}, ${tmdb.tmdb_id}::int, ${name}, ${type}, ${JSON.stringify(links)}::jsonb, ${size || null}, ${size_unit || 'GB'}, ${note || null}, 'pending', NOW())
         RETURNING id
       `;
       const newId = insertRows[0].id;
