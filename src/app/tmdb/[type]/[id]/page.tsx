@@ -98,7 +98,10 @@ export default function TmdbDetailPage() {
   }
 
   // 1. 海报 + 标题从 credits 取（无则 fallback）
-  const title = credits?.title || (resources?.by_source[0]?.items[0]?.name?.replace(/\s*\(\d{4}\)\s*/g, '').slice(0, 30)) || '未知资源';
+  // 2026-08-05: 链式 optional chaining 必加每一段 ?. — resources=null 时 by_source[0] 抛 TypeError
+  const title = credits?.title
+    || resources?.by_source?.[0]?.items?.[0]?.name?.replace(/\s*\(\d{4}\)\s*/g, '').slice(0, 30)
+    || '未知资源';
   const poster = credits?.genres ? null : null; // poster 从另一个 API 拿 (因为 credits 不返 poster_path 全 URL)
   // poster_path 是 /xxx.jpg，需要拼 base url
   const backdrop = credits?.backdrop_path;

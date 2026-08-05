@@ -62,8 +62,14 @@ export async function POST(
   try {
     const sql = neon(process.env.DATABASE_URL || '', { fetchOptions: { cache: 'no-store' } });
 
-    // 1) 读 pending record
-    const pendingRows = await sql`SELECT id, user_id, tmdb_id, name, type, links, status FROM xx_pending_resources WHERE id = ${pendingId}::int`;
+    // 1) 读 pending record + JOIN xx_upcoming 拿 tmdb_type ('tv'|'movie') — user_upload 缺这字段会 0 命中
+    const pendingRows = await sql`
+      SELECT p.id, p.user_id, p.tmdb_id, p.name, p.type, p.links, p.size, p.size_unit, p.status,
+             u.tmdb_type
+      FROM xx_pending_resources p
+      LEFT JOIN xx_upcoming u ON u.tmdb_id = p.tmdb_id
+      WHERE p.id = ${pendingId}::int
+    `;
     if (pendingRows.length === 0) {
       return NextResponse.json({ error: '找不到该 pending 资源' }, { status: 404 });
     }
@@ -81,12 +87,26 @@ export async function POST(
     const source = detectSource(firstLink);
     const { category, accessLevel } = typeToCategory(p.type);
     const points = pointsForType(p.type);
+    // 2026-08-05: 补齐 4 个字段 — 不然 /api/tmdb-resources 查不到这条 (type=NULL) 或 basic 看不到 (access_tier='free')
+    const tmdbType = (p as any).tmdb_type || 'movie';  // fallback 'movie' 防 pending 没匹配 upcoming
+    const sizeText = p.size != null ? `${p.size} ${p.size_unit || 'GB'}` : null;
 
     // 2) INSERT xx_resources (1 条对应 1 个 link, 多个 link 用同 name 多次插, 这里先取 links[0])
     // 简化: 只插第 1 条 link (后续可扩展为 1 对 N, 用 xx_resource_links)
+    // 必传字段: type(从 xx_upcoming JOIN 拿), access_tier='document'(basic 可看), lumen_cost=0(免费), size(拼单位)
     const insertRes = await sql`
-      INSERT INTO xx_resources (name, link, link_code, source, category, access_level, status, import_channel, tmdb_id, created_at, updated_at)
-      VALUES (${p.name}, ${firstLink}, '', ${source}, ${category}, ${accessLevel}, 'active', 'user_upload', ${p.tmdb_id}::text, NOW(), NOW())
+      INSERT INTO xx_resources (
+        name, link, link_code, source, category, access_level,
+        status, import_channel, tmdb_id,
+        type, access_tier, lumen_cost, size,
+        created_at, updated_at
+      )
+      VALUES (
+        ${p.name}, ${firstLink}, '', ${source}, ${category}, ${accessLevel},
+        'active', 'user_upload', ${String(p.tmdb_id)},
+        ${tmdbType}, 'document', 0, ${sizeText},
+        NOW(), NOW()
+      )
       RETURNING id
     `;
     const newResourceId = insertRes[0].id;

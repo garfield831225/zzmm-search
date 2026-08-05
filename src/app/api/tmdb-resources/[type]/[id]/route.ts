@@ -34,11 +34,12 @@ export async function GET(req: Request, { params }: { params: { type: string; id
     let rows: any[];
 
     // 固定 4 分支按 user_group 过滤 (不能用 sql.unsafe)
+    // 2026-08-05: 移除 region 字段 (xx_resources 表不存在, 之前漏修导致 500)
     if (group === 'admin') {
       rows = await sql`
         SELECT id, name, link, link_code, source, size, lumen_cost,
                access_tier, access_level, import_channel, doc_sheet,
-               sub_type, region, status, created_at, updated_at
+               sub_type, status, created_at, updated_at
         FROM xx_resources
         WHERE tmdb_id = ${tmdbId} AND type = ${type} AND status = 'active'
         ORDER BY source, created_at DESC
@@ -47,7 +48,7 @@ export async function GET(req: Request, { params }: { params: { type: string; id
       rows = await sql`
         SELECT id, name, link, link_code, source, size, lumen_cost,
                access_tier, access_level, import_channel, doc_sheet,
-               sub_type, region, status, created_at, updated_at
+               sub_type, status, created_at, updated_at
         FROM xx_resources
         WHERE tmdb_id = ${tmdbId} AND type = ${type} AND status = 'active'
           AND access_tier IN ('document', 'vip')
@@ -57,7 +58,7 @@ export async function GET(req: Request, { params }: { params: { type: string; id
       rows = await sql`
         SELECT id, name, link, link_code, source, size, lumen_cost,
                access_tier, access_level, import_channel, doc_sheet,
-               sub_type, region, status, created_at, updated_at
+               sub_type, status, created_at, updated_at
         FROM xx_resources
         WHERE tmdb_id = ${tmdbId} AND type = ${type} AND status = 'active'
           AND access_tier = 'document'
@@ -68,7 +69,7 @@ export async function GET(req: Request, { params }: { params: { type: string; id
       rows = await sql`
         SELECT id, name, link, link_code, source, size, lumen_cost,
                access_tier, access_level, import_channel, doc_sheet,
-               sub_type, region, status, created_at, updated_at
+               sub_type, status, created_at, updated_at
         FROM xx_resources
         WHERE tmdb_id = ${tmdbId} AND type = ${type} AND status = 'active'
           AND access_tier = 'document'

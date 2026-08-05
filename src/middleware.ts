@@ -159,6 +159,9 @@ const PUBLIC_PATHS = [
   '/api/upcoming',
   // /api/resources/unlock 资源解锁 (后端 Bearer 鉴权, 双模式) - 用 startsWith 通配
   // /api/resources/[id]/unlock-status 动态路由也走 unlock 路径检查
+  // 2026-08-05: /api/tmdb-resources + /api/tmdb-credits 详情页用, 路由内 getUserGroup 走 cookie 鉴权, 无 token 返 'user' 公开浏览
+  '/api/tmdb-resources',
+  '/api/tmdb-credits',
 ];
 
 export async function middleware(request: NextRequest) {
