@@ -48,6 +48,7 @@ const PUBLIC_PATHS = [
   '/api/admin/add-sub-type',
   '/api/admin/reset-yuancategory',
   '/api/tmdb-films',
+  '/api/tmdb/videos',  // 2026-08-06 P11: TrailerRow 首页公开浏览, 路由内不查 user
   '/tmdb-films',
   '/vip-videos',
   '/api/vip-videos',
