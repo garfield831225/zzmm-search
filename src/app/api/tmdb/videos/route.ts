@@ -95,8 +95,9 @@ export async function GET(req: NextRequest) {
     // 1) 拿 trending/now_playing 列表 (混合 movie + tv)
     const listPromises: Promise<{ type: 'movie' | 'tv'; data: any }>[] = [];
     if (tab === 'now_playing') {
+      // 2026-08-06: region=CN 在 NAS IP 上返 0 条, 改 US (全球上映电影更多)
       listPromises.push(
-        tmdbGet('/movie/now_playing', apiKey, { language: lang, page: '1', region: 'CN' })
+        tmdbGet('/movie/now_playing', apiKey, { language: lang, page: '1', region: 'US' })
           .then((data: any) => ({ type: 'movie' as const, data })),
         tmdbGet('/tv/on_the_air', apiKey, { language: lang, page: '1' })
           .then((data: any) => ({ type: 'tv' as const, data })),
