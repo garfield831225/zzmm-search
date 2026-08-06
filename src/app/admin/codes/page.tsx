@@ -70,7 +70,8 @@ export default function CodesPage() {
   // 生成器
   const [genPlan, setGenPlan] = useState('vip_180d');
   const [genChannel, setGenChannel] = useState('xy');
-  const [genCount, setGenCount] = useState(10);
+  // 2026-08-06: 修 BUG — 改用 string state, 避免清空后第一次输入只拿到 1 位变 1
+  const [genCountStr, setGenCountStr] = useState('10');
   const [genBatch, setGenBatch] = useState('');
   const [genLumenAmount, setGenLumenAmount] = useState(50);  // 流明数量
   const [genResourceId, setGenResourceId] = useState<number | null>(null);  // 单资源 ID
@@ -79,6 +80,7 @@ export default function CodesPage() {
   const [resourceResults, setResourceResults] = useState<{ id: number; name: string; category: string }[]>([]);
   const [genResult, setGenResult] = useState<{ codes: string[]; plan: string; channel: string; batch_id: string; price: number; lumen_amount?: number } | null>(null);
   const [toast, setToast] = useState('');
+  const genCount = parseInt(genCountStr, 10) || 1;
 
   // token 鉴权
   useEffect(() => {
@@ -93,20 +95,28 @@ export default function CodesPage() {
     if (!token) return;
     setLoading(true);
     try {
-      const params = new URLSearchParams({ pageSize: '200' });
+      // 2026-08-06: 修 BUG — 之前传 pageSize 但后端看 limit, 默认 100 截断
+      // 加 plan 过滤 (前端传 plan_id), 用 limit=2000 看全量 (用户能看到所有码)
+      // 改: sent 也走后端 filter (后端已支持)
+      // 改: fCodeType = 'vip_30d' 之类会当 plan_id 过滤, 其他当 code_type
+      const params = new URLSearchParams({ limit: '2000' });
       if (fChannel) params.set('channel', fChannel);
-      if (fCodeType) params.set('code_type', fCodeType);
-      if (fStatus) params.set('status', fStatus);
       if (fBatch) params.set('batch_id', fBatch);
+      if (fStatus) params.set('status', fStatus);
+      if (fSent) params.set('sent', fSent);
+      // fCodeType 区分: vip_30d/180d/365d/forever/trial 走 plan_id, 其他 (vip/lumen/unlock) 走 code_type
+      const planMap: Record<string, string> = {
+        vip_trial: 'VIP-TRIAL-1D', vip_30d: 'VIP-30D', vip_180d: 'VIP-180D', vip_365d: 'VIP-365D', vip_forever: 'VIP-FOREVER',
+      };
+      if (fCodeType) {
+        if (planMap[fCodeType]) params.set('plan_id', planMap[fCodeType]);
+        else params.set('code_type', fCodeType);
+      }
       const r = await fetch('/api/admin/codes?' + params, { credentials: 'include', headers: {  Authorization: 'Bearer ' + token  } });
       let d = await r.json();
       if (d.error) showToast('❌ ' + d.error);
       else {
-        let items = d.items || [];
-        // sent 过滤 (前端, 因为后端没加)
-        if (fSent === 'sent') items = items.filter((c: Code) => c.sent_to_customer);
-        else if (fSent === 'unsent') items = items.filter((c: Code) => !c.sent_to_customer);
-        setCodes(items);
+        setCodes(d.items || []);
         setBatchStats(d.batch_stats || []);
       }
     } catch (e: any) { showToast('❌ ' + e.message); }
@@ -269,7 +279,13 @@ export default function CodesPage() {
               >
                 <div className="text-2xl mb-1">{t.emoji}</div>
                 <div className="font-semibold text-sm">{t.plan.startsWith('vip') ? `VIP ${t.label}` : t.label}</div>
-                <div className="text-xs text-white/60 mt-1">{t.price > 0 ? `¥${t.price}` : (t.plan === 'lumen' ? '流明数自定义' : '单资源指定')}</div>
+                <div className="text-xs text-white/60 mt-1">
+                  {t.price > 0 ? `¥${t.price}` :
+                   t.plan === 'vip_trial' ? '1 天 VIP 权益试用' :
+                   t.plan === 'vip_forever' ? '永久 VIP' :
+                   t.plan === 'lumen' ? '流明数自定义' :
+                   t.plan === 'unlock' ? '单资源指定' : ''}
+                </div>
               </button>
             ))}
           </div>
@@ -334,8 +350,9 @@ export default function CodesPage() {
               <label className="block text-xs text-white/60 mb-1.5">数量</label>
               <input
                 type="number" min={1} max={200}
-                value={genCount}
-                onChange={e => setGenCount(parseInt(e.target.value) || 1)}
+                value={genCountStr}
+                onChange={e => setGenCountStr(e.target.value.replace(/[^\d]/g, '').slice(0, 3))}
+                onBlur={e => { if (!e.target.value || parseInt(e.target.value, 10) < 1) setGenCountStr('1'); }}
                 className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500/50"
               />
             </div>
@@ -537,6 +554,11 @@ export default function CodesPage() {
             <select value={fCodeType} onChange={e => setFCodeType(e.target.value)} className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm">
               <option value="">全部类型</option>
               <option value="vip">🎫 VIP 会员</option>
+              <option value="vip_trial">⏰ VIP 试用 1 天</option>
+              <option value="vip_30d">🎫 VIP 30 天</option>
+              <option value="vip_180d">🎟️ VIP 半年</option>
+              <option value="vip_365d">🎁 VIP 年卡</option>
+              <option value="vip_forever">👑 VIP 永久</option>
               <option value="unlock">🔓 单资源</option>
               <option value="lumen">💎 流明</option>
             </select>

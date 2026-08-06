@@ -186,16 +186,54 @@ export async function GET(req: NextRequest) {
     }
 
     // 普通列表
-    const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100', 10)));
+    // 2026-08-06: 修 BUG — limit cap 500 → 2000 (用户要看到所有码)
+    // 加 6 个过滤参数: code_type / plan_id / channel / status / batch_id / sent
+    // neon sql 模板拼接 (用子模板条件)
+    const limit = Math.min(2000, Math.max(1, parseInt(searchParams.get('limit') || '2000', 10)));
+    const codeType = searchParams.get('code_type') || '';
+    const planId = searchParams.get('plan_id') || '';
+    const channel = searchParams.get('channel') || '';
+    const status = searchParams.get('status') || '';
+    const batchId = searchParams.get('batch_id') || '';
+    const sent = searchParams.get('sent') || '';
+    // 用子模板条件拼接 (neon serverless v3 标准方式)
     const rows: any = await sql`
-      SELECT id, code, code_type, plan_id, duration, channel, sent_note, created_at, used_at, used_by, expires_at, is_used
-      FROM xx_activation_codes ORDER BY id DESC LIMIT ${limit}
+      SELECT id, code, code_type, plan_id, duration, channel, sent_to_customer, sent_at, sent_note, batch_id, target_resource_id, lumen_amount, user_group, price_at_issue, created_at, used_at, used_by, expires_at, is_used
+      FROM xx_activation_codes
+      WHERE 1=1
+        ${codeType ? sql`AND code_type = ${codeType}` : sql``}
+        ${planId ? sql`AND plan_id = ${planId}` : sql``}
+        ${channel ? sql`AND channel = ${channel}` : sql``}
+        ${batchId ? sql`AND batch_id = ${batchId}` : sql``}
+        ${status === 'used' ? sql`AND is_used = true` : sql``}
+        ${status === 'unused' ? sql`AND is_used = false` : sql``}
+        ${sent === 'sent' ? sql`AND sent_to_customer = true` : sql``}
+        ${sent === 'unsent' ? sql`AND sent_to_customer = false` : sql``}
+      ORDER BY id DESC LIMIT ${limit}
     `;
+    // 2026-08-06: 批次统计 (按 batch_id+plan_id+code_type+channel 分组, 返 total/used)
+    const batchStats: any = await sql`
+      SELECT channel, batch_id, plan_id, code_type, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE is_used = true)::int AS used
+      FROM xx_activation_codes
+      WHERE 1=1
+        ${codeType ? sql`AND code_type = ${codeType}` : sql``}
+        ${planId ? sql`AND plan_id = ${planId}` : sql``}
+        ${channel ? sql`AND channel = ${channel}` : sql``}
+        ${batchId ? sql`AND batch_id = ${batchId}` : sql``}
+        ${status === 'used' ? sql`AND is_used = true` : sql``}
+        ${status === 'unused' ? sql`AND is_used = false` : sql``}
+        ${sent === 'sent' ? sql`AND sent_to_customer = true` : sql``}
+        ${sent === 'unsent' ? sql`AND sent_to_customer = false` : sql``}
+      GROUP BY channel, batch_id, plan_id, code_type
+      ORDER BY MIN(id) DESC
+    `;
+    // 总数统计 (不受过滤影响, 让用户看到全局)
     const total = await sql`SELECT COUNT(*)::int AS c FROM xx_activation_codes`;
     const used = await sql`SELECT COUNT(*)::int AS c FROM xx_activation_codes WHERE is_used = true`;
     const expired = await sql`SELECT COUNT(*)::int AS c FROM xx_activation_codes WHERE is_used = false AND expires_at IS NOT NULL AND expires_at < NOW()`;
     return NextResponse.json({
       items: rows,
+      batch_stats: batchStats,
       stats: { total: total[0].c, used: used[0].c, unused: total[0].c - used[0].c, expired: expired[0].c },
     });
   } catch (e: any) {
@@ -284,9 +322,24 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: true, updated: r.length || 1, expires_at: newExpiresAt });
     }
 
+    // 标记已发 / 取消已发 (批量 ids 数组 + sent_to_customer 布尔)
+    // 2026-08-06: 修 BUG — 之前 PATCH 只处理单 id is_used, 没处理 ids + sent_to_customer
+    if (Array.isArray(body.ids) && body.ids.length > 0 && typeof body.sent_to_customer === 'boolean') {
+      const ids = body.ids.map((x: any) => parseInt(String(x), 10)).filter((n: number) => n > 0);
+      if (ids.length === 0) return NextResponse.json({ error: 'ids 数组为空' }, { status: 400 });
+      const sent = body.sent_to_customer === true;
+      if (sent) {
+        const r = await sql`UPDATE xx_activation_codes SET sent_to_customer = true, sent_at = NOW(), sent_note = ${body.sent_note || null} WHERE id = ANY(${ids}::int[])`;
+        return NextResponse.json({ success: true, updated: r.length, sent_to_customer: true });
+      } else {
+        const r = await sql`UPDATE xx_activation_codes SET sent_to_customer = false, sent_at = NULL, sent_note = NULL WHERE id = ANY(${ids}::int[])`;
+        return NextResponse.json({ success: true, updated: r.length, sent_to_customer: false });
+      }
+    }
+
     // 标记已用 / 取消已用
     const id = parseInt(String(body.id || 0), 10);
-    if (!id) return NextResponse.json({ error: '需要 id' }, { status: 400 });
+    if (!id) return NextResponse.json({ error: '需要 id 或 ids' }, { status: 400 });
     const isUsed = body.is_used === true;
 
     if (isUsed) {
