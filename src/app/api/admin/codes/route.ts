@@ -1,7 +1,8 @@
 // 2026-07-20: 改用共享 authAdmin (双轨鉴权 Bearer + cookie), 修激活码卡打不开的 bug
 // 2026-07-21: 修 duration NOT NULL 500 错 + 加导出/删除/延期 (跟 invites 同步)
+// 2026-08-06: 加 6 个过滤参数, 用 Pool 模式支持动态 SQL (neon() 函数不支持 sql.unsafe / sql.join)
 import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
+import { neon, Pool } from '@neondatabase/serverless';
 import { authAdmin } from '@/lib/admin-auth';
 
 export const dynamic = 'force-dynamic';
@@ -188,7 +189,8 @@ export async function GET(req: NextRequest) {
     // 普通列表
     // 2026-08-06: 修 BUG — limit cap 500 → 2000 (用户要看到所有码)
     // 加 6 个过滤参数: code_type / plan_id / channel / status / batch_id / sent
-    // neon sql 模板拼接 (用子模板条件)
+    // 用 Pool 模式支持动态 SQL (neon() 函数没有 sql.unsafe / sql.join)
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
     const limit = Math.min(2000, Math.max(1, parseInt(searchParams.get('limit') || '2000', 10)));
     const codeType = searchParams.get('code_type') || '';
     const planId = searchParams.get('plan_id') || '';
@@ -196,37 +198,37 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get('status') || '';
     const batchId = searchParams.get('batch_id') || '';
     const sent = searchParams.get('sent') || '';
-    // 用子模板条件拼接 (neon serverless v3 标准方式)
-    const rows: any = await sql`
-      SELECT id, code, code_type, plan_id, duration, channel, sent_to_customer, sent_at, sent_note, batch_id, target_resource_id, lumen_amount, user_group, price_at_issue, created_at, used_at, used_by, expires_at, is_used
-      FROM xx_activation_codes
-      WHERE 1=1
-        ${codeType ? sql`AND code_type = ${codeType}` : sql``}
-        ${planId ? sql`AND plan_id = ${planId}` : sql``}
-        ${channel ? sql`AND channel = ${channel}` : sql``}
-        ${batchId ? sql`AND batch_id = ${batchId}` : sql``}
-        ${status === 'used' ? sql`AND is_used = true` : sql``}
-        ${status === 'unused' ? sql`AND is_used = false` : sql``}
-        ${sent === 'sent' ? sql`AND sent_to_customer = true` : sql``}
-        ${sent === 'unsent' ? sql`AND sent_to_customer = false` : sql``}
-      ORDER BY id DESC LIMIT ${limit}
-    `;
-    // 2026-08-06: 批次统计 (按 batch_id+plan_id+code_type+channel 分组, 返 total/used)
-    const batchStats: any = await sql`
-      SELECT channel, batch_id, plan_id, code_type, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE is_used = true)::int AS used
-      FROM xx_activation_codes
-      WHERE 1=1
-        ${codeType ? sql`AND code_type = ${codeType}` : sql``}
-        ${planId ? sql`AND plan_id = ${planId}` : sql``}
-        ${channel ? sql`AND channel = ${channel}` : sql``}
-        ${batchId ? sql`AND batch_id = ${batchId}` : sql``}
-        ${status === 'used' ? sql`AND is_used = true` : sql``}
-        ${status === 'unused' ? sql`AND is_used = false` : sql``}
-        ${sent === 'sent' ? sql`AND sent_to_customer = true` : sql``}
-        ${sent === 'unsent' ? sql`AND sent_to_customer = false` : sql``}
-      GROUP BY channel, batch_id, plan_id, code_type
-      ORDER BY MIN(id) DESC
-    `;
+    // 动态拼 WHERE
+    const conds: string[] = ['1=1'];
+    const args: any[] = [];
+    if (codeType) { args.push(codeType); conds.push(`code_type = $${args.length}`); }
+    if (planId) { args.push(planId); conds.push(`plan_id = $${args.length}`); }
+    if (channel) { args.push(channel); conds.push(`channel = $${args.length}`); }
+    if (batchId) { args.push(batchId); conds.push(`batch_id = $${args.length}`); }
+    if (status === 'used') conds.push(`is_used = true`);
+    else if (status === 'unused') conds.push(`is_used = false`);
+    if (sent === 'sent') conds.push(`sent_to_customer = true`);
+    else if (sent === 'unsent') conds.push(`sent_to_customer = false`);
+    args.push(limit);
+    const limitPlaceholder = `$${args.length}`;
+    const whereSql = conds.join(' AND ');
+    const rowsRes = await pool.query(
+      `SELECT id, code, code_type, plan_id, duration, channel, sent_to_customer, sent_at, sent_note, batch_id, target_resource_id, lumen_amount, user_group, price_at_issue, created_at, used_at, used_by, expires_at, is_used
+       FROM xx_activation_codes
+       WHERE ${whereSql}
+       ORDER BY id DESC LIMIT ${limitPlaceholder}`,
+      args
+    );
+    const batchStatsRes = await pool.query(
+      `SELECT channel, batch_id, plan_id, code_type, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE is_used = true)::int AS used
+       FROM xx_activation_codes
+       WHERE ${whereSql}
+       GROUP BY channel, batch_id, plan_id, code_type
+       ORDER BY MIN(id) DESC`,
+      args.slice(0, args.length - 1)  // 不带 limit
+    );
+    const rows = rowsRes.rows;
+    const batchStats = batchStatsRes.rows;
     // 总数统计 (不受过滤影响, 让用户看到全局)
     const total = await sql`SELECT COUNT(*)::int AS c FROM xx_activation_codes`;
     const used = await sql`SELECT COUNT(*)::int AS c FROM xx_activation_codes WHERE is_used = true`;
