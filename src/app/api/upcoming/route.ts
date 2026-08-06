@@ -35,6 +35,9 @@ export async function GET(req: NextRequest) {
     const isAll = type === 'all';
 
     // LEFT JOIN xx_resources 看匹配
+    // 2026-08-06: 加 r.type=u.tmdb_type 匹配 (兼容 type 准确的新数据)
+    // + r.category 白名单兜底 (兼容 type=NULL 的老数据)
+    // 修 BUG: 记忆管理局 (id=1039882) type=tv 但 category 误填'电影', 原 SQL 不匹配
     const rows = await sql`
       SELECT
         u.id,
@@ -56,7 +59,10 @@ export async function GET(req: NextRequest) {
       LEFT JOIN xx_resources r
         ON r.tmdb_id = u.tmdb_id::text
         AND r.status = 'active'
-        AND (u.tmdb_type = 'movie' AND r.category IN ('电影','原盘','REMUX','系列电影') OR u.tmdb_type = 'tv' AND r.category IN ('剧集','动漫','综艺','纪录片'))
+        AND (
+          (u.tmdb_type = 'movie' AND (r.type = 'movie' OR r.category IN ('电影','原盘','REMUX','系列电影')))
+          OR (u.tmdb_type = 'tv' AND (r.type = 'tv' OR r.category IN ('剧集','动漫','综艺','纪录片')))
+        )
       WHERE u.status = 'active'
         AND (${isAll} OR u.tmdb_type = ${type})
       ORDER BY u.release_date DESC, u.vote_average DESC NULLS LAST
