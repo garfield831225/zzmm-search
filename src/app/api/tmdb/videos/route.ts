@@ -13,7 +13,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMG = 'https://image.zzmm-search.uk/t/p';  // 2026-08-05 step 2: CF Worker 反代 (image.zzmm-search.uk)
@@ -44,11 +44,26 @@ async function tmdbGet(path: string, apiKey: string, params: Record<string, stri
   const url = new URL(`${TMDB_BASE}${path}`);
   url.searchParams.set('api_key', apiKey);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const r = await fetch(url.toString(), { cache: 'no-store' });
-  if (!r.ok) {
-    throw new Error(`TMDB ${path} ${r.status}: ${await r.text().catch(() => '')}`);
+  const urlStr = url.toString();
+  // 2026-08-06: 加 8s timeout + retry 2 次 (NAS IP 偶尔被 TMDB 限流 130s 超时)
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      const r = await fetch(urlStr, { cache: 'no-store', signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!r.ok) {
+        if (attempt === 2) throw new Error(`TMDB ${path} ${r.status}: ${await r.text().catch(() => '')}`);
+        await new Promise(r => setTimeout(r, 500));
+        continue;
+      }
+      return r.json();
+    } catch (e: any) {
+      if (attempt === 2) throw e;
+      await new Promise(r => setTimeout(r, 500));
+    }
   }
-  return r.json();
+  throw new Error('unreachable');
 }
 
 // 从一部 movie/tv 拿第一个 YouTube trailer/teaser

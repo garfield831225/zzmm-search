@@ -2,9 +2,10 @@
 //   - GET  /api/requests  列表 (open / claimed by me / fulfilled by me)
 //   - POST /api/requests  创建求片 (扣 lumen, status=open)
 //   - DELETE /api/requests/[id]  取消我的求片 (status=cancelled, 退 lumen)
+// 2026-08-06: GET 改用 Pool 模式 (neon() 子模板拼接 WHERE 被当 boolean column)
 
 import { NextRequest, NextResponse } from 'next/server';
-import { neon, neonConfig } from '@neondatabase/serverless';
+import { neon, neonConfig, Pool } from '@neondatabase/serverless';
 import { jwtVerify } from 'jose';
 
 neonConfig.fetchConnectionCache = false;
@@ -40,34 +41,41 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const sql = neon(process.env.DATABASE_URL || '', { fetchOptions: { cache: 'no-store' } });
+    // 2026-08-06: 改用 Pool.query(text, args) 拼动态 WHERE (neon() 子模板当 boolean column)
+    const pool = new Pool({ connectionString: process.env.DATABASE_URL });
     const sp = request.nextUrl.searchParams;
     const status = sp.get('status') || 'all'; // 'open' | 'mine' | 'all'
     const page = parseInt(sp.get('page') || '1');
     const pageSize = Math.min(parseInt(sp.get('pageSize') || '30'), 100);
 
-    let whereClause;
+    const conds: string[] = ['1=1'];
+    const args: any[] = [];
     if (status === 'open') {
-      whereClause = sql`status = 'open'`;
+      conds.push(`status = 'open'`);
     } else if (status === 'mine') {
-      whereClause = sql`user_id = ${user.id}`;
-    } else {
-      whereClause = sql`1=1`;
+      args.push(user.id);
+      conds.push(`user_id = $${args.length}`);
     }
+    const whereSql = conds.join(' AND ');
+    args.push(pageSize);
+    const limitPos = `$${args.length}`;
+    args.push((page - 1) * pageSize);
+    const offsetPos = `$${args.length}`;
 
-    const rows = await sql`
-      SELECT r.id, r.user_id, r.tmdb_id, r.tmdb_type, r.title, r.reason, r.lumen_cost, r.status,
-             r.fulfilled_by, r.fulfilled_resource_id, r.created_at, r.fulfilled_at,
-             u.username as requester_username
-      FROM xx_requests r
-      LEFT JOIN xx_users u ON u.id = r.user_id
-      WHERE ${whereClause}
-      ORDER BY r.created_at DESC
-      LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
-    `;
-
-    const totalRow = await sql`SELECT count(*) as cnt FROM xx_requests r WHERE ${whereClause}`;
-    const total = parseInt(totalRow[0]?.cnt || '0');
+    const rowsRes = await pool.query(
+      `SELECT r.id, r.user_id, r.tmdb_id, r.tmdb_type, r.title, r.reason, r.lumen_cost, r.status,
+              r.fulfilled_by, r.fulfilled_resource_id, r.created_at, r.fulfilled_at,
+              u.username as requester_username
+       FROM xx_requests r
+       LEFT JOIN xx_users u ON u.id = r.user_id
+       WHERE ${whereSql}
+       ORDER BY r.created_at DESC
+       LIMIT ${limitPos} OFFSET ${offsetPos}`,
+      args
+    );
+    const rows = rowsRes.rows;
+    const totalRes = await pool.query(`SELECT count(*)::int as cnt FROM xx_requests r WHERE ${whereSql}`, args.slice(0, args.length - 2));
+    const total = totalRes.rows[0]?.cnt || 0;
 
     return NextResponse.json({
       total,
