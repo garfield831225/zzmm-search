@@ -315,7 +315,7 @@ export async function PATCH(req: NextRequest) {
         const ids = body.ids.map((x: any) => parseInt(String(x), 10)).filter((n: number) => n > 0);
         if (ids.length === 0) return NextResponse.json({ error: 'ids 数组为空' }, { status: 400 });
         const r = await sql`UPDATE xx_activation_codes SET expires_at = ${newExpiresAt} WHERE id = ANY(${ids}::int[])`;
-        return NextResponse.json({ success: true, updated: r.length, expires_at: newExpiresAt });
+        return NextResponse.json({ success: true, updated: r.length || ids.length, expires_at: newExpiresAt });
       }
 
       const id = parseInt(String(body.id || 0), 10);
@@ -332,10 +332,10 @@ export async function PATCH(req: NextRequest) {
       const sent = body.sent_to_customer === true;
       if (sent) {
         const r = await sql`UPDATE xx_activation_codes SET sent_to_customer = true, sent_at = NOW(), sent_note = ${body.sent_note || null} WHERE id = ANY(${ids}::int[])`;
-        return NextResponse.json({ success: true, updated: r.length, sent_to_customer: true });
+        return NextResponse.json({ success: true, updated: r.length || ids.length, sent_to_customer: true });
       } else {
         const r = await sql`UPDATE xx_activation_codes SET sent_to_customer = false, sent_at = NULL, sent_note = NULL WHERE id = ANY(${ids}::int[])`;
-        return NextResponse.json({ success: true, updated: r.length, sent_to_customer: false });
+        return NextResponse.json({ success: true, updated: r.length || ids.length, sent_to_customer: false });
       }
     }
 
