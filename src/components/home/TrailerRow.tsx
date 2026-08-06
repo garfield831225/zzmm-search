@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Play, X, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 
 interface Trailer {
   id: string;
@@ -43,6 +43,8 @@ export default function TrailerRow() {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(true);
+  // 2026-08-06: 手动重试计数器, 触发 ?fresh=1 跳过 server 10 分钟缓存
+  const [retryTick, setRetryTick] = useState(0);
 
   // 拉数据
   useEffect(() => {
@@ -50,7 +52,7 @@ export default function TrailerRow() {
     setLoading(true);
     setError(null);
     setItems([]);
-    fetch(`/api/tmdb/videos?tab=${tab}&lang=zh-CN&limit=12`, { cache: 'no-store' })
+    fetch(`/api/tmdb/videos?tab=${tab}&lang=zh-CN&limit=12&_t=${Date.now()}${retryTick > 0 ? '&fresh=1' : ''}`, { cache: 'no-store' })
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;
@@ -67,7 +69,7 @@ export default function TrailerRow() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [tab]);
+  }, [tab, retryTick]);
 
   // 滚动箭头状态
   useEffect(() => {
@@ -131,10 +133,16 @@ export default function TrailerRow() {
 
       {/* 视频横向滚动 */}
       {error ? (
-        <div className="px-4 py-3 rounded-xl border border-rose-500/20 bg-rose-500/[0.06] text-rose-200 text-sm">
-          预告片加载失败: {error}
+        <div className="flex flex-col gap-2 px-4 py-5 rounded-xl border border-rose-500/20 bg-rose-500/[0.06] text-rose-200 text-sm">
+          <div>预告片加载失败: {error}</div>
+          <button
+            onClick={() => setRetryTick(t => t + 1)}
+            className="self-start px-3 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-xs flex items-center gap-1"
+          >
+            <RefreshCw className="w-3 h-3" /> 重试
+          </button>
         </div>
-      ) : loading || items.length === 0 ? (
+      ) : loading ? (
         <div className="flex gap-3 overflow-hidden">
           {Array.from({ length: 5 }).map((_, i) => (
             <div
@@ -142,6 +150,16 @@ export default function TrailerRow() {
               className="flex-shrink-0 w-[260px] sm:w-[300px] aspect-video rounded-xl bg-white/[0.03] animate-pulse"
             />
           ))}
+        </div>
+      ) : items.length === 0 ? (
+        <div className="flex flex-col gap-2 px-4 py-6 rounded-xl border border-white/[0.06] bg-white/[0.02] text-white/50 text-sm">
+          <div>暂无 {tab === 'now_playing' ? '影院上映中' : '热门'} 预告片</div>
+          <button
+            onClick={() => setRetryTick(t => t + 1)}
+            className="self-start px-3 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-white/70 hover:text-white text-xs flex items-center gap-1"
+          >
+            <RefreshCw className="w-3 h-3" /> 重新加载 (跳过缓存)
+          </button>
         </div>
       ) : (
         <div className="relative group/sec">

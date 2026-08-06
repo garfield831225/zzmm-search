@@ -83,10 +83,11 @@ export async function GET(req: NextRequest) {
   const tab = sp.get('tab') || 'trending';  // trending | now_playing
   const lang = sp.get('lang') || 'zh-CN';
   const limit = Math.min(parseInt(sp.get('limit') || '12'), 20);
+  const fresh = sp.get('fresh') === '1';  // 2026-08-06: 跳过缓存, 强制重新拉 (用户切 tab 卡 0 条用)
 
   const cacheKey = `${tab}:${lang}:${limit}`;
   const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+  if (!fresh && cached && Date.now() - cached.at < CACHE_TTL_MS) {
     return NextResponse.json({ ok: true, tab, lang, cached: true, items: cached.data });
   }
 
