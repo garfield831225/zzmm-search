@@ -64,6 +64,11 @@ export default function CodesPage() {
   const [fStatus, setFStatus] = useState('');
   const [fBatch, setFBatch] = useState('');
   const [fSent, setFSent] = useState(''); // '' / 'sent' / 'unsent'
+  // 2026-08-08: 分页 (每页 100 条, 可翻页)
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(100);
+  const [filteredTotal, setFilteredTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [sentNote, setSentNote] = useState('');
 
@@ -99,7 +104,8 @@ export default function CodesPage() {
       // 加 plan 过滤 (前端传 plan_id), 用 limit=2000 看全量 (用户能看到所有码)
       // 改: sent 也走后端 filter (后端已支持)
       // 改: fCodeType = 'vip_30d' 之类会当 plan_id 过滤, 其他当 code_type
-      const params = new URLSearchParams({ limit: '2000' });
+      // 2026-08-08: 加 page/pageSize 分页 (每页 100, 用户可翻页)
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (fChannel) params.set('channel', fChannel);
       if (fBatch) params.set('batch_id', fBatch);
       if (fStatus) params.set('status', fStatus);
@@ -118,12 +124,16 @@ export default function CodesPage() {
       else {
         setCodes(d.items || []);
         setBatchStats(d.batch_stats || []);
+        setFilteredTotal(d.filtered_total || 0);
+        setTotalPages(d.total_pages || 1);
       }
     } catch (e: any) { showToast('❌ ' + e.message); }
     finally { setLoading(false); }
-  }, [token, fChannel, fCodeType, fStatus, fBatch, fSent]);
+  }, [token, fChannel, fCodeType, fStatus, fBatch, fSent, page, pageSize]);
 
   useEffect(() => { if (authed) fetchList(); }, [authed, fetchList]);
+  // 2026-08-08: 任意筛选条件变化都重置 page=1, 避免翻到没数据的页
+  useEffect(() => { setPage(1); }, [fChannel, fCodeType, fStatus, fBatch, fSent]);
 
   const handleGen = async () => {
     if (!token) { showToast('❌ 请先登录'); return; }
@@ -453,7 +463,7 @@ export default function CodesPage() {
         <div className="bg-[#12121a] rounded-2xl p-6 border border-white/5">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <h2 className="text-lg font-semibold flex items-center gap-2">
-              <Filter className="w-5 h-5 text-amber-400" /> 激活码明细（共 {codes.length} 条）
+              <Filter className="w-5 h-5 text-amber-400" /> 激活码明细（共 {filteredTotal} 条 · 第 {page}/{totalPages} 页）
             </h2>
             <div className="flex items-center gap-2 flex-wrap">
               {selectedIds.length > 0 && (
@@ -623,6 +633,63 @@ export default function CodesPage() {
               </tbody>
             </table>
           </div>
+
+          {/* 2026-08-08: 分页 UI (每页 pageSize=100, 总页 totalPages) */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4 flex-wrap gap-2">
+              <div className="text-sm text-white/40">
+                第 {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, filteredTotal)} 条 / 共 {filteredTotal} 条
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPage(1)}
+                  disabled={page === 1}
+                  className="px-3 py-1.5 bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg text-sm"
+                >
+                  ⏮ 首页
+                </button>
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="px-3 py-1.5 bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg text-sm"
+                >
+                  ← 上一页
+                </button>
+                <span className="px-3 py-1.5 bg-violet-500/20 border border-violet-500/30 rounded-lg text-sm text-violet-300 font-mono">
+                  {page} / {totalPages}
+                </span>
+                <button
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="px-3 py-1.5 bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg text-sm"
+                >
+                  下一页 →
+                </button>
+                <button
+                  onClick={() => setPage(totalPages)}
+                  disabled={page === totalPages}
+                  className="px-3 py-1.5 bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg text-sm"
+                >
+                  末页 ⏭
+                </button>
+                <div className="ml-2 flex items-center gap-1 text-xs text-white/40">
+                  跳到
+                  <input
+                    type="number"
+                    min={1}
+                    max={totalPages}
+                    value={page}
+                    onChange={e => {
+                      const n = parseInt(e.target.value, 10);
+                      if (n >= 1 && n <= totalPages) setPage(n);
+                    }}
+                    className="w-14 bg-white/5 border border-white/10 rounded px-2 py-1 text-center"
+                  />
+                  页
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

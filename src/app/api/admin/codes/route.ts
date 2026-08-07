@@ -46,8 +46,8 @@ export async function POST(req: NextRequest) {
   const targetResourceId = body.target_resource_id ? parseInt(String(body.target_resource_id), 10) : null;
 
   // 2026-07-28: 4 种 plan: vip_30d/180d/365d/forever (VIP) + lumen (流明) + unlock (单资源)
-  // 不同的 code_type 走不同的 INSERT
-  const sql = neon(process.env.DATABASE_URL || '');
+  // 2026-08-08: BATCH 50→5 + 串行 await (避免 Neon HTTP 限流, 100 条报错 "fetch failed")
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL || '' });
   try {
     const codes: string[] = [];
     // 流明码默认 1 年有效 (避免后台忘了清, 长期堆积)
@@ -59,19 +59,28 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: '流明数必须 1-1000000' }, { status: 400 });
       }
       for (let i = 0; i < count; i++) codes.push(genCodeFull(channel));
-      const BATCH = 50;
+      const BATCH = 5;
       let inserted = 0;
       for (let i = 0; i < codes.length; i += BATCH) {
         const slice = codes.slice(i, i + BATCH);
-        await Promise.all(slice.map(code =>
-          sql`INSERT INTO xx_activation_codes
-              (code, code_type, plan_id, duration, channel, sent_note, batch_id, created_by, expires_at, is_used, user_group, lumen_amount, price_at_issue)
-              VALUES (${code}, 'lumen', 'LUMEN-CODE', 0, ${channel}, ${note}, ${batchId}, ${auth.userId}, ${baseExpiresAt}, false, 'user', ${lumenAmount}, 0)`
-            .then(() => { inserted++; })
-            .catch((e: any) => {
-              if (!String(e.message).includes('duplicate key') && !String(e.message).includes('unique')) throw e;
-            })
-        ));
+        // 串行: 一次 1 个 INSERT, 单条 catch 不影响其他
+        for (const code of slice) {
+          try {
+            await pool.query(
+              `INSERT INTO xx_activation_codes
+               (code, code_type, plan_id, duration, channel, sent_note, batch_id, created_by, expires_at, is_used, user_group, lumen_amount, price_at_issue)
+               VALUES ($1, 'lumen', 'LUMEN-CODE', 0, $2, $3, $4, $5, $6, false, 'user', $7, 0)
+               ON CONFLICT (code) DO NOTHING`,
+              [code, channel, note, batchId, auth.userId, baseExpiresAt, lumenAmount]
+            );
+            inserted++;
+          } catch (e: any) {
+            // duplicate key 跳过 (ON CONFLICT 已经处理, 这里兜底)
+            if (!String(e.message).includes('duplicate') && !String(e.message).includes('unique')) {
+              console.error('[codes-gen] lumen insert failed', code, e.message);
+            }
+          }
+        }
       }
       return NextResponse.json({
         codes, plan: '流明兑换码', plan_id: 'LUMEN-CODE', count, channel,
@@ -87,19 +96,26 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: '请指定 target_resource_id' }, { status: 400 });
       }
       for (let i = 0; i < count; i++) codes.push(genCodeFull(channel));
-      const BATCH = 50;
+      const BATCH = 5;
       let inserted = 0;
       for (let i = 0; i < codes.length; i += BATCH) {
         const slice = codes.slice(i, i + BATCH);
-        await Promise.all(slice.map(code =>
-          sql`INSERT INTO xx_activation_codes
-              (code, code_type, plan_id, duration, channel, sent_note, batch_id, created_by, expires_at, is_used, user_group, target_resource_id, price_at_issue)
-              VALUES (${code}, 'unlock', 'UNLOCK', 0, ${channel}, ${note}, ${batchId}, ${auth.userId}, ${baseExpiresAt}, false, 'user', ${targetResourceId}, 0)`
-            .then(() => { inserted++; })
-            .catch((e: any) => {
-              if (!String(e.message).includes('duplicate key') && !String(e.message).includes('unique')) throw e;
-            })
-        ));
+        for (const code of slice) {
+          try {
+            await pool.query(
+              `INSERT INTO xx_activation_codes
+               (code, code_type, plan_id, duration, channel, sent_note, batch_id, created_by, expires_at, is_used, user_group, target_resource_id, price_at_issue)
+               VALUES ($1, 'unlock', 'UNLOCK', 0, $2, $3, $4, $5, $6, false, 'user', $7, 0)
+               ON CONFLICT (code) DO NOTHING`,
+              [code, channel, note, batchId, auth.userId, baseExpiresAt, targetResourceId]
+            );
+            inserted++;
+          } catch (e: any) {
+            if (!String(e.message).includes('duplicate') && !String(e.message).includes('unique')) {
+              console.error('[codes-gen] unlock insert failed', code, e.message);
+            }
+          }
+        }
       }
       return NextResponse.json({
         codes, plan: '单资源解锁码', plan_id: 'UNLOCK', count, channel,
@@ -118,19 +134,26 @@ export async function POST(req: NextRequest) {
       : null;
     const durationValue = plan.duration > 0 ? plan.duration : 9999;
     for (let i = 0; i < count; i++) codes.push(genCodeFull(channel));
-    const BATCH = 50;
+    const BATCH = 5;
     let inserted = 0;
     for (let i = 0; i < codes.length; i += BATCH) {
       const slice = codes.slice(i, i + BATCH);
-      await Promise.all(slice.map(code =>
-        sql`INSERT INTO xx_activation_codes
-            (code, code_type, plan_id, duration, channel, sent_note, batch_id, created_by, expires_at, is_used, user_group, price_at_issue)
-            VALUES (${code}, 'vip', ${plan.plan_id}, ${durationValue}, ${channel}, ${note}, ${batchId}, ${auth.userId}, ${expiresAt}, false, 'vip', ${plan.default_price})`
-          .then(() => { inserted++; })
-          .catch((e: any) => {
-            if (!String(e.message).includes('duplicate key') && !String(e.message).includes('unique')) throw e;
-          })
-      ));
+      for (const code of slice) {
+        try {
+          await pool.query(
+            `INSERT INTO xx_activation_codes
+             (code, code_type, plan_id, duration, channel, sent_note, batch_id, created_by, expires_at, is_used, user_group, price_at_issue)
+             VALUES ($1, 'vip', $2, $3, $4, $5, $6, $7, $8, false, 'vip', $9)
+             ON CONFLICT (code) DO NOTHING`,
+            [code, plan.plan_id, durationValue, channel, note, batchId, auth.userId, expiresAt, plan.default_price]
+          );
+          inserted++;
+        } catch (e: any) {
+          if (!String(e.message).includes('duplicate') && !String(e.message).includes('unique')) {
+            console.error('[codes-gen] vip insert failed', code, e.message);
+          }
+        }
+      }
     }
     return NextResponse.json({
       codes, plan: plan.label, plan_id: plan.plan_id, count, channel,
@@ -190,8 +213,11 @@ export async function GET(req: NextRequest) {
     // 2026-08-06: 修 BUG — limit cap 500 → 2000 (用户要看到所有码)
     // 加 6 个过滤参数: code_type / plan_id / channel / status / batch_id / sent
     // 用 Pool 模式支持动态 SQL (neon() 函数没有 sql.unsafe / sql.join)
+    // 2026-08-08: 加 page/pageSize 分页 (用户要每页 100 条, 可翻页)
     const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-    const limit = Math.min(2000, Math.max(1, parseInt(searchParams.get('limit') || '2000', 10)));
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const pageSize = Math.min(2000, Math.max(10, parseInt(searchParams.get('pageSize') || '100', 10)));
+    const offset = (page - 1) * pageSize;
     const codeType = searchParams.get('code_type') || '';
     const planId = searchParams.get('plan_id') || '';
     const channel = searchParams.get('channel') || '';
@@ -209,15 +235,23 @@ export async function GET(req: NextRequest) {
     else if (status === 'unused') conds.push(`is_used = false`);
     if (sent === 'sent') conds.push(`sent_to_customer = true`);
     else if (sent === 'unsent') conds.push(`sent_to_customer = false`);
-    args.push(limit);
-    const limitPlaceholder = `$${args.length}`;
     const whereSql = conds.join(' AND ');
+    // 过滤后总数 (分页用)
+    args.push(pageSize);
+    const limitPlaceholder = `$${args.length}`;
+    args.push(offset);
+    const offsetPlaceholder = `$${args.length}`;
     const rowsRes = await pool.query(
       `SELECT id, code, code_type, plan_id, duration, channel, sent_to_customer, sent_at, sent_note, batch_id, target_resource_id, lumen_amount, user_group, price_at_issue, created_at, used_at, used_by, expires_at, is_used
        FROM xx_activation_codes
        WHERE ${whereSql}
-       ORDER BY id DESC LIMIT ${limitPlaceholder}`,
+       ORDER BY id DESC LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}`,
       args
+    );
+    // 过滤后总数
+    const filteredCountRes = await pool.query(
+      `SELECT COUNT(*)::int AS c FROM xx_activation_codes WHERE ${whereSql}`,
+      args.slice(0, args.length - 2)
     );
     const batchStatsRes = await pool.query(
       `SELECT channel, batch_id, plan_id, code_type, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE is_used = true)::int AS used
@@ -225,17 +259,22 @@ export async function GET(req: NextRequest) {
        WHERE ${whereSql}
        GROUP BY channel, batch_id, plan_id, code_type
        ORDER BY MIN(id) DESC`,
-      args.slice(0, args.length - 1)  // 不带 limit
+      args.slice(0, args.length - 2)  // 不带 limit + offset
     );
     const rows = rowsRes.rows;
     const batchStats = batchStatsRes.rows;
-    // 总数统计 (不受过滤影响, 让用户看到全局)
+    const filteredTotal = filteredCountRes.rows[0].c;
+    // 全局统计 (不受过滤影响, 让用户看到全局)
     const total = await sql`SELECT COUNT(*)::int AS c FROM xx_activation_codes`;
     const used = await sql`SELECT COUNT(*)::int AS c FROM xx_activation_codes WHERE is_used = true`;
     const expired = await sql`SELECT COUNT(*)::int AS c FROM xx_activation_codes WHERE is_used = false AND expires_at IS NOT NULL AND expires_at < NOW()`;
     return NextResponse.json({
       items: rows,
       batch_stats: batchStats,
+      filtered_total: filteredTotal,
+      page,
+      page_size: pageSize,
+      total_pages: Math.ceil(filteredTotal / pageSize),
       stats: { total: total[0].c, used: used[0].c, unused: total[0].c - used[0].c, expired: expired[0].c },
     });
   } catch (e: any) {
@@ -264,27 +303,28 @@ export async function DELETE(req: NextRequest) {
     const action = body.action || (body.ids ? 'batch' : (body.id ? 'one' : 'all_unused'));
 
     if (action === 'all_unused') {
-      const r = await sql`DELETE FROM xx_activation_codes WHERE is_used = false`;
+      // 2026-08-08: 用 RETURNING id 拿真实删除数 (neon() .length 是 0)
+      const r: any = await sql`DELETE FROM xx_activation_codes WHERE is_used = false RETURNING id`;
       return NextResponse.json({ success: true, deleted: r.length });
     }
     if (action === 'all_expired') {
-      const r = await sql`DELETE FROM xx_activation_codes WHERE is_used = false AND expires_at IS NOT NULL AND expires_at < NOW()`;
+      const r: any = await sql`DELETE FROM xx_activation_codes WHERE is_used = false AND expires_at IS NOT NULL AND expires_at < NOW() RETURNING id`;
       return NextResponse.json({ success: true, deleted: r.length });
     }
     if (action === 'all_used') {
-      const r = await sql`DELETE FROM xx_activation_codes WHERE is_used = true`;
+      const r: any = await sql`DELETE FROM xx_activation_codes WHERE is_used = true RETURNING id`;
       return NextResponse.json({ success: true, deleted: r.length });
     }
     if (action === 'batch' && Array.isArray(body.ids) && body.ids.length > 0) {
       const ids = body.ids.map((x: any) => parseInt(String(x), 10)).filter((n: number) => n > 0);
       if (ids.length === 0) return NextResponse.json({ error: 'ids 数组为空' }, { status: 400 });
-      // 只删未使用的
-      const r = await sql`DELETE FROM xx_activation_codes WHERE id = ANY(${ids}::int[]) AND is_used = false`;
+      // 只删未使用的 - 2026-08-08: RETURNING id 拿真删数
+      const r: any = await sql`DELETE FROM xx_activation_codes WHERE id = ANY(${ids}::int[]) AND is_used = false RETURNING id`;
       return NextResponse.json({ success: true, deleted: r.length, requested: ids.length });
     }
     if (action === 'one' && body.id) {
       const id = parseInt(String(body.id), 10);
-      const r = await sql`DELETE FROM xx_activation_codes WHERE id = ${id} AND is_used = false`;
+      const r: any = await sql`DELETE FROM xx_activation_codes WHERE id = ${id} AND is_used = false RETURNING id`;
       if (r.length === 0) return NextResponse.json({ error: '激活码不存在或已使用' }, { status: 404 });
       return NextResponse.json({ success: true });
     }
