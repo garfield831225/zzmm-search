@@ -522,12 +522,19 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-violet-500 to-pink-500 rounded-xl flex items-center justify-center">
-                <span className="text-xl">🎬</span>
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-white">泽泽妈妈资源库</h1>
-                <p className="text-xs text-white/40">共 {total.toLocaleString()} 条资源 · 当前显示 {items.length} 条</p>
+              {/* 2026-08-08: HDZZMM 紫粉霓虹 logo (v5-01 紫粉渐变, 跟主站主题色一致) */}
+              <img
+                src="/logo-hdzzmm.png"
+                alt="HDZZMM"
+                width={48}
+                height={48}
+                className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex-shrink-0 shadow-[0_0_16px_rgba(168,85,247,0.3)]"
+                loading="eager"
+                decoding="async"
+              />
+              <div className="min-w-0">
+                <h1 className="text-xl font-bold bg-gradient-to-r from-violet-400 via-fuchsia-400 to-pink-400 bg-clip-text text-transparent tracking-wide">HDZZMM</h1>
+                <p className="text-xs text-white/40 truncate">共 {total.toLocaleString()} 条资源 · 当前显示 {items.length} 条</p>
               </div>
             </div>
             <div className="flex items-center gap-2 flex-wrap justify-end">

@@ -164,6 +164,11 @@ const PUBLIC_PATHS = [
   '/api/tmdb-credits',
   // 2026-08-05: 详情页公开浏览 (有 cookie 进, 无 cookie 走 'user' 权限)
   '/tmdb',
+  // 2026-08-08: 静态资源 (HDZZMM logo 等 public/ 下文件)
+  '/logo',
+  '/favicon',
+  '/icon',
+  '/manifest',
 ];
 
 export async function middleware(request: NextRequest) {
