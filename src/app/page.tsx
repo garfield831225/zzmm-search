@@ -741,10 +741,10 @@ export default function HomePage() {
           loading={secLoading}
         />
 
-        {/* 4. VIP专区 (VIP 影视改名) - 2026-08-07 */}
+        {/* 4. VIP 多网盘 - 2026-08-08 改: 之前叫 "VIP专区" 跟 lovemovie 子域名 (VIP 在线影视) 撞名, 实际是 VIP 才有的多网盘资源 (百度/阿里/夸克/磁力/ed2k) */}
         <HomeSection
-          title="VIP专区"
-          titleEn="VIP EXCLUSIVE"
+          title="VIP多网盘"
+          titleEn="VIP MULTI-DRIVE"
           emoji="💎"
           accent="amber"
           href="/vip"
