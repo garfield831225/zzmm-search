@@ -43,6 +43,20 @@ export default function UpgradePage() {
 
   const isVip = userGroup === 'vip' || userGroup === 'admin';
 
+  // 2026-08-08: 如果是 ?from=lovemovie 跳过来的 + 已登录 + 是 VIP/admin
+  // 自动重定向到子域名影视站 (server.py 在 lovemovie.zzmm-search.uk)
+  // 原因: server.py 跳 /upgrade 时带 from=lovemovie, 但 server.py 跳的是主站 path
+  // 用户是 VIP 的话, 应该直接进影视站, 不应该停在主站升级页
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('from') !== 'lovemovie') return;
+    if (!logged) return;  // 未登录停在升级页 (server.py 跳这里就是为登录用)
+    if (!isVip) return;    // 不是 VIP 停在升级页 (买 VIP 流程)
+    // 已登录 + 是 VIP/admin, 跳子域名影视站
+    window.location.href = 'https://lovemovie.zzmm-search.uk/';
+  }, [logged, isVip]);
+
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white relative overflow-hidden">
       {/* 背景动效 */}
