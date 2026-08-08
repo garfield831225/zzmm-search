@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { Music, Library, LogOut, CreditCard, ShoppingCart, Film, Tv, Shield, Crown, User, Gift, Sparkles, ChevronRight } from 'lucide-react';
 import HomeBanner from '@/components/home/Banner';
 import HomeSection, { type SectionItem } from '@/components/home/Section';
+import TrailerRow from '@/components/home/TrailerRow';
 import { tmdbPoster, tmdbBackdrop, tmdbProfile, TMDB_FALLBACK } from '@/lib/tmdb-image';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
@@ -522,7 +523,7 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              {/* 2026-08-08: HDZZMM 紫粉霓虹 logo (v5-01 紫粉渐变, 跟主站主题色一致) */}
+              {/* 2026-08-08: HDZZMM 紫粉霓虹 logo v5-01 (跟主站主题色一致, 紫粉渐变 + 青色边缘高光) - 替代原紫色方块+emoji */}
               <img
                 src="/logo-hdzzmm.png"
                 alt="HDZZMM"
@@ -553,7 +554,7 @@ export default function HomePage() {
                       <span>VIP 影视区</span>
                     </Link>
                   )}
-                  {/* 2026-08-08: VIP 影视 2 区入口 (basic 跳 /upgrade, vip/admin 进 /lovemovie 镜像站)
+                  {/* 2026-07-31: VIP 影视 2 区入口 (basic 跳 /upgrade, vip/admin 直接进 /lovemovie 镜像站)
                       2026-08-08 修: 之前所有角色都 Link /lovemovie, basic 看不到 /upgrade 入口
                       之前 CF tunnel 配 lovemovie.zzmm-search.uk -> 外部 URL, 8-7 配 tunnel 时被覆盖 PUT 删了
                       现在 /lovemovie 是 src/app/lovemovie/page.tsx (iframe 嵌入, URL 在 NEXT_PUBLIC_LOVEMOVIE_URL) */}
@@ -588,6 +589,10 @@ export default function HomePage() {
                     <Library size={14} className="transition-transform group-hover:scale-110" />
                     <span>文档资源库</span>
                   </Link>
+                  <Link href="/request" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-pink-500/20 hover:from-amber-500/40 hover:to-pink-500/40 rounded-lg text-sm transition-all duration-200 text-amber-200 hover:shadow-[0_0_12px_rgba(245,158,11,0.4)] hover:scale-105 border border-amber-400/30">
+                    <Sparkles size={14} className="transition-transform group-hover:scale-110" />
+                    <span>求片专区</span>
+                  </Link>
                   <button onClick={handleLogout} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">退出</button>
                   <Link href="/activate" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/30 hover:bg-pink-600/60 rounded-lg text-sm transition-all duration-200 text-pink-200 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
                     <Gift size={14} className="transition-transform group-hover:scale-110" />
@@ -609,6 +614,10 @@ export default function HomePage() {
                   <Link href="/library" className="group flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/20 hover:bg-violet-600/50 rounded-lg text-sm transition-all duration-200 text-violet-300 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105">
                     <Library size={14} className="transition-transform group-hover:scale-110" />
                     <span>文档资源库</span>
+                  </Link>
+                  <Link href="/request" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-pink-500/20 hover:from-amber-500/40 hover:to-pink-500/40 rounded-lg text-sm transition-all duration-200 text-amber-200 hover:shadow-[0_0_12px_rgba(245,158,11,0.4)] hover:scale-105 border border-amber-400/30">
+                    <Sparkles size={14} className="transition-transform group-hover:scale-110" />
+                    <span>求片专区</span>
                   </Link>
                   <Link href="/activate" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/30 hover:bg-pink-600/60 rounded-lg text-sm transition-all duration-200 text-pink-200 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
                     <Gift size={14} className="transition-transform group-hover:scale-110" />
@@ -696,47 +705,7 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Filter Bar - 2026-07-25 改: 玻璃态 pill + 紫粉渐变激活态 (克制版) */}
-          <div className="flex flex-col gap-1.5 mt-4 p-2 rounded-2xl bg-white/[0.02] border border-white/[0.04] backdrop-blur-sm">
-            {/* 分类 */}
-            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
-              {CATEGORIES.map((cat) => (
-                <button key={cat} onClick={() => setCategory(cat)}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition shrink-0 ${category === cat
-                    ? 'bg-gradient-to-r from-violet-500/25 to-fuchsia-500/25 text-white border border-violet-400/40 shadow-[0_0_12px_rgba(168,85,247,0.15)]'
-                    : 'bg-white/[0.03] text-white/55 hover:text-white/85 hover:bg-white/[0.06] border border-transparent'}`}>{cat}</button>
-              ))}
-            </div>
-            {/* 来源 */}
-            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
-              {SOURCES.map((src) => (
-                <button key={src} onClick={() => setSource(src)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${source === src
-                    ? 'bg-gradient-to-r from-pink-500/25 to-rose-500/25 text-white border border-pink-400/40'
-                    : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{src}</button>
-              ))}
-            </div>
-            {/* 地区 */}
-            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
-              <span className="text-[10px] text-white/30 self-center mr-0.5 shrink-0 tracking-wider">地区</span>
-              {REGIONS.map((r) => (
-                <button key={r} onClick={() => setRegion(r)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${region === r
-                    ? 'bg-gradient-to-r from-orange-500/25 to-amber-500/25 text-white border border-orange-400/40'
-                    : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{r}</button>
-              ))}
-            </div>
-            {/* 年份 */}
-            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
-              <span className="text-[10px] text-white/30 self-center mr-0.5 shrink-0 tracking-wider">年份</span>
-              {YEARS.map((y) => (
-                <button key={y} onClick={() => setYear(y)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${year === y
-                    ? 'bg-gradient-to-r from-cyan-500/25 to-teal-500/25 text-white border border-cyan-400/40'
-                    : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{y}</button>
-              ))}
-            </div>
-          </div>
+          {/* Filter Bar - 2026-08-07 移除: 4 行筛选挪到下方"已匹配资源"模块里 (顶部只留搜索 + 入口, 不冻大块在头部影响观感) */}
         </div>
       </header>
 
@@ -744,6 +713,9 @@ export default function HomePage() {
       <div className="max-w-7xl mx-auto px-4 pt-6">
         {/* 1. 顶部 banner 轮播 */}
         <HomeBanner />
+
+        {/* 1.5 2026-08-05 P11: TMDB 最新预告片区 (横幅下面) */}
+        <TrailerRow />
 
         {/* 2. 最新上映模块 */}
         <div className="mt-6">
@@ -758,20 +730,20 @@ export default function HomePage() {
           />
         </div>
 
-        {/* 3. Basic 专区 (泽泽妈 115 文档) */}
+        {/* 3. 免费专区 (115 链接, 泽泽妈文档改名) - 2026-08-07 */}
         <HomeSection
-          title="泽泽妈文档"
-          titleEn="ZEZHE LIBRARY"
-          emoji="👑"
+          title="免费专区"
+          titleEn="FREE ZONE"
+          emoji="🆓"
           accent="violet"
           href="/basic"
           items={secBasic}
           loading={secLoading}
         />
 
-        {/* 4. VIP 专区 */}
+        {/* 4. VIP专区 (VIP 影视改名) - 2026-08-07 */}
         <HomeSection
-          title="VIP 影视"
+          title="VIP专区"
           titleEn="VIP EXCLUSIVE"
           emoji="💎"
           accent="amber"
@@ -821,8 +793,58 @@ export default function HomePage() {
         )}
       </div>
 
-      {/* 原来的搜索 + 卡片网格 (保留所有现有功能) */}
+      {/* 2026-08-07 P12: 已匹配资源模块 (从 header 挪下来的 4 行筛选 + SORT + 卡片列表) */}
       <main className="max-w-7xl mx-auto px-4 py-6 relative">
+        {/* 模块标题 */}
+        <div className="flex items-center justify-between mb-4 px-2">
+          <h2 className="text-base sm:text-lg font-bold text-cyan-300">
+            🗂️ 已匹配资源
+            <span className="ml-2 text-[10px] sm:text-xs text-white/40 font-normal tracking-wider uppercase">MATCHED RESOURCES</span>
+          </h2>
+        </div>
+
+        {/* 2026-08-07 从 header 挪过来: 4 行筛选 (分类/网盘/地区/年份) */}
+        <div className="flex flex-col gap-1.5 mb-4 p-2 rounded-2xl bg-white/[0.02] border border-white/[0.04] backdrop-blur-sm">
+          {/* 分类 */}
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+            {CATEGORIES.map((cat) => (
+              <button key={cat} onClick={() => setCategory(cat)}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition shrink-0 ${category === cat
+                  ? 'bg-gradient-to-r from-violet-500/25 to-fuchsia-500/25 text-white border border-violet-400/40 shadow-[0_0_12px_rgba(168,85,247,0.15)]'
+                  : 'bg-white/[0.03] text-white/55 hover:text-white/85 hover:bg-white/[0.06] border border-transparent'}`}>{cat}</button>
+            ))}
+          </div>
+          {/* 来源 */}
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+            {SOURCES.map((src) => (
+              <button key={src} onClick={() => setSource(src)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${source === src
+                  ? 'bg-gradient-to-r from-pink-500/25 to-rose-500/25 text-white border border-pink-400/40'
+                  : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{src}</button>
+            ))}
+          </div>
+          {/* 地区 */}
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+            <span className="text-[10px] text-white/30 self-center mr-0.5 shrink-0 tracking-wider">地区</span>
+            {REGIONS.map((r) => (
+              <button key={r} onClick={() => setRegion(r)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${region === r
+                  ? 'bg-gradient-to-r from-orange-500/25 to-amber-500/25 text-white border border-orange-400/40'
+                  : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{r}</button>
+            ))}
+          </div>
+          {/* 年份 */}
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+            <span className="text-[10px] text-white/30 self-center mr-0.5 shrink-0 tracking-wider">年份</span>
+            {YEARS.map((y) => (
+              <button key={y} onClick={() => setYear(y)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${year === y
+                  ? 'bg-gradient-to-r from-cyan-500/25 to-teal-500/25 text-white border border-cyan-400/40'
+                  : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{y}</button>
+            ))}
+          </div>
+        </div>
+
         {/* Sort & Size Bar - 2026-07-25 改: 玻璃态 + 紫粉激活 */}
         <div className="flex flex-wrap items-center justify-between gap-3 mb-5 px-2">
           <div className="flex items-center gap-2">
@@ -953,7 +975,7 @@ export default function HomePage() {
                   )}
                   {isZezheChannel(item.importChannel) && (
                     <span className="px-2 py-0.5 bg-sky-500/30 border border-sky-500/40 text-sky-300 text-xs rounded">
-                      📚 泽泽妈文档
+                      📚 免费专区
                     </span>
                   )}
                   {/* 2026-06-03 单资源付费标记 */}

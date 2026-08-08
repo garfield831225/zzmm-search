@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Play, X, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
 
 interface Trailer {
   id: string;
@@ -43,6 +43,8 @@ export default function TrailerRow() {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(true);
+  // 2026-08-06: 手动重试计数器, 触发 ?fresh=1 跳过 server 10 分钟缓存
+  const [retryTick, setRetryTick] = useState(0);
 
   // 拉数据
   useEffect(() => {
@@ -50,7 +52,8 @@ export default function TrailerRow() {
     setLoading(true);
     setError(null);
     setItems([]);
-    fetch(`/api/tmdb/videos?tab=${tab}&lang=zh-CN&limit=12`, { cache: 'no-store' })
+    // 2026-08-06: 永远 fresh=1 强制刷新, 避免 server 10 分钟缓存污染 (限流时 0 items 卡住)
+    fetch(`/api/tmdb/videos?tab=${tab}&lang=zh-CN&limit=12&_t=${Date.now()}&fresh=1`, { cache: 'no-store' })
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;
@@ -67,7 +70,7 @@ export default function TrailerRow() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [tab]);
+  }, [tab, retryTick]);
 
   // 滚动箭头状态
   useEffect(() => {
@@ -131,10 +134,16 @@ export default function TrailerRow() {
 
       {/* 视频横向滚动 */}
       {error ? (
-        <div className="px-4 py-3 rounded-xl border border-rose-500/20 bg-rose-500/[0.06] text-rose-200 text-sm">
-          预告片加载失败: {error}
+        <div className="flex flex-col gap-2 px-4 py-5 rounded-xl border border-rose-500/20 bg-rose-500/[0.06] text-rose-200 text-sm">
+          <div>预告片加载失败: {error}</div>
+          <button
+            onClick={() => setRetryTick(t => t + 1)}
+            className="self-start px-3 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-xs flex items-center gap-1"
+          >
+            <RefreshCw className="w-3 h-3" /> 重试
+          </button>
         </div>
-      ) : loading || items.length === 0 ? (
+      ) : loading ? (
         <div className="flex gap-3 overflow-hidden">
           {Array.from({ length: 5 }).map((_, i) => (
             <div
@@ -142,6 +151,16 @@ export default function TrailerRow() {
               className="flex-shrink-0 w-[260px] sm:w-[300px] aspect-video rounded-xl bg-white/[0.03] animate-pulse"
             />
           ))}
+        </div>
+      ) : items.length === 0 ? (
+        <div className="flex flex-col gap-2 px-4 py-6 rounded-xl border border-white/[0.06] bg-white/[0.02] text-white/50 text-sm">
+          <div>暂无 {tab === 'now_playing' ? '影院上映中' : '热门'} 预告片</div>
+          <button
+            onClick={() => setRetryTick(t => t + 1)}
+            className="self-start px-3 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-white/70 hover:text-white text-xs flex items-center gap-1"
+          >
+            <RefreshCw className="w-3 h-3" /> 重新加载 (跳过缓存)
+          </button>
         </div>
       ) : (
         <div className="relative group/sec">
@@ -168,18 +187,22 @@ export default function TrailerRow() {
 
           <div
             ref={scrollerRef}
-            className="flex gap-3 overflow-x-auto pb-2 scroll-smooth"
-            style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}
+            className="flex gap-3 overflow-x-auto overflow-y-visible pb-2 scroll-smooth"
+            style={{
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'rgba(255,255,255,0.1) transparent',
+              WebkitOverflowScrolling: 'touch',
+              touchAction: 'pan-x pan-y',  // 2026-08-07: mobile 上允许垂直滚动同时支持横向 scroll
+              overscrollBehavior: 'contain',
+            }}
           >
             {items.map((t, i) => (
-              <motion.button
+              <button
                 key={t.id}
                 type="button"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.03, duration: 0.3 }}
                 onClick={() => setActiveTrailer(t)}
-                className="flex-shrink-0 w-[260px] sm:w-[300px] text-left group/card"
+                style={{ animationDelay: `${i * 30}ms` }}
+                className="flex-shrink-0 w-[260px] sm:w-[300px] text-left group/card trailer-card"
               >
                 {/* 16:9 缩略图 */}
                 <div className="relative aspect-video rounded-xl overflow-hidden bg-white/5 mb-2 ring-1 ring-white/5 group-hover/card:ring-cyan-400/40 transition">
@@ -228,7 +251,7 @@ export default function TrailerRow() {
                 <p className="text-[11px] text-white/40 mt-0.5 line-clamp-2 leading-relaxed">
                   {t.overview || t.videoName || '—'}
                 </p>
-              </motion.button>
+              </button>
             ))}
           </div>
         </div>

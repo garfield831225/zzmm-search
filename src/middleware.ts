@@ -171,6 +171,8 @@ const PUBLIC_PATHS = [
   '/manifest',
   // 2026-08-08: VIP 影视 2 区 (iframe 嵌入外部镜像站, 公开访问, 鉴权在 page.tsx Link 入口做 user_group 判断)
   '/lovemovie',
+  // 2026-08-08: 首页 TrailerRow 用的 TMDB 预告片 API (无 token 也能访问, NAS IP 限流时返 stale)
+  '/api/tmdb/videos',
 ];
 
 export async function middleware(request: NextRequest) {
