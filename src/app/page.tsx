@@ -181,9 +181,11 @@ export default function HomePage() {
   }, []);
 
   // 将 API item 映射到 SectionItem
+  // 2026-08-08: /api/upcoming|basic|vip 返的是 resourceId (xx_resources.id), 不是 id
+  //   之前 it.id → undefined, section 渲染空卡片
   function mapToSection(it: any): SectionItem {
     return {
-      id: it.id,
+      id: it.resourceId || it.id,
       tmdbId: it.tmdbId || it.tmdb_id,
       title: it.title || it.name || '',
       posterUrl: it.posterUrl || it.poster_url || (it.posterPath ? tmdbPoster(it.posterPath, 'card') : '') || '',
