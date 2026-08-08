@@ -169,6 +169,8 @@ const PUBLIC_PATHS = [
   '/favicon',
   '/icon',
   '/manifest',
+  // 2026-08-08: VIP 影视 2 区 (iframe 嵌入外部镜像站, 公开访问, 鉴权在 page.tsx Link 入口做 user_group 判断)
+  '/lovemovie',
 ];
 
 export async function middleware(request: NextRequest) {

@@ -553,12 +553,22 @@ export default function HomePage() {
                       <span>VIP 影视区</span>
                     </Link>
                   )}
-                  {/* 2026-07-31: VIP 影视 2 区入口 (basic 进跳 /upgrade, vip/admin 直接进 /lovemovie 镜像站) */}
+                  {/* 2026-08-08: VIP 影视 2 区入口 (basic 跳 /upgrade, vip/admin 进 /lovemovie 镜像站)
+                      2026-08-08 修: 之前所有角色都 Link /lovemovie, basic 看不到 /upgrade 入口
+                      之前 CF tunnel 配 lovemovie.zzmm-search.uk -> 外部 URL, 8-7 配 tunnel 时被覆盖 PUT 删了
+                      现在 /lovemovie 是 src/app/lovemovie/page.tsx (iframe 嵌入, URL 在 NEXT_PUBLIC_LOVEMOVIE_URL) */}
                   {['basic', 'vip', 'admin'].includes(user?.group || '') && (
-                    <Link href="/lovemovie" target="_blank" rel="noopener" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 hover:from-violet-500/40 hover:to-fuchsia-500/40 rounded-lg text-sm transition-all duration-200 text-violet-200 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105 border border-violet-400/30">
-                      <Sparkles size={14} className="transition-transform group-hover:scale-110" />
-                      <span>VIP 影视 2 区</span>
-                    </Link>
+                    user?.group === 'basic' ? (
+                      <Link href="/upgrade" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 hover:from-violet-500/40 hover:to-fuchsia-500/40 rounded-lg text-sm transition-all duration-200 text-violet-200 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105 border border-violet-400/30">
+                        <Sparkles size={14} className="transition-transform group-hover:scale-110" />
+                        <span>VIP 影视 2 区 (升级)</span>
+                      </Link>
+                    ) : (
+                      <Link href="/lovemovie" target="_blank" rel="noopener" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 hover:from-violet-500/40 hover:to-fuchsia-500/40 rounded-lg text-sm transition-all duration-200 text-violet-200 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105 border border-violet-400/30">
+                        <Sparkles size={14} className="transition-transform group-hover:scale-110" />
+                        <span>VIP 影视 2 区</span>
+                      </Link>
+                    )
                   )}
                   {/* 2026-07-15 隐藏: 用户要求不要显示 TMDB 影视区 + VIP 观影区 入口
                   <Link href="/tmdb-films" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/20 hover:bg-pink-600/50 rounded-lg text-sm transition-all duration-200 text-pink-300 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
