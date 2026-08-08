@@ -95,6 +95,8 @@ export async function POST(req: NextRequest) {
     );
 
     // 设置 HTTP-only cookie（供 middleware 读取）
+    // 2026-08-08: 加 domain='.zzmm-search.uk' 让 lovemovie.zzmm-search.uk 子域名也能读到
+    // (server.py 8688 在子域名下做鉴权, 必须共享 cookie)
     const cookieStore = await cookies();
     cookieStore.set('zzmm_token', token, {
       httpOnly: true,
@@ -102,6 +104,7 @@ export async function POST(req: NextRequest) {
       sameSite: 'lax',
       maxAge: 30 * 24 * 60 * 60,
       path: '/',
+      domain: '.zzmm-search.uk',
     });
 
     return NextResponse.json({
