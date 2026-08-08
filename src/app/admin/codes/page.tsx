@@ -38,7 +38,7 @@ interface BatchStat {
 const VIP_TEMPLATES = [
   { plan: 'vip_trial',   label: '试用 1 天', emoji: '⏰', price: 0,   color: 'from-stone-500 to-slate-600' },
   { plan: 'vip_30d',     label: '30 天',   emoji: '🎫', price: 12,  color: 'from-sky-500 to-blue-600' },
-  { plan: 'vip_180d',    label: '半年',    emoji: '🎟️', price: 58,  color: 'from-violet-500 to-purple-600' },
+  { plan: 'vip_90d',     label: '季卡',    emoji: '🎟️', price: 58,  color: 'from-violet-500 to-purple-600' },
   { plan: 'vip_365d',    label: '年卡',    emoji: '🎁', price: 98,  color: 'from-pink-500 to-rose-600' },
   { plan: 'vip_forever', label: '永久',    emoji: '👑', price: 198, color: 'from-amber-500 to-orange-600' },
   { plan: 'unlock',      label: '单资源',  emoji: '🔓', price: 0,   color: 'from-emerald-500 to-teal-600' },
@@ -73,7 +73,7 @@ export default function CodesPage() {
   const [sentNote, setSentNote] = useState('');
 
   // 生成器
-  const [genPlan, setGenPlan] = useState('vip_180d');
+  const [genPlan, setGenPlan] = useState('vip_90d');
   const [genChannel, setGenChannel] = useState('xy');
   // 2026-08-06: 修 BUG — 改用 string state, 避免清空后第一次输入只拿到 1 位变 1
   const [genCountStr, setGenCountStr] = useState('10');
@@ -110,9 +110,10 @@ export default function CodesPage() {
       if (fBatch) params.set('batch_id', fBatch);
       if (fStatus) params.set('status', fStatus);
       if (fSent) params.set('sent', fSent);
-      // fCodeType 区分: vip_30d/180d/365d/forever/trial 走 plan_id, 其他 (vip/lumen/unlock) 走 code_type
+      // fCodeType 区分: vip_30d/90d/365d/forever/trial 走 plan_id, 其他 (vip/lumen/unlock) 走 code_type
+      // 2026-08-08: vip_90d 替代 vip_180d (半年 -> 季卡 90天, plan_id 保留 VIP-180D 兼容老码)
       const planMap: Record<string, string> = {
-        vip_trial: 'VIP-TRIAL-1D', vip_30d: 'VIP-30D', vip_180d: 'VIP-180D', vip_365d: 'VIP-365D', vip_forever: 'VIP-FOREVER',
+        vip_trial: 'VIP-TRIAL-1D', vip_30d: 'VIP-30D', vip_90d: 'VIP-180D', vip_365d: 'VIP-365D', vip_forever: 'VIP-FOREVER',
       };
       if (fCodeType) {
         if (planMap[fCodeType]) params.set('plan_id', planMap[fCodeType]);
@@ -371,7 +372,7 @@ export default function CodesPage() {
               <input
                 value={genBatch}
                 onChange={e => setGenBatch(e.target.value)}
-                placeholder="例: 20260609-XY-180D"
+                placeholder="例: 20260609-XY-90D"
                 className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500/50"
               />
             </div>
@@ -566,7 +567,7 @@ export default function CodesPage() {
               <option value="vip">🎫 VIP 会员</option>
               <option value="vip_trial">⏰ VIP 试用 1 天</option>
               <option value="vip_30d">🎫 VIP 30 天</option>
-              <option value="vip_180d">🎟️ VIP 半年</option>
+              <option value="vip_90d">🎟️ VIP 季卡 (90天)</option>
               <option value="vip_365d">🎁 VIP 年卡</option>
               <option value="vip_forever">👑 VIP 永久</option>
               <option value="unlock">🔓 单资源</option>

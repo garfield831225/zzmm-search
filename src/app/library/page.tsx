@@ -473,7 +473,7 @@ export default function LibraryPage() {
                 <li>• <b>1. 拿邀请码</b>：找站长微信要（站内不开放公开注册）</li>
                 <li>• <b>2. 注册</b>：用邀请码 + 邮箱 + 密码注册</li>
                 <li>• <b>3. 自动 basic</b>：注册成功自动成为 basic 会员，可看泽泽妈妈文档</li>
-                <li>• <b>4. 升级 VIP</b>：basic 会员才能买 VIP 码（30/180/365/永久）</li>
+                <li>• <b>4. 升级 VIP</b>：basic 会员才能买 VIP 码（30/90/365/永久）</li>
                 <li>• <b>5. 全开</b>：VIP 会员可看全站资源（含 VIP 区全部）</li>
               </ul>
             </div>

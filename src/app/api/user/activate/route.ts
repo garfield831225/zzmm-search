@@ -187,7 +187,7 @@ export async function POST(req: NextRequest) {
 function planLabelByPlanId(planId: string): string {
   const map: Record<string, string> = {
     'VIP-30D': '30 天会员',
-    'VIP-180D': '半年会员',
+    'VIP-180D': '季卡会员',
     'VIP-365D': '年卡会员',
     'VIP-FOREVER': '永久会员',
   };
