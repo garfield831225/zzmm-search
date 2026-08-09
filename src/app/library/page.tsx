@@ -538,8 +538,8 @@ export default function LibraryPage() {
 
       <main className="max-w-[1600px] mx-auto px-4 py-4">
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-          {/* Table header */}
-          <div className={`grid gap-2 px-3 py-2.5 bg-gray-50 border-b border-gray-200 text-sm font-medium text-gray-500 uppercase tracking-wide ${userGroup === 'admin' ? 'grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px_140px]' : 'grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px]'}`}>
+          {/* Table header — 2026-08-08 mobile 适配: mobile 完全隐藏 (item 垂直堆叠展示, 不需要 header), PC (md+) 9 列横排保持原样 */}
+          <div className={`hidden md:grid gap-2 px-3 py-2.5 bg-gray-50 border-b border-gray-200 text-sm font-medium text-gray-500 uppercase tracking-wide ${userGroup === 'admin' ? 'md:grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px_140px]' : 'md:grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px]'}`}>
             <div>分类</div>
             <div>标签</div>
             <div>名称</div>
@@ -567,7 +567,7 @@ export default function LibraryPage() {
 
             return (
               <div key={item.id}
-                className={`grid gap-2 px-3 py-2.5 border-b border-gray-100 hover:bg-violet-50/30 transition text-base items-center ${isTopAdmin ? 'grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px_140px]' : 'grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px]'} ${isVipLock ? 'bg-amber-50/30' : ''} ${isCodeLock ? 'bg-cyan-50/30' : ''}`}>
+                className={`grid gap-2 px-3 py-2.5 border-b border-gray-100 hover:bg-violet-50/30 transition text-base items-center ${isTopAdmin ? 'grid-cols-1 md:grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px_140px]' : 'grid-cols-1 md:grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px]'} ${isVipLock ? 'bg-amber-50/30' : ''} ${isCodeLock ? 'bg-cyan-50/30' : ''}`}>
                 {/* 分类 — sheet 优先, category 兜底 */}
                 <div>
                   <div className="text-2xl leading-none">{showIcon}</div>
