@@ -173,6 +173,13 @@ const PUBLIC_PATHS = [
   '/lovemovie',
   // 2026-08-08: 首页 TrailerRow 用的 TMDB 预告片 API (无 token 也能访问, NAS IP 限流时返 stale)
   '/api/tmdb/videos',
+  // 2026-08-09: 求片专区 (5 个新功能 cherry-pick from feature/admin-upload-rules)
+  //   - /api/requests + /api/requests/[id]/claim 路由内 getUser 鉴权 (Bearer + cookie)
+  //   - /api/points/redeem 同上
+  //   - /api/upload 同上
+  '/api/requests',
+  '/api/points/redeem',
+  '/api/upload',
 ];
 
 export async function middleware(request: NextRequest) {
