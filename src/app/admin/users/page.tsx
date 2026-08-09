@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Users, RefreshCw, ChevronLeft, ChevronRight, ShieldOff, ShieldCheck, Calendar } from 'lucide-react';
+import { Users, RefreshCw, ChevronLeft, ChevronRight, ShieldOff, ShieldCheck, Calendar, KeyRound } from 'lucide-react';
 
 interface UserRow {
   id: number;
@@ -93,6 +93,34 @@ export default function UsersPage() {
     } catch (e: any) { showToast('error', e.message); }
   };
 
+  // 2026-08-09: 重置用户密码, 8 位随机, API 返明文让 admin 复制给用户
+  const resetPassword = async (u: UserRow) => {
+    if (!confirm(`🔑 重置 ${u.username} 的密码?\n\n新密码为 8 位随机字符串, 重置后请立即告知用户。\n旧密码立即失效, 不可恢复。`)) return;
+    try {
+      const r = await fetch('/api/admin/users', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ id: u.id, action: 'reset_password' }),
+      });
+      const d = await r.json();
+      if (d.error) showToast('error', d.error);
+      else {
+        // 弹窗显示新密码让 admin 复制 (复制按钮 + 自动选中)
+        const textarea = document.createElement('textarea');
+        textarea.value = d.new_password;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        let copied = false;
+        try { copied = document.execCommand('copy'); } catch {}
+        document.body.removeChild(textarea);
+        alert(`✅ ${u.username} 的新密码:\n\n${d.new_password}\n\n${copied ? '已自动复制, 请粘贴告知用户' : '请手动复制'}\n\n⚠️ 密码不会再次显示`);
+      }
+    } catch (e: any) { showToast('error', e.message); }
+  };
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   if (!authed) {
@@ -179,6 +207,13 @@ export default function UsersPage() {
                       className="ml-1 px-2 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded text-xs"
                     >
                       <Calendar className="w-3 h-3 inline mr-1" />延期
+                    </button>
+                    <button
+                      onClick={() => resetPassword(u)}
+                      className="ml-1 px-2 py-1 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 rounded text-xs"
+                      title="重置为 8 位随机密码"
+                    >
+                      <KeyRound className="w-3 h-3 inline mr-1" />重置密码
                     </button>
                   </td>
                 </tr>

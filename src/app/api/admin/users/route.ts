@@ -1,8 +1,10 @@
 // 2026-07-20: 改用共享 authAdmin (双轨鉴权 Bearer + cookie), 修用户列表卡打不开的 bug
 // 兼容 ?key= JWT_SECRET 调用 (旧脚本)
+// 2026-08-09: 加 reset_password action (admin 后台重置用户密码, 8 位随机)
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
 import { authAdmin } from '@/lib/admin-auth';
 
 export const dynamic = 'force-dynamic';
@@ -133,6 +135,21 @@ export async function PUT(req: NextRequest) {
       }
       await sql`UPDATE xx_users SET expire_at = ${newExpire.toISOString()}, updated_at = NOW() WHERE id = ${id}`;
       return NextResponse.json({ success: true, new_expire: newExpire.toISOString().slice(0, 10) });
+    }
+
+    if (action === 'reset_password') {
+      // 8 位随机密码 (排除 0/O/1/l/I 避免混淆, 跟注册验证码硬规则一致)
+      // 字符集: A-Z 除 I/O + a-z 除 l + 2-9 (共 56 字符)
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+      const bytes = randomBytes(8);
+      let newPassword = '';
+      for (let i = 0; i < 8; i++) newPassword += chars[bytes[i] % chars.length];
+
+      const hashed = bcrypt.hashSync(newPassword, 10);
+      await sql`UPDATE xx_users SET password_hash = ${hashed}, updated_at = NOW() WHERE id = ${id}`;
+
+      // 返回明文密码, 仅这一次, 后续不存不返, admin 需告知用户
+      return NextResponse.json({ success: true, new_password: newPassword });
     }
 
     return NextResponse.json({ error: '未知操作' }, { status: 400 });
