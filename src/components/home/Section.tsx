@@ -18,12 +18,17 @@ export interface SectionItem {
   releaseDate?: string;
   voteAverage?: number;
   source?: string;
+  sourceDisplay?: string;   // 2026-08-09: 网盘资源显示名 (百度网盘/夸克/磁力 等)
+  size?: string;             // 2026-08-09: 网盘资源大小 (2.5GB)
   resourceCount?: number;
   accessLevel?: string;
   importChannel?: string;
   payType?: string;
   category?: string;
   tmdbType?: 'movie' | 'tv';
+  link?: string;             // 2026-08-09: 网盘直链, linkMode 时卡片 onClick 直接开
+  lumenCost?: number;        // 2026-08-09: 流明消耗 (code payType 用)
+  noPoster?: boolean;        // 2026-08-09: true 时走 source 卡片 (无海报, 用 source icon 兜底)
 }
 
 interface SectionProps {
@@ -34,10 +39,32 @@ interface SectionProps {
   items: SectionItem[];
   accent?: 'cyan' | 'violet' | 'amber' | 'pink' | 'emerald';
   loading?: boolean;
+  linkMode?: boolean;     // 2026-08-09: 网盘资源模式, 卡片 onClick 直接 window.open(it.link) 不跳详情页
 }
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
 const TMDB_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
+
+// 2026-08-09: 网盘资源卡片配色 (noPoster 模式用)
+//  - source key 是 source 字段 (baidu/quark/aliyun/magnet/ed2k 等)
+//  - 没匹配到的用默认灰
+const SOURCE_META: Record<string, { emoji: string; gradient: string; text: string }> = {
+  baidu:    { emoji: '💾', gradient: 'from-blue-500/40 to-cyan-500/30',    text: 'text-blue-200' },
+  quark:    { emoji: '⚡', gradient: 'from-violet-500/40 to-fuchsia-500/30', text: 'text-violet-200' },
+  aliyun:   { emoji: '☁️', gradient: 'from-orange-500/40 to-amber-500/30',  text: 'text-orange-200' },
+  ali:      { emoji: '☁️', gradient: 'from-orange-500/40 to-amber-500/30',  text: 'text-orange-200' },
+  magnet:   { emoji: '🧲', gradient: 'from-rose-500/40 to-pink-500/30',     text: 'text-rose-200' },
+  ed2k:     { emoji: '🔗', gradient: 'from-emerald-500/40 to-teal-500/30',  text: 'text-emerald-200' },
+  thunder:  { emoji: '⚡', gradient: 'from-sky-500/40 to-blue-500/30',      text: 'text-sky-200' },
+  xunlei:   { emoji: '⚡', gradient: 'from-sky-500/40 to-blue-500/30',      text: 'text-sky-200' },
+  uc:       { emoji: '☁️', gradient: 'from-red-500/40 to-orange-500/30',    text: 'text-red-200' },
+  '115':    { emoji: '📦', gradient: 'from-green-500/40 to-emerald-500/30', text: 'text-green-200' },
+  default:  { emoji: '📁', gradient: 'from-slate-500/40 to-gray-500/30',   text: 'text-slate-200' },
+};
+function getSourceMeta(src?: string) {
+  if (!src) return SOURCE_META.default;
+  return SOURCE_META[src.toLowerCase()] || SOURCE_META.default;
+}
 
 const accentColor: Record<string, { bg: string; text: string; border: string; glow: string }> = {
   cyan:    { bg: 'from-cyan-500/10 to-blue-500/10',    text: 'text-cyan-300',    border: 'border-cyan-500/30',    glow: 'shadow-cyan-500/10' },
@@ -47,7 +74,7 @@ const accentColor: Record<string, { bg: string; text: string; border: string; gl
   emerald: { bg: 'from-emerald-500/10 to-green-500/10', text: 'text-emerald-300', border: 'border-emerald-500/30', glow: 'shadow-emerald-500/10' },
 };
 
-export default function HomeSection({ title, titleEn, emoji, href, items, accent = 'cyan', loading }: SectionProps) {
+export default function HomeSection({ title, titleEn, emoji, href, items, accent = 'cyan', loading, linkMode }: SectionProps) {
   const color = accentColor[accent] || accentColor.cyan;
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [canLeft, setCanLeft] = useState(false);
@@ -135,80 +162,133 @@ export default function HomeSection({ title, titleEn, emoji, href, items, accent
             className="flex gap-3 overflow-x-auto pb-2 scroll-smooth"
             style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(255,255,255,0.1) transparent' }}
           >
-            {items.map((it, i) => (
-              <motion.div
-                key={it.id + '-' + i}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.02, duration: 0.3 }}
-                className="flex-shrink-0 w-[140px] sm:w-[160px] cursor-pointer group/card"
-                onClick={() => {
-                  // 2026-08-04 P9.3: VIP 资源跳 /vip/[id] 业务页 (playerla + m3u8 视频)
-                  //   - 用户原话: "我是看视频的专区你给我弄成什么了"
-                  //   - /vip/[id] 才是真正放 playerla iframe / m3u8 的视频页
-                  //   - 通用 /tmdb/[type]/[id] 是下载链接列表, 不能播
-                  // 判定: accessLevel==='vip' 或 importChannel 是 zezhe 系列 → VIP 专区资源
-                  const isVipResource = it.accessLevel === 'vip' || it.importChannel === 'zezhe' || it.importChannel === 'zezemom_excel';
-                  if (isVipResource && it.id) {
-                    location.href = `/vip/${it.id}`;
-                  } else if (it.tmdbId && it.tmdbType) {
-                    location.href = `/tmdb/${it.tmdbType}/${it.tmdbId}`;
-                  } else {
-                    location.href = `/titles`;
-                  }
-                }}
-              >
-                {/* 海报 */}
-                <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-1.5 ring-1 ring-white/5 group-hover/card:ring-violet-400/40 transition">
-                  <img
-                    src={it.posterUrl || TMDB_FALLBACK}
-                    alt={it.title}
-                    className="w-full h-full object-cover group-hover/card:scale-105 transition duration-500"
-                    onError={(e: any) => { e.target.src = TMDB_FALLBACK; }}
-                    loading="lazy"
-                    decoding="async"
-                  />
-                  {/* 类型/年份标签 */}
-                  <div className="absolute top-1.5 left-1.5 flex flex-col gap-1 items-start">
-                    {it.tmdbType && (
-                      <span className="px-1.5 py-0.5 rounded bg-black/70 text-[9px] text-white/90 backdrop-blur">
-                        {it.tmdbType === 'movie' ? '🎬' : '📺'}
-                      </span>
-                    )}
-                    {it.importChannel === 'zezhe' && (
-                      <span className="px-1.5 py-0.5 rounded bg-gradient-to-r from-violet-500/80 to-pink-500/80 text-[9px] text-white font-medium">
-                        👑 泽泽妈
-                      </span>
-                    )}
-                    {it.accessLevel === 'vip' && (
-                      <span className="px-1.5 py-0.5 rounded bg-amber-500/80 text-[9px] text-white font-medium">
-                        🔒 VIP
-                      </span>
-                    )}
-                    {it.payType === 'code' && (
-                      <span className="px-1.5 py-0.5 rounded bg-purple-500/80 text-[9px] text-white font-medium">
-                        💰 解锁
-                      </span>
-                    )}
-                  </div>
-                  {/* 评分 */}
-                  {it.voteAverage != null && it.voteAverage > 0 && (
-                    <div className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[10px] text-yellow-300 backdrop-blur">
-                      ★ {it.voteAverage.toFixed(1)}
+            {items.map((it, i) => {
+              // 2026-08-09: noPoster (网盘资源) 走 source 卡片, 有 poster 走老海报卡片
+              //   - 其他 section (upcoming/basic/themes) poster 不为 null, 走老逻辑, 不影响
+              const isSourceCard = !!it.noPoster;
+              const sm = isSourceCard ? getSourceMeta(it.source) : null;
+              return (
+                <motion.div
+                  key={it.id + '-' + i}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.02, duration: 0.3 }}
+                  className="flex-shrink-0 w-[140px] sm:w-[160px] cursor-pointer group/card"
+                  onClick={() => {
+                    // 2026-08-09: linkMode (网盘资源) 优先开网盘直链, 不跳详情页
+                    if (linkMode && it.link) {
+                      try {
+                        window.open(it.link, '_blank', 'noopener,noreferrer');
+                      } catch {}
+                      return;
+                    }
+                    // 2026-08-04 P9.3: VIP 资源跳 /vip/[id] 业务页 (playerla + m3u8 视频)
+                    //   - 用户原话: "我是看视频的专区你给我弄成什么了"
+                    //   - /vip/[id] 才是真正放 playerla iframe / m3u8 的视频页
+                    //   - 通用 /tmdb/[type]/[id] 是下载链接列表, 不能播
+                    // 判定: accessLevel==='vip' 或 importChannel 是 zezhe 系列 → VIP 专区资源
+                    const isVipResource = it.accessLevel === 'vip' || it.importChannel === 'zezhe' || it.importChannel === 'zezemom_excel';
+                    if (isVipResource && it.id) {
+                      location.href = `/vip/${it.id}`;
+                    } else if (it.tmdbId && it.tmdbType) {
+                      location.href = `/tmdb/${it.tmdbType}/${it.tmdbId}`;
+                    } else {
+                      location.href = `/titles`;
+                    }
+                  }}
+                >
+                  {isSourceCard && sm ? (
+                    // ============ 网盘资源卡片 (无海报) ============
+                    <div className={`relative aspect-[2/3] rounded-xl overflow-hidden bg-gradient-to-br ${sm.gradient} mb-1.5 ring-1 ring-white/10 group-hover/card:ring-violet-400/40 transition`}>
+                      {/* 大 emoji 占位 */}
+                      <div className="absolute inset-0 flex flex-col items-center justify-center p-2">
+                        <div className="text-5xl sm:text-6xl drop-shadow-lg group-hover/card:scale-110 transition duration-500">{sm.emoji}</div>
+                        <div className={`mt-2 px-1.5 py-0.5 rounded text-[9px] bg-black/40 ${sm.text} font-medium uppercase tracking-wide`}>
+                          {it.sourceDisplay || it.source}
+                        </div>
+                      </div>
+                      {/* VIP 锁 / code 解锁 角标 */}
+                      <div className="absolute top-1.5 right-1.5 flex flex-col gap-1 items-end">
+                        {it.accessLevel === 'vip' && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-500/80 text-[9px] text-white font-medium">
+                            🔒 VIP
+                          </span>
+                        )}
+                        {it.payType === 'code' && it.lumenCost != null && (
+                          <span className="px-1.5 py-0.5 rounded bg-purple-500/80 text-[9px] text-white font-medium">
+                            💰 {it.lumenCost}
+                          </span>
+                        )}
+                      </div>
+                      {/* 大小 右下角 */}
+                      {it.size && (
+                        <div className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/60 text-[10px] text-white/90 backdrop-blur font-medium">
+                          {it.size}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    // ============ 原海报卡片 (TMDB 资源) ============
+                    <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-1.5 ring-1 ring-white/5 group-hover/card:ring-violet-400/40 transition">
+                      <img
+                        src={it.posterUrl || TMDB_FALLBACK}
+                        alt={it.title}
+                        className="w-full h-full object-cover group-hover/card:scale-105 transition duration-500"
+                        onError={(e: any) => { e.target.src = TMDB_FALLBACK; }}
+                        loading="lazy"
+                        decoding="async"
+                      />
+                      {/* 类型/年份标签 */}
+                      <div className="absolute top-1.5 left-1.5 flex flex-col gap-1 items-start">
+                        {it.tmdbType && (
+                          <span className="px-1.5 py-0.5 rounded bg-black/70 text-[9px] text-white/90 backdrop-blur">
+                            {it.tmdbType === 'movie' ? '🎬' : '📺'}
+                          </span>
+                        )}
+                        {it.importChannel === 'zezhe' && (
+                          <span className="px-1.5 py-0.5 rounded bg-gradient-to-r from-violet-500/80 to-pink-500/80 text-[9px] text-white font-medium">
+                            👑 泽泽妈
+                          </span>
+                        )}
+                        {it.accessLevel === 'vip' && (
+                          <span className="px-1.5 py-0.5 rounded bg-amber-500/80 text-[9px] text-white font-medium">
+                            🔒 VIP
+                          </span>
+                        )}
+                        {it.payType === 'code' && (
+                          <span className="px-1.5 py-0.5 rounded bg-purple-500/80 text-[9px] text-white font-medium">
+                            💰 解锁
+                          </span>
+                        )}
+                      </div>
+                      {/* 评分 */}
+                      {it.voteAverage != null && it.voteAverage > 0 && (
+                        <div className="absolute bottom-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/70 text-[10px] text-yellow-300 backdrop-blur">
+                          ★ {it.voteAverage.toFixed(1)}
+                        </div>
+                      )}
                     </div>
                   )}
-                </div>
-                {/* 标题 */}
-                <h3 className="text-xs font-medium text-white/90 line-clamp-1 group-hover/card:text-violet-300 transition">
-                  {it.title}
-                </h3>
-                {/* 年份 + 源 */}
-                <div className="flex items-center gap-1 mt-0.5 text-[10px] text-white/40">
-                  {it.releaseDate && <span>{it.releaseDate.slice(0, 4)}</span>}
-                  {it.source && <span className="uppercase">· {it.source}</span>}
-                </div>
-              </motion.div>
-            ))}
+                  {/* 标题 (两种卡片共用) */}
+                  <h3 className="text-xs font-medium text-white/90 line-clamp-1 group-hover/card:text-violet-300 transition">
+                    {it.title}
+                  </h3>
+                  {/* 年份 + 源 */}
+                  <div className="flex items-center gap-1 mt-0.5 text-[10px] text-white/40">
+                    {isSourceCard ? (
+                      <>
+                        {it.category && <span className="line-clamp-1">{it.category}</span>}
+                      </>
+                    ) : (
+                      <>
+                        {it.releaseDate && <span>{it.releaseDate.slice(0, 4)}</span>}
+                        {it.source && <span className="uppercase">· {it.source}</span>}
+                      </>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
             {/* "更多" 占位卡 */}
             {href && (
               <div className="flex-shrink-0 w-[140px] sm:w-[160px] flex items-center justify-center">

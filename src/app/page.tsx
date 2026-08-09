@@ -159,7 +159,10 @@ export default function HomePage() {
         const [upRes, baRes, vipRes, thRes] = await Promise.allSettled([
           fetch('/api/upcoming?type=all&pageSize=12'),
           fetch('/api/basic?pageSize=12'),
-          fetch('/api/vip?pageSize=12'),
+          // 2026-08-09: VIP 多网盘改用 /api/catalog?section=vip (网盘资源, 跟 /library 一套)
+          //   - 之前用 /api/vip 返的是 xingfan 视频流, 跟"VIP 多网盘"描述不符
+          //   - 跟 library page.tsx 同源, 改 href="/library?section=vip"
+          fetch('/api/catalog?section=vip&pageSize=12&zone=library'),
           fetch('/api/themes'),
         ]);
         if (cancelled) return;
@@ -169,7 +172,8 @@ export default function HomePage() {
         const thData = thRes.status === 'fulfilled' ? await thRes.value.json() : { themes: [] };
         setSecUpcoming((upData.items || []).map(mapToSection));
         setSecBasic((baData.items || []).map(mapToSection));
-        setSecVip((vipData.items || []).map(mapToSection));
+        // 2026-08-09: VIP 多网盘用 catalog 字段映射 (id/name/source/link/noPoster 跟 vip API 不一样)
+        setSecVip((vipData.items || []).map(mapToCatalog));
         setSecThemes(thData.themes || []);
         setSecLoading(false);
       } catch (e) {
@@ -198,6 +202,32 @@ export default function HomePage() {
       payType: it.payType ?? it.pay_type,
       category: it.category,
       tmdbType: it.tmdbType ?? it.tmdb_type,
+    };
+  }
+
+  // 2026-08-09: /api/catalog (网盘资源库, 跟 /library 同源) 字段映射
+  //   - id: xx_resources.id (主键)
+  //   - name → title
+  //   - poster: 大多数 null, 走 noPoster=true 让 Section 渲染 source 卡片
+  //   - source/sourceDisplay: 百度/夸克/磁力 等
+  //   - link: 网盘直链, linkMode 模式下卡片 onClick 直接 window.open
+  //   - size: "2.5GB" 格式
+  function mapToCatalog(it: any): SectionItem {
+    const hasPoster = !!it.poster;
+    return {
+      id: it.id,
+      title: it.name || '',
+      posterUrl: it.poster || '',  // 空串, 配合 noPoster 判定
+      source: it.source,
+      sourceDisplay: it.sourceDisplay,
+      size: it.size,
+      accessLevel: it.accessLevel,
+      importChannel: it.importChannel,
+      payType: it.payType,
+      category: it.category,
+      link: it.link || (it.links && it.links[0]?.url) || '',
+      noPoster: !hasPoster,  // 触发 Section 走 source 卡片
+      lumenCost: it.lumenCost,
     };
   }
 
@@ -744,14 +774,16 @@ export default function HomePage() {
         />
 
         {/* 4. VIP 多网盘 - 2026-08-08 改: 之前叫 "VIP专区" 跟 lovemovie 子域名 (VIP 在线影视) 撞名, 实际是 VIP 才有的多网盘资源 (百度/阿里/夸克/磁力/ed2k) */}
+        {/* 2026-08-09: linkMode 让卡片 onClick 直接开网盘链接, noPoster 让 Section 走 source 卡片 (无海报) */}
         <HomeSection
           title="VIP多网盘"
           titleEn="VIP MULTI-DRIVE"
           emoji="💎"
           accent="amber"
-          href="/vip"
+          href="/library?section=vip"
           items={secVip}
           loading={secLoading}
+          linkMode
         />
 
         {/* 5. 主题专区 (横排卡片) */}
