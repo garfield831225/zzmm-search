@@ -6,6 +6,11 @@ import { rateLimit, getClientIp } from '@/lib/rate-limit';
 export const dynamic = 'force-dynamic';
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
+// 2026-08-10: VIP 1-day 激活码每个账号每月限领 1 次 (自然月, 每月 1 号 0 点刷)
+//   - 硬规则: code_type='vip' AND duration=1 的码, 同一 user 同一自然月只能成功领一次
+//   - 不影响 30/90/365/永久 码
+//   - 失败返 429 + code='monthly_limit_exceeded' + next_available_at (下月 1 号 ISO)
+
 // 三种码格式: 14位带前缀 (XY-/WD-) / 8位 (旧) / 自定义 (vip_custom)
 // 14位: XY-ABCD-EFGH-IJKL
 const CODE_REGEX_14 = /^[A-Z]{2}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}-[A-Za-z0-9]{4}$/;
@@ -83,6 +88,32 @@ export async function POST(req: NextRequest) {
 
     // === VIP 套餐码: 叠加 expire_at ===
     if (c.code_type === 'vip') {
+      // 2026-08-10: VIP 1-day 每月限领 1 次 (自然月) - 在标码 is_used 之前检查
+      //   - 月份定义: date_trunc('month', NOW()) (PostgreSQL 自然月, 每月 1 号 0 点刷)
+      //   - 不影响 30/90/365/永久 码 (duration != 1 跳过)
+      if (c.duration === 1) {
+        const monthDup = await sql`
+          SELECT id, used_at
+          FROM xx_activation_codes
+          WHERE used_by = ${userId}
+            AND code_type = 'vip'
+            AND duration = 1
+            AND is_used = true
+            AND used_at >= date_trunc('month', NOW())
+          LIMIT 1
+        `;
+        if ((monthDup as any[])[0]) {
+          const lastUsed = new Date((monthDup as any[])[0].used_at);
+          // 下月 1 号 0 点
+          const nextAvailable = new Date(lastUsed.getFullYear(), lastUsed.getMonth() + 1, 1, 0, 0, 0);
+          return NextResponse.json({
+            error: `本月已领过 1 天 VIP 激活码 (上次: ${lastUsed.toLocaleString('zh-CN')}), 下次可领: ${nextAvailable.toLocaleString('zh-CN')}`,
+            code: 'monthly_limit_exceeded',
+            next_available_at: nextAvailable.toISOString(),
+          }, { status: 429 });
+        }
+      }
+
       // 取用户当前 expire_at 和 user_group
       const users: any = await sql`SELECT user_group, expire_at FROM xx_users WHERE id = ${userId}`;
       if (!users[0]) return NextResponse.json({ error: '用户不存在' }, { status: 404 });
