@@ -85,7 +85,48 @@ export default function ProfilePage() {
 
   const showToast = (type: 'success' | 'error', msg: string) => {
     setToast({ type, msg });
-    setTimeout(() => setToast(null), 2500);
+  };
+
+  // 2026-08-11: 积分兑换流明 (复用 /api/points/redeem, 10 积分 = 1 流明)
+  const handlePointsRedeem = async () => {
+    if (pointsBalance < 10) {
+      showToast('error', `积分不足, 当前 ${pointsBalance} 积分, 至少需要 10 积分 (1 流明)`);
+      return;
+    }
+    const maxLumen = Math.floor(pointsBalance / 10);
+    const maxAmount = Math.min(pointsBalance, 10000);
+    const input = prompt(
+      `💡 积分兑换流明\n\n` +
+      `比例: 10 积分 = 1 流明\n` +
+      `当前积分: ${pointsBalance}\n` +
+      `最多可兑: ${maxAmount} 积分 = ${Math.floor(maxAmount / 10)} 流明\n` +
+      `(必须 10 的倍数, 单次最多 10000 积分 / 1000 流明)\n\n` +
+      `请输入要兑换的积分数量:`, '10'
+    );
+    if (!input) return;
+    const amount = parseInt(input, 10);
+    if (!amount || amount < 10 || amount > 10000 || amount % 10 !== 0) {
+      showToast('error', '兑换数量必须是 10-10000 的 10 倍数');
+      return;
+    }
+    try {
+      const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
+      const r = await fetch('/api/points/redeem', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+        body: JSON.stringify({ amount }),
+      });
+      const d = await r.json();
+      if (d.error) {
+        showToast('error', d.error);
+      } else {
+        showToast('success', d.message || `✅ 兑换成功: ${amount} 积分 → ${d.lumenGet} 流明`);
+        if (typeof d.pointsAfter === 'number') setPointsBalance(d.pointsAfter);
+        if (typeof d.lumenAfter === 'number') setLumenBalance(d.lumenAfter);
+      }
+    } catch (e: any) {
+      showToast('error', e.message);
+    }
   };
 
   useEffect(() => {
@@ -393,16 +434,27 @@ export default function ProfilePage() {
 
         {/* 4 个统计卡 */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
-          {/* 积分 / 流明 */}
+          {/* 2026-08-11: 流明卡片 (原错误标"积分" → 实际是 lumen, 改"流明 💡")
+              - 加说明: 流明是购买独立付费资源所需
+              - 充值按钮左边加积分兑换 (复用 /api/points/redeem 10:1 模式) */}
           <div className="rounded-2xl p-4 md:p-5 border border-amber-500/20 bg-gradient-to-br from-amber-500/5 to-yellow-500/5 relative overflow-hidden">
             <div className="absolute top-2 right-2 w-12 h-12 rounded-full bg-amber-500/10 blur-xl" />
-            {/* 2026-07-29: 加"充值"按钮 (跳 /upgrade 买流明) */}
-            <Link href="/upgrade#lumen" className="absolute top-2 right-2 z-10 px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-md text-[10px] text-amber-200 font-medium transition">
-              ➕ 充值
-            </Link>
-            <div className="text-xs text-amber-300/80 mb-1">积 分</div>
+            {/* 充值 + 积分兑换 2 个按钮 (积分兑换左, 充值右) */}
+            <div className="absolute top-2 right-2 z-10 flex gap-1">
+              <button
+                onClick={handlePointsRedeem}
+                title={`积分兑换流明 (10 积分 = 1 流明, 当前 ${pointsBalance} 积分)`}
+                className="px-2 py-0.5 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-md text-[10px] text-cyan-200 font-medium transition"
+              >
+                🔁 积分兑换
+              </button>
+              <Link href="/upgrade#lumen" className="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-md text-[10px] text-amber-200 font-medium transition">
+                ➕ 充值
+              </Link>
+            </div>
+            <div className="text-xs text-amber-300/80 mb-1">流 明 💡</div>
             <div className="text-2xl md:text-3xl font-bold text-amber-300">{lumenBalance}</div>
-            <div className="text-[10px] text-white/40 mt-1">可用流明</div>
+            <div className="text-[10px] text-white/40 mt-1">流明是购买独立付费资源所需</div>
           </div>
           {/* 分享数 */}
           <div className="rounded-2xl p-4 md:p-5 border border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 to-green-500/5 relative overflow-hidden">
