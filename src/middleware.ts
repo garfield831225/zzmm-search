@@ -181,6 +181,11 @@ const PUBLIC_PATHS = [
   '/api/requests',
   '/api/points/redeem',
   '/api/upload',
+  // 2026-08-12: 公共 TMDB 匹配 API (跨服务调用, moviezone / 未来子站)
+  //   - Bearer admin/vip token 鉴权在 route 内
+  //   - 共享 100 req/s admin TMDB 限速, 不额外限速
+  '/api/match-single',
+  '/api/match-batch',
 ];
 
 export async function middleware(request: NextRequest) {
