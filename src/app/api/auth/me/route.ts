@@ -64,6 +64,9 @@ export async function GET(req: NextRequest) {
             VALUES (${u.id}, 0, 0, 'expire', NULL, ${`VIP 过期降级 basic (lazy check, expire_at=${u.expire_at})`}, NOW())
           `;
           u.user_group = 'basic';
+          // 2026-08-12: 降级同时清 expire_at 返给前端, 不然 VipCountdown 看到过期值继续触发 reload 死循环
+          // db 字段不重置 (保留历史), 只清返回的 u 字段
+          u.expire_at = null;
         } catch (e: any) {
           console.error('[auth/me] lazy expire check failed:', e.message);
         }

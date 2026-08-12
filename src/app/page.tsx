@@ -747,8 +747,9 @@ export default function HomePage() {
         <HomeBanner />
 
         {/* 1.4 2026-08-12: VIP/basic 倒计时 - 到 0:00 自动清 token + 跳登录
-              (后端 middleware 兜底: middleware.ts 实时查 expire_at, 过期就 redirect /login?error=vip_expired) */}
-        {user?.expire_at && <VipCountdown expireAt={user.expire_at} />}
+              (后端 middleware 兜底: middleware.ts 实时查 expire_at, 过期就 redirect /login?error=vip_expired)
+              2026-08-12 修死循环: 必须加 user.group==='vip' 条件, 不然降级后 expire_at 残留会一直触发 reload */}
+        {user?.group === 'vip' && user?.expire_at && <VipCountdown expireAt={user.expire_at} />}
 
         {/* 1.5 2026-08-05 P11: TMDB 最新预告片区 (横幅下面) */}
         <TrailerRow />
@@ -1799,7 +1800,12 @@ function VipCountdown({ expireAt }: { expireAt: string }) {
         setTimeout(() => t.remove(), 3500);
       } catch {}
       // reload 页面让 middleware 降级
-      setTimeout(() => { window.location.reload(); }, 800);
+      // 2026-08-12 修死循环: 同时清 localStorage.user, 强制 sync effect 重新拉 /api/auth/me
+      //   不然 localStorage 还是老 vip + 过期 expire_at, reload 后又触发又弹 toast
+      setTimeout(() => {
+        try { localStorage.removeItem('user'); } catch {}
+        window.location.reload();
+      }, 800);
     }
   }, [now, expireAt, expired]);
 
