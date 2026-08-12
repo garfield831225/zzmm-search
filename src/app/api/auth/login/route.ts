@@ -18,11 +18,6 @@ const CORS_HEADERS = {
   'Access-Control-Max-Age': '86400',
 };
 
-// 加 CORS 的 json 响应
-function jsonWithCors(body: any, init?: ResponseInit) {
-  return NextResponse.json(body, { ...init, headers: { ...CORS_HEADERS, ...(init?.headers as any || {}) } });
-}
-
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
@@ -72,11 +67,11 @@ export async function POST(req: NextRequest) {
     // 验证码校验（可选，跳过也不阻止登录）
 //     const storedCaptcha = req.cookies.get('captcha_code')?.value || '';
 //     if (captcha && storedCaptcha && captcha.toLowerCase() !== storedCaptcha.toLowerCase()) {
-//       return NextResponse.json({ error: '验证码错误' }, { status: 400 });
+//       return NextResponse.json({ error: '验证码错误' }, { status: 400, headers: CORS_HEADERS });
 //     }
 
     if (!username || !password) {
-      return jsonWithCors({ error: '用户名和密码不能为空' }, { status: 400 });
+      return NextResponse.json({ error: '用户名和密码不能为空' }, { status: 400, headers: CORS_HEADERS });
     }
 
     const sql = neon(process.env.DATABASE_URL || '');
@@ -85,17 +80,17 @@ export async function POST(req: NextRequest) {
     const users = rows as any[];
 
     if (!users.length) {
-      return jsonWithCors({ error: '用户名或密码错误' }, { status: 401 });
+      return NextResponse.json({ error: '用户名或密码错误' }, { status: 401, headers: CORS_HEADERS });
     }
 
     const user = users[0];
     if (user.status !== 'active') {
-      return jsonWithCors({ error: '账号已被禁用' }, { status: 403 });
+      return NextResponse.json({ error: '账号已被禁用' }, { status: 403, headers: CORS_HEADERS });
     }
 
     const valid = bcrypt.compareSync(password, user.password_hash);
     if (!valid) {
-      return jsonWithCors({ error: '用户名或密码错误' }, { status: 401 });
+      return NextResponse.json({ error: '用户名或密码错误' }, { status: 401, headers: CORS_HEADERS });
     }
 
     // 更新最后登录时间 (同步, 单点登录挤下线依赖此时间戳)
@@ -125,7 +120,7 @@ export async function POST(req: NextRequest) {
       domain: '.zzmm-search.uk',
     });
 
-    return jsonWithCors({
+    return NextResponse.json({
       token,
       user: {
         id: user.id,
@@ -133,8 +128,8 @@ export async function POST(req: NextRequest) {
         group: user.user_group,
         expire_at: user.expire_at,
       },
-    });
+    }, { headers: CORS_HEADERS });
   } catch (e: any) {
-    return jsonWithCors({ error: e.message }, { status: 500 });
+    return NextResponse.json({ error: e.message }, { status: 500, headers: CORS_HEADERS });
   }
 }

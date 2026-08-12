@@ -25,10 +25,6 @@ const CORS_HEADERS = {
   'Access-Control-Max-Age': '86400',
 };
 
-function jsonWithCors(body: any, init?: ResponseInit) {
-  return NextResponse.json(body, { ...init, headers: { ...CORS_HEADERS, ...(init?.headers as any || {}) } });
-}
-
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
@@ -109,7 +105,7 @@ export async function GET(req: NextRequest) {
       category: r.category,
     }));
 
-    return jsonWithCors({
+    return NextResponse.json({
       total,
       page,
       pageSize,
@@ -117,10 +113,11 @@ export async function GET(req: NextRequest) {
       items,
     }, {
       headers: {
+        ...CORS_HEADERS,
         'Cache-Control': 'no-store, no-cache, must-revalidate',
       },
     });
   } catch (e: any) {
-    return jsonWithCors({ error: e.message?.slice(0, 200) }, { status: 500 });
+    return NextResponse.json({ error: e.message?.slice(0, 200) }, { status: 500, headers: CORS_HEADERS });
   }
 }
