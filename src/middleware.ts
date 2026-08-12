@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { jwtVerify } from 'jose';  // 2026-07-24: 改用 jose 库, Edge Runtime 友好
+import { isFutureTime } from '@/lib/time';  // 2026-08-12: VIP/basic 过期实时踢
 
 const JWT_SECRET_RAW = process.env.JWT_SECRET || 'cLWhs2015';
 // jose 需要 Uint8Array 形式的 secret
@@ -261,13 +262,16 @@ export async function middleware(request: NextRequest) {
   // 2026-07-29: 单点登录 - 校验 token iat vs user.last_login
   // 新登录会 UPDATE last_login=NOW(), 比 token.iat 新 → 旧 token 失效 → 跳登录 + Toast
   // admin 不挤 (怕自己误踢)
+  // 2026-08-12: 加 expire_at 实时检查 (VIP/basic 过期, 之前 middleware 不查, 用户能继续访问 + 前端 cache 显示 vip 权限)
+  //   - 跟被挤下线一样跳登录 + error=vip_expired, 清 cookie 强制重新登录
+  //   - admin 永久, 跳过; user 没 expire_at, 跳过
   try {
     const secret = new TextEncoder().encode(process.env.JWT_SECRET || '');
     const { payload } = await jwtVerify(token, secret);
     if ((payload as any)?.group !== 'admin') {
       const { neon } = await import('@neondatabase/serverless');
       const sql = neon(process.env.DATABASE_URL || '');
-      const r = await sql`SELECT last_login, status FROM xx_users WHERE id = ${payload.id} LIMIT 1` as any[];
+      const r = await sql`SELECT last_login, status, user_group, expire_at FROM xx_users WHERE id = ${payload.id} LIMIT 1` as any[];
       const u = r[0];
       if (!u || u.status !== 'active') {
         // 账号禁用/不存在 → 跳登录
@@ -275,6 +279,19 @@ export async function middleware(request: NextRequest) {
         r2.searchParams.set('redirect', pathname);
         r2.searchParams.set('error', 'account_disabled');
         const res = NextResponse.redirect(r2);
+        res.cookies.delete('zzmm_token');
+        res.cookies.delete('token');
+        return res;
+      }
+      // 2026-08-12: VIP/basic 过期实时踢 (expire_at < NOW() 跳登录)
+      //   - isFutureTime(null) = true (永久), isFutureTime(future) = true, isFutureTime(past) = false
+      //   - user 跟 admin 不进这分支 (getUserGroup 永远 'user', 或没 expire_at)
+      if ((u.user_group === 'vip' || u.user_group === 'basic') && !isFutureTime(u.expire_at)) {
+        const rExp = new URL('/login', request.url);
+        rExp.searchParams.set('redirect', pathname);
+        rExp.searchParams.set('error', 'vip_expired');
+        if (u.expire_at) rExp.searchParams.set('expired_at', String(u.expire_at));
+        const res = NextResponse.redirect(rExp);
         res.cookies.delete('zzmm_token');
         res.cookies.delete('token');
         return res;

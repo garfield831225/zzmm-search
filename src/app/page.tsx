@@ -746,6 +746,10 @@ export default function HomePage() {
         {/* 1. 顶部 banner 轮播 */}
         <HomeBanner />
 
+        {/* 1.4 2026-08-12: VIP/basic 倒计时 - 到 0:00 自动清 token + 跳登录
+              (后端 middleware 兜底: middleware.ts 实时查 expire_at, 过期就 redirect /login?error=vip_expired) */}
+        {user?.expire_at && <VipCountdown expireAt={user.expire_at} />}
+
         {/* 1.5 2026-08-05 P11: TMDB 最新预告片区 (横幅下面) */}
         <TrailerRow />
 
@@ -1761,6 +1765,74 @@ export default function HomePage() {
           </div>
         </div>
       )}
+      </div>
+    </div>
+  );
+}
+
+// 2026-08-12: VIP/basic 倒计时组件 (D 方案 - 前端倒计时 + 后端 middleware 兜底)
+//   - 实时显示剩余时间, 颜色随紧急度变化 (>1天 cyan / <1天 amber / <1小时 red)
+//   - 到 0:00 立刻清 localStorage + cookie + 跳 /login?error=vip_expired
+//   - 后端 middleware 兜底 (防止用户改本地时间绕过, 或 user 不在 / 页面)
+function VipCountdown({ expireAt }: { expireAt: string }) {
+  const [now, setNow] = useState<number>(() => Date.now());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  // 到 0:00 自动踢 (清 localStorage + cookie + 跳登录)
+  useEffect(() => {
+    const ts = new Date(expireAt).getTime();
+    if (!isNaN(ts) && ts <= now) {
+      try {
+        localStorage.removeItem('token');
+        localStorage.removeItem('zzmm_token');
+        localStorage.removeItem('adminToken');
+        localStorage.removeItem('user');
+        // 清 cookie (3 种 domain 尝试, 兼容子域名)
+        const expires = 'expires=Thu, 01 Jan 1970 00:00:00 GMT';
+        document.cookie = `zzmm_token=; ${expires}; path=/; domain=.zzmm-search.uk`;
+        document.cookie = `zzmm_token=; ${expires}; path=/`;
+        document.cookie = `token=; ${expires}; path=/; domain=.zzmm-search.uk`;
+        document.cookie = `token=; ${expires}; path=/`;
+      } catch {}
+      const cur = typeof window !== 'undefined' ? window.location.pathname : '/';
+      window.location.href = `/login?error=vip_expired&expired_at=${encodeURIComponent(expireAt)}&redirect=${encodeURIComponent(cur)}`;
+    }
+  }, [now, expireAt]);
+
+  const ts = new Date(expireAt).getTime();
+  if (isNaN(ts) || ts <= now) return null;
+  const diff = ts - now;
+  const days = Math.floor(diff / 86400000);
+  const hours = Math.floor((diff % 86400000) / 3600000);
+  const mins = Math.floor((diff % 3600000) / 60000);
+  const secs = Math.floor((diff % 60000) / 1000);
+
+  // 颜色: < 1 小时 red / < 1 天 amber / 否则 cyan
+  const urgent = diff < 3600000;
+  const warning = diff < 86400000;
+  const cls = urgent
+    ? 'bg-gradient-to-r from-red-500/15 to-rose-500/15 border-red-500/40 text-red-200'
+    : warning
+    ? 'bg-gradient-to-r from-amber-500/15 to-orange-500/15 border-amber-500/40 text-amber-200'
+    : 'bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border-cyan-500/30 text-cyan-200';
+
+  return (
+    <div className={`mx-4 mt-3 rounded-xl border ${cls} px-4 py-2.5 flex items-center gap-3`}>
+      <Crown size={18} className="shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-semibold">
+          {urgent ? '⏰ VIP 即将到期' : '👑 VIP 会员剩余时间'}
+        </div>
+        <div className="text-[11px] text-white/50 mt-0.5">
+          到期时间: {new Date(expireAt).toLocaleString('zh-CN')}
+        </div>
+      </div>
+      <div className="text-lg font-bold tabular-nums">
+        {days > 0 ? `${days}天 ` : ''}{String(hours).padStart(2, '0')}:{String(mins).padStart(2, '0')}:{String(secs).padStart(2, '0')}
       </div>
     </div>
   );
