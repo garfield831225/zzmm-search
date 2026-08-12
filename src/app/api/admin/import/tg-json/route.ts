@@ -299,22 +299,31 @@ export async function POST(req: NextRequest) {
     // Neon serverless v3 的 RETURNING 不可靠, 不能用 r?.[0]?.id 判定
     // ANY() array literal 对中文/特殊字符转义坏, 改单条 SELECT 50 并发
     // 2026-07-26 改: 50 并发 → 5 并发 (Neon 免费版 RPS 限制 5/s, 50 并发排队卡到 100s+)
-    // 测速: 300 条 × 2 链接 = 600 INSERT @ CONCURRENCY=50 要 126s, @5 应该 30s
-    const CONCURRENCY = 5;
+    // 2026-08-12 改: 5 并发 → 2 并发 (用户报 batch 1 288 条 90s 超时 + batch 2 46s 网络断开)
+    //   实测: 5 并发 × 3 SQL/条 = 174 SQL, 90s 内打完撞 Neon RPS 5 限制, Neon 端拒后续 SQL 触发 batch 2 失败
+    //   改 2 并发 + 合并 before+after SELECT → 2 SQL/条, 288 条 144 SQL 在 RPS 5 内能稳定跑
+    const CONCURRENCY = 2;
 
     for (let i = 0; i < candidates.length; i += CONCURRENCY) {
       const chunk = candidates.slice(i, i + CONCURRENCY);
 
-      // 1. before: 50 并发查 (link, name) 是否存在
+      // 1. before: 并发查 (link, name) 是否存在 + 拿到 id (合并 before/after, 1 次 SELECT 拿所有)
+      //   2026-08-12 优化: 之前 2 次 SELECT (before + after), 改 1 次拿 (id, existed)
       const beforeResults = await Promise.all(chunk.map(async (c) => {
         try {
-          const r = await sql`SELECT 1 as hit FROM xx_resources WHERE link = ${c.link} AND name = ${c.name} LIMIT 1` as any[];
-          return { key: `${c.link}\u0000${c.name}`, existed: !!(r && r[0]) };
+          const r = await sql`SELECT id, name FROM xx_resources WHERE link = ${c.link} LIMIT 1` as any[];
+          const existing = r && r[0];
+          // existed: 链接 + 名字都匹配 (业务去重规则)
+          const existed = existing && existing.name === c.name;
+          return { key: `${c.link}\u0000${c.name}`, existed, id: existed ? existing.id : null };
         } catch {
-          return { key: `${c.link}\u0000${c.name}`, existed: false };
+          return { key: `${c.link}\u0000${c.name}`, existed: false, id: null };
         }
       }));
-      const existedSet = new Set(beforeResults.filter(r => r.existed).map(r => r.key));
+      const existedMap = new Map<string, { existed: boolean; id: number | null }>();
+      beforeResults.forEach((r) => {
+        existedMap.set(r.key, { existed: r.existed, id: r.id });
+      });
 
       // 2. INSERT (不依赖 RETURNING)
       // 2026-07-27: 加 doc_sheet 字段 (从 category 推, 套 sheet-mapping 合并规则)
@@ -340,18 +349,33 @@ export async function POST(req: NextRequest) {
         }
       }));
 
-      // 3. after: 50 并发查 id (新插入的)
-      const afterResults = await Promise.all(chunk.map(async (c) => {
-        try {
-          const r = await sql`SELECT id FROM xx_resources WHERE link = ${c.link} AND name = ${c.name} LIMIT 1` as any[];
-          return { key: `${c.link}\u0000${c.name}`, id: r?.[0]?.id };
-        } catch {
-          return { key: `${c.link}\u0000${c.name}`, id: null };
-        }
-      }));
+      // 3. after: 并发查 id (只查 INSERT 成功的 + 新插入的)
+      //   2026-08-12 优化: 只对没拿到 id 的查 (如果 before 找到了 id, INSERT 时 ON CONFLICT 覆盖, id 不变; 如果没找到, INSERT 新增, id 变化)
+      //   实际上用 RETURNING id 是最稳的, 但 Neon v3 sql template tag 不支持 RETURNING
+      //   所以保留 after SELECT, 但只对没拿 id 的查
+      const needAfterLookup = insertResults.filter(ir => {
+        if (!ir.ok) return false;
+        const m = existedMap.get(`${ir.c.link}\u0000${ir.c.name}`);
+        return m && !m.id;  // before 没找到 id 的 (说明是新插入)
+      });
+
       const idByKey = new Map<string, number>();
-      for (const r of afterResults) {
-        if (r.id) idByKey.set(r.key, r.id);
+      existedMap.forEach((m, key) => {
+        if (m.id) idByKey.set(key, m.id);
+      });
+
+      if (needAfterLookup.length > 0) {
+        const afterResults = await Promise.all(needAfterLookup.map(async (ir) => {
+          try {
+            const r = await sql`SELECT id FROM xx_resources WHERE link = ${ir.c.link} AND name = ${ir.c.name} LIMIT 1` as any[];
+            return { key: `${ir.c.link}\u0000${ir.c.name}`, id: r?.[0]?.id };
+          } catch {
+            return { key: `${ir.c.link}\u0000${ir.c.name}`, id: null };
+          }
+        }));
+        for (const r of afterResults) {
+          if (r.id) idByKey.set(r.key, r.id);
+        }
       }
 
       // 4. 副表 INSERT
@@ -363,7 +387,8 @@ export async function POST(req: NextRequest) {
           continue;
         }
         const key = `${ir.c.link}\u0000${ir.c.name}`;
-        const existed = existedSet.has(key);
+        const m = existedMap.get(key);
+        const existed = m?.existed || false;
         const id = idByKey.get(key);
         if (id && !existed) {
           // 真新插入

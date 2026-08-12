@@ -325,45 +325,49 @@ export default function ImportTgPage() {
       const batch = splitPayloads[i];
       addLog(`📤 [${i + 1}/${splitPayloads.length}] ${batch.name} (${batch.count} 条, ${(batch.bytes / 1024 / 1024).toFixed(2)}MB)`);
 
-      try {
-        const start = Date.now();
-        // 2026-07-26 改: 90s abort 早于 CF tunnel 524 timeout (100s)
-        // route.ts maxDuration=300, 但 CF 等 100s 就断开 → 524 HTML 错误
-        // 90s abort 让 client 主动断, 返 AbortError, 提示用户重试更小批
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 90_000);
-        let r: Response;
-        try {
-          r = await fetch('/api/admin/import/tg-json', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: 'Bearer ' + token,
-            },
-            body: JSON.stringify({ jsonContent: batch.jsonStr }),
-            signal: ctrl.signal,
-          });
-        } finally {
-          clearTimeout(timer);
-        }
-        const data = await r.json();
-        const duration = Date.now() - start;
+      // 2026-08-12: 加 retry 2 次 + 间隔 5s (Neon RPS 限流会被 batch 1 撞到, batch 2/3/4 可能被拒, retry 容错)
+      //   业务: 之前 116 批 28797 条, batch 1 90s + batch 2 46s 失败, 整个上传中断
+      //   现在每个 batch 失败时 sleep 5s 重试, 最多 3 次
+      const MAX_RETRIES = 3;
+      let lastError: any = null;
+      let success = false;
 
-        if (data.error) {
-          addLog(`❌ [${i + 1}] ${data.error}`);
-          allResults.push({
-            batch: i + 1,
-            total_messages: batch.count,
-            l1_candidates: 0, l1_inserted: 0, l1_skipped: 0, l1_failed: 0,
-            l2_candidates: 0, l2_inserted: 0, l2_queue_added: 0, l2_skipped: 0, l2_failed: 0,
-            by_category: {}, by_source: {}, duration_ms: duration, file_size_mb: 0,
-            errors: [data.error],
-          });
-        } else {
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const start = Date.now();
+          // 2026-07-26 改: 90s abort 早于 CF tunnel 524 timeout (100s)
+          // route.ts maxDuration=300, 但 CF 等 100s 就断开 → 524 HTML 错误
+          // 90s abort 让 client 主动断, 返 AbortError, 提示用户重试更小批
+          // 2026-08-12 改: 150s abort (Neon RPS 限流 + 288 条 2 并发实际 70-90s, 150s 给 buffer)
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 150_000);
+          let r: Response;
+          try {
+            r = await fetch('/api/admin/import/tg-json', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer ' + token,
+              },
+              body: JSON.stringify({ jsonContent: batch.jsonStr }),
+              signal: ctrl.signal,
+            });
+          } finally {
+            clearTimeout(timer);
+          }
+          const data = await r.json();
+          const duration = Date.now() - start;
+
+          if (data.error) {
+            // server 端返 error 也算失败, retry
+            lastError = new Error(data.error);
+            throw lastError;
+          }
+
           const s = data.summary || {};
           const l1 = s.l1 || {};
           const l2 = s.l2 || {};
-          addLog(`✅ [${i + 1}] L1入库 ${l1.inserted}/${l1.candidates}, L2入库 ${l2.inserted}/${l2.candidates} (队列+${l2.queue_added || 0}) ${duration}ms`);
+          addLog(`✅ [${i + 1}] L1入库 ${l1.inserted}/${l1.candidates}, L2入库 ${l2.inserted}/${l2.candidates} (队列+${l2.queue_added || 0}) ${duration}ms${attempt > 1 ? ` (第 ${attempt} 次成功)` : ''}`);
           if (data.by_category) {
             const top5 = Object.entries(data.by_category).slice(0, 5).map(([k, v]) => `${k}:${v}`).join(', ');
             addLog(`   📊 分类: ${top5}`);
@@ -390,16 +394,35 @@ export default function ImportTgPage() {
             file_size_mb: 0,
             errors: data.errors,
           });
+          success = true;
+          break;
+        } catch (e: any) {
+          lastError = e;
+          if (attempt < MAX_RETRIES) {
+            const errMsg = e.name === 'AbortError' ? '超时' : (e.message?.slice(0, 100) || '未知错误');
+            addLog(`⚠️ [${i + 1}] 第 ${attempt} 次失败 (${errMsg}), 5s 后重试...`);
+            await new Promise(r => setTimeout(r, 5000));
+          }
         }
-      } catch (e: any) {
-        // 2026-07-26: 细分错误, 给清晰重试提示
+      }
+
+      if (!success && lastError) {
+        const e = lastError;
         if (e.name === 'AbortError') {
-          addLog(`⏱️ [${i + 1}] 超时 (>240s), 批次 ${batch.count} 条太多被 Neon 卡住. 建议: 重新切更小批次 (500 条) 重试.`);
-        } else if (e.message?.includes('Failed to fetch')) {
-          addLog(`❌ [${i + 1}] 网络断开. 检查: 1) 浏览器没关 2) 域名 zzmm-search.uk 通 3) NAS systemd 在跑`);
+          addLog(`⏱️ [${i + 1}] 超时 (3 次重试都失败, >150s), 批次 ${batch.count} 条太多被 Neon 卡住. 建议: 重新切更小批次 (200 条) 重试.`);
+        } else if (e.message?.includes('Failed to fetch') || e.message?.includes('NetworkError')) {
+          addLog(`❌ [${i + 1}] 网络断开 (3 次重试都失败). 检查: 1) 浏览器没关 2) 域名 zzmm-search.uk 通 3) NAS systemd 在跑`);
         } else {
-          addLog(`❌ [${i + 1}] 网络错误: ${e.message?.slice(0, 200)}`);
+          addLog(`❌ [${i + 1}] 失败 (3 次重试): ${e.message?.slice(0, 200)}`);
         }
+        allResults.push({
+          batch: i + 1,
+          total_messages: batch.count,
+          l1_candidates: 0, l1_inserted: 0, l1_skipped: 0, l1_failed: 0,
+          l2_candidates: 0, l2_inserted: 0, l2_queue_added: 0, l2_skipped: 0, l2_failed: 0,
+          by_category: {}, by_source: {}, duration_ms: 0, file_size_mb: 0,
+          errors: [e.message?.slice(0, 200) || 'failed after 3 retries'],
+        });
       }
 
       setProgress(Math.round(((i + 1) / splitPayloads.length) * 100));
