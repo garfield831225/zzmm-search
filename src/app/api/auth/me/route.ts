@@ -58,14 +58,14 @@ export async function GET(req: NextRequest) {
       if (expireMs < Date.now()) {
         // 过期了, 降级
         try {
-          await sql`UPDATE xx_users SET user_group = 'basic' WHERE id = ${u.id} AND user_group = 'vip'`;
+          await sql`UPDATE xx_users SET user_group = 'basic', expire_at = NULL WHERE id = ${u.id} AND user_group = 'vip'`;
           await sql`
             INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description, created_at)
             VALUES (${u.id}, 0, 0, 'expire', NULL, ${`VIP 过期降级 basic (lazy check, expire_at=${u.expire_at})`}, NOW())
           `;
           u.user_group = 'basic';
-          // 2026-08-12: 降级同时清 expire_at 返给前端, 不然 VipCountdown 看到过期值继续触发 reload 死循环
-          // db 字段不重置 (保留历史), 只清返回的 u 字段
+          // 2026-08-12: 同步清 u.expire_at, 否则返回给前端时还是有值
+          // (虽然 db 已经清了, 但 u 已经是 SELECT 时的旧值, 防止 SELECT 后才过期 race)
           u.expire_at = null;
         } catch (e: any) {
           console.error('[auth/me] lazy expire check failed:', e.message);

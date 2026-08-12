@@ -42,6 +42,9 @@ export async function GET(request: NextRequest) {
     // 3) 批量降级到 basic
     // 2026-08-04 设计: 过期后
     //   - user_group: 'vip' → 'basic'
+    //   - expire_at: 2026-08-12 修死循环 — 同步清 NULL (跟 /api/auth/me lazy check 行为一致)
+    //     不然前端 VipCountdown 看到 group='vip' (假设) + 过期值会一直触发 reload
+    //     历史保留在 xx_lumen_logs type='expire' 流水里
     //   - weekly_credit: 不清 (但 weekly_credit 表可能 row 不存在, 跳过)
     //   - lumen 余额: 不动 (用户花钱买的, 不能偷)
     //   - 解锁历史: 不动 (用户之前买的, 永久有效)
@@ -50,7 +53,7 @@ export async function GET(request: NextRequest) {
 
     const upd = await sql`
       UPDATE xx_users
-      SET user_group = 'basic'
+      SET user_group = 'basic', expire_at = NULL
       WHERE id = ANY(${ids}::int[])
       RETURNING id, username
     `;
