@@ -17,6 +17,22 @@ export const maxDuration = 30;
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 
+// 2026-08-13: 公共 API (moviezone + 子站) - 加 CORS 头
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Max-Age': '86400',
+};
+
+function jsonWithCors(body: any, init?: ResponseInit) {
+  return NextResponse.json(body, { ...init, headers: { ...CORS_HEADERS, ...(init?.headers as any || {}) } });
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
 export async function GET(req: NextRequest) {
   const sql = neon(process.env.DATABASE_URL || '', {
     fetchOptions: { cache: 'no-store' },
@@ -93,7 +109,7 @@ export async function GET(req: NextRequest) {
       category: r.category,
     }));
 
-    return NextResponse.json({
+    return jsonWithCors({
       total,
       page,
       pageSize,
@@ -105,6 +121,6 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message?.slice(0, 200) }, { status: 500 });
+    return jsonWithCors({ error: e.message?.slice(0, 200) }, { status: 500 });
   }
 }

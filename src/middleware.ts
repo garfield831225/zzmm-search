@@ -53,6 +53,7 @@ const PUBLIC_PATHS = [
   '/vip-videos',
   '/api/vip-videos',
   '/api/user/activate',
+  '/api/auth/activate',  // 2026-08-13: 公共 API 别名 (moviezone + 子站跨域调用, 转发到 /api/user/activate)
   '/activate',
   '/profile',
   '/api/user/activations',
