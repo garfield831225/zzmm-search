@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, Star, Copy, ExternalLink, Calendar, Globe, Film, Tv, Users, Lock, Play } from 'lucide-react';
 import { SOURCE_DICT, getSourceInfo } from '@/lib/sources';
+import UploadButton from '@/components/UploadButton';
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p';
 
@@ -218,6 +219,26 @@ export default function TmdbDetailPage() {
             <Play size={18} /> 资源链接
             {resources && <span className="text-gray-500 text-xs">({resources.total} 条)</span>}
           </h2>
+
+          {/* 2026-08-12: 用户自行发布资源入口 (UploadButton mode='button')
+              - 用户原话: 之前有这个功能咋没了
+              - 8-9 cherry-pick 进了 UploadButton 组件, 但没在 page import, 这次接上 */}
+          <div className="mb-4">
+            <UploadButton
+              tmdbId={tmdbId}
+              tmdbType={type as 'movie' | 'tv'}
+              tmdbTitle={title}
+              posterPath={credits?.poster_path || null}
+              mode="button"
+              onSuccess={() => {
+                // 重新拉资源
+                fetch(`/api/tmdb-resources/${type}/${tmdbId}?_t=${Date.now()}`)
+                  .then((r) => r.json())
+                  .then((res) => { if (res) setResources(res); })
+                  .catch(() => {});
+              }}
+            />
+          </div>
 
           {!resources || resources.total === 0 ? (
             <div className="bg-gray-900/50 border border-gray-800 rounded-lg p-8 text-center text-gray-500">

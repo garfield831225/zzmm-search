@@ -1,8 +1,10 @@
 // /api/games — 改用 Client (node-postgres wire protocol) 替代 neon()
-// 鉴权: vip 专属
+//   2026-08-12 修: 放开 basic 看列表 (用户原话: basic 应该看到所有卡片, 点开 vip_only 游戏时前端加锁)
+//   - admin / vip: 看全部 + 直接打开
+//   - basic: 看全部, is_vip_only 的前端锁住
+//   - user (未登录): 看全部
 import { NextRequest, NextResponse } from 'next/server';
 import { Client } from '@neondatabase/serverless';
-import { requireAccess } from '@/lib/access';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,8 +20,9 @@ async function getDb(): Promise<Client> {
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await requireAccess(req, 'vip');
-    if (auth instanceof NextResponse) return auth;
+    // 2026-08-12 修: 去掉 requireAccess(req, 'vip'), 让 basic 也能看列表
+    //   之前 basic 调这个 API 直接被 403 need='vip' 拒绝
+    //   鉴权推到前端 (isGameVipLocked) + /api/games/[id] 路由内
 
     const db = await getDb();
     const { searchParams } = new URL(req.url);
@@ -56,7 +59,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      user: { id: auth.id, user_group: auth.effective_group, is_expired: auth.is_expired },
       total,
       page,
       pageSize,

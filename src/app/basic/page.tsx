@@ -43,9 +43,11 @@ export default function BasicPage() {
       for (let i = 0; i < 3; i++) {
         if (cancelled) return;
         try {
+          // 2026-08-12 修: 不再带 Cache-Control: no-store + Pragma: no-cache 这俩 header
+          //   带这俩 header 会让 NAS nginx 卡死 (curl 5s+ 不返回, page 25s "加载中..." 不消失)
+          //   只用 cache: 'no-store' 就够了, 浏览器自动不缓存
           const r = await fetch(`/api/basic?type=${tab}&pageSize=60&_t=${Date.now()}`, {
             cache: 'no-store',
-            headers: { 'Cache-Control': 'no-store', 'Pragma': 'no-cache' },
           });
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           const d = await r.json();

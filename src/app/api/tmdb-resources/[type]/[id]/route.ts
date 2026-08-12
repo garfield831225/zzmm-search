@@ -35,13 +35,18 @@ export async function GET(req: Request, { params }: { params: { type: string; id
 
     // 固定 4 分支按 user_group 过滤 (不能用 sql.unsafe)
     // 2026-08-05: 移除 region 字段 (xx_resources 表不存在, 之前漏修导致 500)
+    // 2026-08-12 修: 兼容 type IS NULL / type='other' (21.7 万条 type=null 占绝大多数, 严格按 type 过滤会漏 1598732 这种只标了 tmdb_id 没标 type 的资源)
+    //   跟用户拍板: 详情页展示同 tmdb_id 全部链接, type 严格过滤反而漏数据
+    //   TMDB 设计上同 tmdb_id 在 movie/tv 是互斥的, 跨 type 查也不会撞
+    //   4 分支都需要 inline (不能传子 sql, neon v3 模板 tag 限制)
     if (group === 'admin') {
       rows = await sql`
         SELECT id, name, link, link_code, source, size, lumen_cost,
                access_tier, access_level, import_channel, doc_sheet,
                sub_type, status, created_at, updated_at
         FROM xx_resources
-        WHERE tmdb_id = ${tmdbId} AND type = ${type} AND status = 'active'
+        WHERE tmdb_id = ${tmdbId} AND status = 'active'
+          AND (type IS NULL OR type = '' OR type = 'other' OR type = ${type})
         ORDER BY source, created_at DESC
       ` as any[];
     } else if (group === 'vip') {
@@ -50,7 +55,8 @@ export async function GET(req: Request, { params }: { params: { type: string; id
                access_tier, access_level, import_channel, doc_sheet,
                sub_type, status, created_at, updated_at
         FROM xx_resources
-        WHERE tmdb_id = ${tmdbId} AND type = ${type} AND status = 'active'
+        WHERE tmdb_id = ${tmdbId} AND status = 'active'
+          AND (type IS NULL OR type = '' OR type = 'other' OR type = ${type})
           AND access_tier IN ('document', 'vip')
         ORDER BY source, created_at DESC
       ` as any[];
@@ -60,7 +66,8 @@ export async function GET(req: Request, { params }: { params: { type: string; id
                access_tier, access_level, import_channel, doc_sheet,
                sub_type, status, created_at, updated_at
         FROM xx_resources
-        WHERE tmdb_id = ${tmdbId} AND type = ${type} AND status = 'active'
+        WHERE tmdb_id = ${tmdbId} AND status = 'active'
+          AND (type IS NULL OR type = '' OR type = 'other' OR type = ${type})
           AND access_tier = 'document'
         ORDER BY source, created_at DESC
       ` as any[];
@@ -71,7 +78,8 @@ export async function GET(req: Request, { params }: { params: { type: string; id
                access_tier, access_level, import_channel, doc_sheet,
                sub_type, status, created_at, updated_at
         FROM xx_resources
-        WHERE tmdb_id = ${tmdbId} AND type = ${type} AND status = 'active'
+        WHERE tmdb_id = ${tmdbId} AND status = 'active'
+          AND (type IS NULL OR type = '' OR type = 'other' OR type = ${type})
           AND access_tier = 'document'
           AND (lumen_cost IS NULL OR lumen_cost = 0)
         ORDER BY source, created_at DESC
