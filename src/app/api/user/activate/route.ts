@@ -6,6 +6,22 @@ import { rateLimit, getClientIp } from '@/lib/rate-limit';
 export const dynamic = 'force-dynamic';
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
+// 2026-08-13: 公共 API (moviezone + 子站) - 加 CORS 头
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Max-Age': '86400',
+};
+
+function jsonWithCors(body: any, init?: ResponseInit) {
+  return jsonWithCors(body, { ...init, headers: { ...CORS_HEADERS, ...(init?.headers as any || {}) } });
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
 // 2026-08-10: VIP 1-day 激活码每个账号每月限领 1 次 (自然月, 每月 1 号 0 点刷)
 //   - 硬规则: code_type='vip' AND duration=1 的码, 同一 user 同一自然月只能成功领一次
 //   - 不影响 30/90/365/永久 码
@@ -49,21 +65,21 @@ export async function POST(req: NextRequest) {
   try {
     const payload = getUser(req);
     if (!payload) {
-      return NextResponse.json({ error: '请先登录后再兑换', code: 'unauthenticated' }, { status: 401 });
+      return jsonWithCors({ error: '请先登录后再兑换', code: 'unauthenticated' }, { status: 401 });
     }
     const userId = String(payload.id);
 
     // 限流: 单用户 10 次/小时
     const rl = rateLimit(`activate:${userId}:${getClientIp(req.headers)}`, { limit: 10, windowMs: 60 * 60 * 1000 });
     if (!rl.allowed) {
-      return NextResponse.json({ error: '兑换太频繁，请稍后再试', code: 'rate_limited', resetIn: Math.ceil(rl.resetIn / 1000) }, { status: 429 });
+      return jsonWithCors({ error: '兑换太频繁，请稍后再试', code: 'rate_limited', resetIn: Math.ceil(rl.resetIn / 1000) }, { status: 429 });
     }
 
     const body = await req.json().catch(() => ({}));
     const code = String(body.code || '').trim();
-    if (!code) return NextResponse.json({ error: '请输入激活码' }, { status: 400 });
+    if (!code) return jsonWithCors({ error: '请输入激活码' }, { status: 400 });
     if (!CODE_REGEX_14.test(code) && !CODE_REGEX_8.test(code)) {
-      return NextResponse.json({ error: '激活码格式错误（XY-XXXX-XXXX-XXXX 或 8位）' }, { status: 400 });
+      return jsonWithCors({ error: '激活码格式错误（XY-XXXX-XXXX-XXXX 或 8位）' }, { status: 400 });
     }
 
     const sql = neon(process.env.DATABASE_URL || '');
@@ -74,16 +90,16 @@ export async function POST(req: NextRequest) {
              price_at_issue, lumen_amount, is_used, used_by, used_at, expires_at, channel, batch_id
       FROM xx_activation_codes WHERE UPPER(code) = UPPER(${code}) LIMIT 1
     `;
-    if (!codes[0]) return NextResponse.json({ error: '激活码无效' }, { status: 404 });
+    if (!codes[0]) return jsonWithCors({ error: '激活码无效' }, { status: 404 });
     const c: any = codes[0];
     if (c.is_used) {
-      return NextResponse.json({
+      return jsonWithCors({
         error: `该激活码已被使用（${c.used_at ? new Date(c.used_at).toLocaleString('zh-CN') : ''}）`,
         code: 'already_used',
       }, { status: 409 });
     }
     if (c.expires_at && new Date(c.expires_at) < new Date()) {
-      return NextResponse.json({ error: '该激活码已过期', code: 'expired' }, { status: 410 });
+      return jsonWithCors({ error: '该激活码已过期', code: 'expired' }, { status: 410 });
     }
 
     // === VIP 套餐码: 叠加 expire_at ===
@@ -106,7 +122,7 @@ export async function POST(req: NextRequest) {
           const lastUsed = new Date((monthDup as any[])[0].used_at);
           // 下月 1 号 0 点
           const nextAvailable = new Date(lastUsed.getFullYear(), lastUsed.getMonth() + 1, 1, 0, 0, 0);
-          return NextResponse.json({
+          return jsonWithCors({
             error: `本月已领过 1 天 VIP 激活码 (上次: ${lastUsed.toLocaleString('zh-CN')}), 下次可领: ${nextAvailable.toLocaleString('zh-CN')}`,
             code: 'monthly_limit_exceeded',
             next_available_at: nextAvailable.toISOString(),
@@ -116,14 +132,14 @@ export async function POST(req: NextRequest) {
 
       // 取用户当前 expire_at 和 user_group
       const users: any = await sql`SELECT user_group, expire_at FROM xx_users WHERE id = ${userId}`;
-      if (!users[0]) return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+      if (!users[0]) return jsonWithCors({ error: '用户不存在' }, { status: 404 });
       const currentExpire = users[0].expire_at;
       const newExpire = calcNewExpire(currentExpire, c.duration);
 
       try {
         await sql`UPDATE xx_activation_codes SET is_used = true, used_by = ${userId}, used_at = NOW() WHERE id = ${c.id}`;
         await sql`UPDATE xx_users SET user_group = 'vip', expire_at = ${newExpire}, updated_at = NOW() WHERE id = ${userId}`;
-        return NextResponse.json({
+        return jsonWithCors({
           success: true,
           code_type: 'vip',
           plan_id: c.plan_id,
@@ -140,7 +156,7 @@ export async function POST(req: NextRequest) {
             : `🎉 ${c.duration} 天 VIP 会员激活成功！到期时间: ${newExpire ? new Date(newExpire).toLocaleString('zh-CN') : '永久'}`,
         });
       } catch (e: any) {
-        return NextResponse.json({ error: '激活失败: ' + e.message }, { status: 500 });
+        return jsonWithCors({ error: '激活失败: ' + e.message }, { status: 500 });
       }
     }
 
@@ -149,21 +165,21 @@ export async function POST(req: NextRequest) {
       try {
         await sql`UPDATE xx_activation_codes SET is_used = true, used_by = ${userId}, used_at = NOW() WHERE id = ${c.id}`;
         await sql`UPDATE xx_users SET user_group = 'basic', updated_at = NOW() WHERE id = ${userId}`;
-        return NextResponse.json({
+        return jsonWithCors({
           success: true, code_type: 'basic',
           new_user_group: 'basic',
           channel: c.channel, batch_id: c.batch_id,
           message: '基础会员激活成功！现在可以看泽泽妈妈文档导入的所有资源。',
         });
       } catch (e: any) {
-        return NextResponse.json({ error: '激活失败: ' + e.message }, { status: 500 });
+        return jsonWithCors({ error: '激活失败: ' + e.message }, { status: 500 });
       }
     }
 
     // === 流明充值码 (2026-06-25) ===
     if (c.code_type === 'lumen') {
       const amount = c.lumen_amount || 0;
-      if (amount <= 0) return NextResponse.json({ error: '流明数量无效' }, { status: 400 });
+      if (amount <= 0) return jsonWithCors({ error: '流明数量无效' }, { status: 400 });
       try {
         // 标记码已用 + 累加流明 (UPSERT xx_user_lumen)
         const updated = await sql`
@@ -176,7 +192,7 @@ export async function POST(req: NextRequest) {
         await sql`UPDATE xx_activation_codes SET is_used = true, used_by = ${userId}, used_at = NOW() WHERE id = ${c.id}`;
         await sql`INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description)
                   VALUES (${userId}, ${amount}, ${balanceAfter}, 'credit', ${code}, 'lumen_code_redeem')`.catch(() => {});
-        return NextResponse.json({
+        return jsonWithCors({
           success: true, code_type: 'lumen',
           lumen_amount: amount,
           lumen_balance_after: balanceAfter,
@@ -184,34 +200,34 @@ export async function POST(req: NextRequest) {
           message: `✅ 充值成功！获得 ${amount} 流明，当前余额 ${balanceAfter}`,
         });
       } catch (e: any) {
-        return NextResponse.json({ error: '充值失败: ' + e.message }, { status: 500 });
+        return jsonWithCors({ error: '充值失败: ' + e.message }, { status: 500 });
       }
     }
 
     // === 单资源解锁码 ===
     if (c.code_type === 'unlock') {
-      if (!c.target_resource_id) return NextResponse.json({ error: '单资源码未指定资源' }, { status: 400 });
+      if (!c.target_resource_id) return jsonWithCors({ error: '单资源码未指定资源' }, { status: 400 });
       const existing = await sql`SELECT id FROM xx_user_unlocks WHERE user_id = ${userId} AND resource_id = ${c.target_resource_id}`;
-      if (existing[0]) return NextResponse.json({ error: '您已解锁过此资源' }, { status: 409 });
+      if (existing[0]) return jsonWithCors({ error: '您已解锁过此资源' }, { status: 409 });
       const resources = await sql`SELECT id, name FROM xx_resources WHERE id = ${c.target_resource_id}`;
-      if (!resources[0]) return NextResponse.json({ error: '资源不存在' }, { status: 404 });
+      if (!resources[0]) return jsonWithCors({ error: '资源不存在' }, { status: 404 });
       try {
         await sql`UPDATE xx_activation_codes SET is_used = true, used_by = ${userId}, used_at = NOW() WHERE id = ${c.id}`;
         await sql`INSERT INTO xx_user_unlocks (user_id, resource_id, activation_code_id, unlocked_at) VALUES (${userId}, ${c.target_resource_id}, ${c.id}, NOW())`;
-        return NextResponse.json({
+        return jsonWithCors({
           success: true, code_type: 'unlock',
           resource: { id: resources[0].id, name: resources[0].name },
           channel: c.channel, batch_id: c.batch_id,
           message: `✅ 解锁成功: ${resources[0].name}`,
         });
       } catch (e: any) {
-        return NextResponse.json({ error: '解锁失败: ' + e.message }, { status: 500 });
+        return jsonWithCors({ error: '解锁失败: ' + e.message }, { status: 500 });
       }
     }
 
-    return NextResponse.json({ error: '未知激活码类型: ' + c.code_type }, { status: 400 });
+    return jsonWithCors({ error: '未知激活码类型: ' + c.code_type }, { status: 400 });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return jsonWithCors({ error: e.message }, { status: 500 });
   }
 }
 

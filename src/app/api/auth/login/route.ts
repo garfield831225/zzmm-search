@@ -9,6 +9,24 @@ export const dynamic = 'force-dynamic';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
+// 2026-08-13: 公共 API (moviezone + 子站) - 加 CORS 头
+//   错误格式保持原样 {error: 'string'}, 不破坏 login page 现有行为
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Max-Age': '86400',
+};
+
+// 加 CORS 的 json 响应
+function jsonWithCors(body: any, init?: ResponseInit) {
+  return NextResponse.json(body, { ...init, headers: { ...CORS_HEADERS, ...(init?.headers as any || {}) } });
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
 // 2026-07-29: 记录登录 IP + 城市识别 (用于后台 IP 风险监测)
 // 异步调用, 失败不影响登录流程
 async function recordLoginHistory(userId: number, req: NextRequest) {
@@ -58,7 +76,7 @@ export async function POST(req: NextRequest) {
 //     }
 
     if (!username || !password) {
-      return NextResponse.json({ error: '用户名和密码不能为空' }, { status: 400 });
+      return jsonWithCors({ error: '用户名和密码不能为空' }, { status: 400 });
     }
 
     const sql = neon(process.env.DATABASE_URL || '');
@@ -67,17 +85,17 @@ export async function POST(req: NextRequest) {
     const users = rows as any[];
 
     if (!users.length) {
-      return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
+      return jsonWithCors({ error: '用户名或密码错误' }, { status: 401 });
     }
 
     const user = users[0];
     if (user.status !== 'active') {
-      return NextResponse.json({ error: '账号已被禁用' }, { status: 403 });
+      return jsonWithCors({ error: '账号已被禁用' }, { status: 403 });
     }
 
     const valid = bcrypt.compareSync(password, user.password_hash);
     if (!valid) {
-      return NextResponse.json({ error: '用户名或密码错误' }, { status: 401 });
+      return jsonWithCors({ error: '用户名或密码错误' }, { status: 401 });
     }
 
     // 更新最后登录时间 (同步, 单点登录挤下线依赖此时间戳)
@@ -107,7 +125,7 @@ export async function POST(req: NextRequest) {
       domain: '.zzmm-search.uk',
     });
 
-    return NextResponse.json({
+    return jsonWithCors({
       token,
       user: {
         id: user.id,
@@ -117,6 +135,6 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return jsonWithCors({ error: e.message }, { status: 500 });
   }
 }
