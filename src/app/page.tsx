@@ -1770,41 +1770,52 @@ export default function HomePage() {
   );
 }
 
-// 2026-08-12: VIP/basic 倒计时组件 (D 方案 - 前端倒计时 + 后端 middleware 兜底)
+// 2026-08-12: VIP 倒计时组件
 //   - 实时显示剩余时间, 颜色随紧急度变化 (>1天 cyan / <1天 amber / <1小时 red)
-//   - 到 0:00 立刻清 localStorage + cookie + 跳 /login?error=vip_expired
-//   - 后端 middleware 兜底 (防止用户改本地时间绕过, 或 user 不在 / 页面)
+//   - 到 0:00 触发 reload (让 middleware 实时降级 user_group='basic', 用户继续能浏览 basic 资源)
+//   - 降级后弹 toast 提示去 /upgrade 续费 (保留登录态, 不清 token, 不跳 login)
+//   - 后端 middleware 兜底: middleware 查 db 看到 user_group='vip' + expire_at 过期 → UPDATE basic 放行
 function VipCountdown({ expireAt }: { expireAt: string }) {
   const [now, setNow] = useState<number>(() => Date.now());
+  const [expired, setExpired] = useState(false);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // 到 0:00 自动踢 (清 localStorage + cookie + 跳登录)
+  // 到 0:00 触发 reload (让 middleware 降级) + 弹 toast
   useEffect(() => {
     const ts = new Date(expireAt).getTime();
-    if (!isNaN(ts) && ts <= now) {
+    if (!isNaN(ts) && ts <= now && !expired) {
+      setExpired(true);
+      // 弹 toast 提示
       try {
-        localStorage.removeItem('token');
-        localStorage.removeItem('zzmm_token');
-        localStorage.removeItem('adminToken');
-        localStorage.removeItem('user');
-        // 清 cookie (3 种 domain 尝试, 兼容子域名)
-        const expires = 'expires=Thu, 01 Jan 1970 00:00:00 GMT';
-        document.cookie = `zzmm_token=; ${expires}; path=/; domain=.zzmm-search.uk`;
-        document.cookie = `zzmm_token=; ${expires}; path=/`;
-        document.cookie = `token=; ${expires}; path=/; domain=.zzmm-search.uk`;
-        document.cookie = `token=; ${expires}; path=/`;
+        // 简单 toast, 3.5s 自动消失
+        const t = document.createElement('div');
+        t.className = 'fixed top-4 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl bg-amber-500/95 text-black shadow-2xl text-sm font-medium flex items-center gap-2';
+        t.innerHTML = '<span>⏰</span><span>VIP 已到期, 您已自动回到 basic 组。续费请去 <a href="/upgrade?from=vip_expired" class="underline font-bold">/upgrade</a></span>';
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 3500);
       } catch {}
-      const cur = typeof window !== 'undefined' ? window.location.pathname : '/';
-      window.location.href = `/login?error=vip_expired&expired_at=${encodeURIComponent(expireAt)}&redirect=${encodeURIComponent(cur)}`;
+      // reload 页面让 middleware 降级
+      setTimeout(() => { window.location.reload(); }, 800);
     }
-  }, [now, expireAt]);
+  }, [now, expireAt, expired]);
 
   const ts = new Date(expireAt).getTime();
-  if (isNaN(ts) || ts <= now) return null;
+  if (isNaN(ts) || ts <= now) {
+    // 到期瞬间显示"已到期" (reload 之前短暂)
+    return (
+      <div className="mx-4 mt-3 rounded-xl border border-amber-500/40 bg-gradient-to-r from-amber-500/15 to-orange-500/15 px-4 py-2.5 flex items-center gap-3">
+        <Crown size={18} className="shrink-0 text-amber-200" />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-amber-200">⏰ VIP 已到期, 正在降级到 basic...</div>
+          <div className="text-[11px] text-white/50 mt-0.5">到期时间: {new Date(expireAt).toLocaleString('zh-CN')}</div>
+        </div>
+      </div>
+    );
+  }
   const diff = ts - now;
   const days = Math.floor(diff / 86400000);
   const hours = Math.floor((diff % 86400000) / 3600000);

@@ -262,9 +262,11 @@ export async function middleware(request: NextRequest) {
   // 2026-07-29: 单点登录 - 校验 token iat vs user.last_login
   // 新登录会 UPDATE last_login=NOW(), 比 token.iat 新 → 旧 token 失效 → 跳登录 + Toast
   // admin 不挤 (怕自己误踢)
-  // 2026-08-12: 加 expire_at 实时检查 (VIP/basic 过期, 之前 middleware 不查, 用户能继续访问 + 前端 cache 显示 vip 权限)
-  //   - 跟被挤下线一样跳登录 + error=vip_expired, 清 cookie 强制重新登录
-  //   - admin 永久, 跳过; user 没 expire_at, 跳过
+  // 2026-08-12: 加 VIP 过期实时降级 (用户原话: "vip 到期直接回 basic 组, 不是踢出")
+  //   - user_group='vip' && expire_at < NOW() → UPDATE user_group='basic' + 放行 (不清 cookie, 不踢)
+  //   - basic 用户永久, 不该有 expire_at 概念, 跳过 (cron 跑过后 expire_at 残留也不算过期)
+  //   - admin 永久, 跳过
+  //   - cron expire-vip-check 是兜底, 凌晨 4 点跑改 user_group (有 7.5h 滞后, middleware 补这个)
   try {
     const secret = new TextEncoder().encode(process.env.JWT_SECRET || '');
     const { payload } = await jwtVerify(token, secret);
@@ -283,18 +285,23 @@ export async function middleware(request: NextRequest) {
         res.cookies.delete('token');
         return res;
       }
-      // 2026-08-12: VIP/basic 过期实时踢 (expire_at < NOW() 跳登录)
-      //   - isFutureTime(null) = true (永久), isFutureTime(future) = true, isFutureTime(past) = false
-      //   - user 跟 admin 不进这分支 (getUserGroup 永远 'user', 或没 expire_at)
-      if ((u.user_group === 'vip' || u.user_group === 'basic') && !isFutureTime(u.expire_at)) {
-        const rExp = new URL('/login', request.url);
-        rExp.searchParams.set('redirect', pathname);
-        rExp.searchParams.set('error', 'vip_expired');
-        if (u.expire_at) rExp.searchParams.set('expired_at', String(u.expire_at));
-        const res = NextResponse.redirect(rExp);
-        res.cookies.delete('zzmm_token');
-        res.cookies.delete('token');
-        return res;
+      // 2026-08-12: VIP 过期实时降级到 basic (不改 expire_at, 保留历史; 不清 cookie, 放行继续浏览)
+      //   - 只查 vip, basic 永久不该有过期判断 (cron 改后 expire_at 残值不算过期)
+      //   - isFutureTime(null) = true, 永久 vip 跳过
+      if (u.user_group === 'vip' && !isFutureTime(u.expire_at)) {
+        try {
+          await sql`UPDATE xx_users SET user_group = 'basic' WHERE id = ${u.id}`;
+          // 写一条 lumen_logs 记录降级 (跟 cron 行为一致, 方便审计)
+          await sql`
+            INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description, created_at)
+            VALUES (${u.id}, 0, 0, 'expire_middleware', NULL, ${`VIP 中间件实时降级 basic (expire_at=${u.expire_at})`}, NOW())
+          `.catch(() => {});
+        } catch (e) {
+          // 降级失败 (db 问题) 也不影响本次访问, 让用户继续 (下次 cron 兜底)
+          console.error('[middleware] vip->basic downgrade failed:', e);
+        }
+        // 不清 cookie, 不踢, 放行 (让用户继续浏览 basic 资源)
+        return NextResponse.next();
       }
       const lastLoginMs = new Date(u.last_login).getTime();
       const tokenIatMs = ((payload as any).iat || 0) * 1000;
