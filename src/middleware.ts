@@ -187,6 +187,14 @@ const PUBLIC_PATHS = [
   //   - 共享 100 req/s admin TMDB 限速, 不额外限速
   '/api/match-single',
   '/api/match-batch',
+  // 2026-08-13: 公共 API batch 2+3 (moviezone + 子站)
+  //   - /api/search 已有 CORS (route.ts 内 OPTIONS + headers), 不影响现有
+  //   - /api/detail /api/nonfilm /api/search/suggest /api/exclusive-zone 全 Bearer 鉴权在 route 内
+  //   - /api/basic /api/auth/* batch 1 已有
+  '/api/detail',
+  '/api/nonfilm',
+  '/api/search/suggest',
+  '/api/exclusive-zone',
 ];
 
 export async function middleware(request: NextRequest) {

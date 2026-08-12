@@ -7,6 +7,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
 
+// 2026-08-13: 公共 API (moviezone + 子站) - 加 CORS 头
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Max-Age': '86400',
+};
+
+export async function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
+}
+
 // 2026-07-21: 修 read replica lag 终极方案 - 关掉 Neon HTTP fetch connection cache
 // 默认 true 会让 Vercel warm 函数命中老 read replica, 关掉后每次 fetch 重新走 control plane routing
 // (Neon 0.10.4 已废弃但保留 console.warn, 实际还有部分生效)
@@ -572,6 +584,7 @@ export async function GET(request: NextRequest) {
       sources: ['全部', ...Object.values(SOURCE_DISPLAY_MAP)],
     }, {
       headers: {
+        ...CORS_HEADERS,
         // 2026-07-20: 强制不缓存, 防 Vercel CDN 缓存老数据
         'Cache-Control': 'no-store, no-cache, must-revalidate',
         'Pragma': 'no-cache',
@@ -580,6 +593,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('Search error:', error.message);
-    return NextResponse.json({ error: '搜索失败: ' + error.message }, { status: 500 });
+    return NextResponse.json({ error: '搜索失败: ' + error.message }, { status: 500, headers: CORS_HEADERS });
   }
 }
