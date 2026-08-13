@@ -1,16 +1,16 @@
 // 2026-08-13: 公共 API - 搜索联想 (moviezone + 子站调用)
 //   GET /api/search/suggest?q=完美&limit=10
-//   - Bearer admin/vip 鉴权
+//   - 2026-08-13 改: 公开端点 (跟 /api/search /api/basic 一档), 不需 Bearer
+//     - 理由: 搜索联想前端都是 keyup 即时调, 多一次 round-trip 鉴权浪费
+//     - 安全: 只能读公开资源名 (xx_resources.name + xx_tmdb_cache.title_zh)
+//     - 限速: 留给 moviezone BFF 层做 (IP-based 50 req/s)
 //   - 简单 ILIKE 拿 TOP N 资源名
 //   - 200ms 内响应
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
-import jwt from 'jsonwebtoken';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 10;
-
-const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -19,36 +19,11 @@ const CORS_HEADERS = {
   'Access-Control-Max-Age': '86400',
 };
 
-function getAuth(req: NextRequest): { ok: true; group: string } | { ok: false; status: number; code: string; message: string } {
-  const auth = req.headers.get('authorization');
-  if (!auth?.startsWith('Bearer ')) {
-    return { ok: false, status: 401, code: 'no_token', message: '缺少 Authorization Bearer token' };
-  }
-  try {
-    const payload = jwt.verify(auth.replace('Bearer ', ''), JWT_SECRET) as any;
-    const g = String(payload.user_group || payload.group || '').toLowerCase();
-    if (g !== 'vip' && g !== 'admin') {
-      return { ok: false, status: 403, code: 'forbidden', message: '需要 admin / vip token' };
-    }
-    return { ok: true, group: g };
-  } catch {
-    return { ok: false, status: 401, code: 'invalid_token', message: 'Token 无效或过期' };
-  }
-}
-
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
 
 export async function GET(req: NextRequest) {
-  const auth = getAuth(req);
-  if (!auth.ok) {
-    return NextResponse.json(
-      { error: { code: auth.code, message: auth.message } },
-      { status: auth.status, headers: CORS_HEADERS }
-    );
-  }
-
   const { searchParams } = new URL(req.url);
   const q = (searchParams.get('q') || '').trim();
   const limit = Math.min(20, Math.max(1, parseInt(searchParams.get('limit') || '10')));
