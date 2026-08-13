@@ -9,6 +9,9 @@ import HomeBanner from '@/components/home/Banner';
 import HomeSection, { type SectionItem } from '@/components/home/Section';
 import TrailerRow from '@/components/home/TrailerRow';
 import { tmdbPoster, tmdbBackdrop, tmdbProfile, TMDB_FALLBACK } from '@/lib/tmdb-image';
+import NavMenu from '@/components/NavMenu';
+import SearchBox from '@/components/SearchBox';
+import MobileNav from '@/components/MobileNav';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = TMDB_FALLBACK;
@@ -571,106 +574,11 @@ export default function HomePage() {
                 <p className="text-xs text-white/40 truncate">共 {total.toLocaleString()} 条资源 · 当前显示 {items.length} 条</p>
               </div>
             </div>
-            <div className="flex items-center gap-2 flex-wrap justify-end">
-              {user ? (
-                <div className="flex items-center gap-2 flex-wrap justify-end">
-                  <span className="px-3 py-1.5 bg-violet-600/30 rounded-lg text-sm text-violet-300">{user.username}</span>
-                  {/* 2026-07-29: 个人中心入口 (所有已登录用户) */}
-                  <Link href="/profile" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-cyan-500/20 to-blue-500/20 hover:from-cyan-500/40 hover:to-blue-500/40 rounded-lg text-sm transition-all duration-200 text-cyan-200 hover:shadow-[0_0_12px_rgba(34,211,238,0.4)] hover:scale-105 border border-cyan-400/30">
-                    <User size={14} className="transition-transform group-hover:scale-110" />
-                    <span>个人中心</span>
-                  </Link>
-                  {/* 2026-07-29: VIP 影视区入口 (basic/vip/admin 都能看见, basic 点进去看升级提示) */}
-                  {['basic', 'vip', 'admin'].includes(user?.group || '') && (
-                    <Link href="/vip" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-pink-500/20 hover:from-amber-500/40 hover:to-pink-500/40 rounded-lg text-sm transition-all duration-200 text-amber-200 hover:shadow-[0_0_12px_rgba(245,158,11,0.4)] hover:scale-105 border border-amber-400/30">
-                      <Crown size={14} className="transition-transform group-hover:scale-110" />
-                      <span>VIP 影视区</span>
-                    </Link>
-                  )}
-                  {/* 2026-07-31: VIP 影视 2 区入口 (basic 跳 /upgrade, vip/admin 直接进 /lovemovie 镜像站)
-                      2026-08-08 修: 之前所有角色都 Link /lovemovie, basic 看不到 /upgrade 入口
-                      之前 CF tunnel 配 lovemovie.zzmm-search.uk -> 外部 URL, 8-7 配 tunnel 时被覆盖 PUT 删了
-                      现在 /lovemovie 是 src/app/lovemovie/page.tsx (iframe 嵌入, URL 在 NEXT_PUBLIC_LOVEMOVIE_URL) */}
-                  {['basic', 'vip', 'admin'].includes(user?.group || '') && (
-                    user?.group === 'basic' ? (
-                      <Link href="/upgrade" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 hover:from-violet-500/40 hover:to-fuchsia-500/40 rounded-lg text-sm transition-all duration-200 text-violet-200 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105 border border-violet-400/30">
-                        <Sparkles size={14} className="transition-transform group-hover:scale-110" />
-                        <span>VIP 影视 2 区 (升级)</span>
-                      </Link>
-                    ) : (
-                      <Link href="/lovemovie" target="_blank" rel="noopener" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 hover:from-violet-500/40 hover:to-fuchsia-500/40 rounded-lg text-sm transition-all duration-200 text-violet-200 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105 border border-violet-400/30">
-                        <Sparkles size={14} className="transition-transform group-hover:scale-110" />
-                        <span>VIP 影视 2 区</span>
-                      </Link>
-                    )
-                  )}
-                  {/* 2026-07-15 隐藏: 用户要求不要显示 TMDB 影视区 + VIP 观影区 入口
-                  <Link href="/tmdb-films" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/20 hover:bg-pink-600/50 rounded-lg text-sm transition-all duration-200 text-pink-300 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
-                    <Film size={14} className="transition-transform group-hover:scale-110" />
-                    <span>TMDB 影视区</span>
-                  </Link>
-                  <Link href="/vip-videos" className="group flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/20 hover:bg-violet-600/50 rounded-lg text-sm transition-all duration-200 text-violet-300 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105">
-                    <Tv size={14} className="transition-transform group-hover:scale-110" />
-                    <span>VIP 观影区</span>
-                  </Link>
-                  */}
-<Link href="/nonfilm" className="group flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/50 rounded-lg text-sm transition-all duration-200 text-cyan-300 hover:shadow-[0_0_12px_rgba(34,211,238,0.4)] hover:scale-105">
-                    <Music size={14} className="transition-transform group-hover:scale-110" />
-                    <span>非影视区</span>
-                  </Link>
-                  <Link href="/library" className="group flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/20 hover:bg-violet-600/50 rounded-lg text-sm transition-all duration-200 text-violet-300 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105">
-                    <Library size={14} className="transition-transform group-hover:scale-110" />
-                    <span>文档资源库</span>
-                  </Link>
-                  <Link href="/request" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-pink-500/20 hover:from-amber-500/40 hover:to-pink-500/40 rounded-lg text-sm transition-all duration-200 text-amber-200 hover:shadow-[0_0_12px_rgba(245,158,11,0.4)] hover:scale-105 border border-amber-400/30">
-                    <Sparkles size={14} className="transition-transform group-hover:scale-110" />
-                    <span>求片专区</span>
-                  </Link>
-                  <button onClick={handleLogout} className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">退出</button>
-                  <Link href="/activate" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/30 hover:bg-pink-600/60 rounded-lg text-sm transition-all duration-200 text-pink-200 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
-                    <Gift size={14} className="transition-transform group-hover:scale-110" />
-                    <span>兑换中心</span>
-                  </Link>
-                  {user?.group === 'admin' && (
-                    <a href="/admin" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 rounded-lg text-sm font-medium transition-all duration-200 text-white hover:shadow-[0_0_12px_rgba(139,92,246,0.5)] hover:scale-105 border border-violet-400/40">
-                      <Shield size={14} className="transition-transform group-hover:scale-110" />
-                      <span>🎛️ 管理后台</span>
-                    </a>
-                  )}
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Link href="/nonfilm" className="group flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/50 rounded-lg text-sm transition-all duration-200 text-cyan-300 hover:shadow-[0_0_12px_rgba(34,211,238,0.4)] hover:scale-105">
-                    <Music size={14} className="transition-transform group-hover:scale-110" />
-                    <span>非影视区</span>
-                  </Link>
-                  <Link href="/library" className="group flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/20 hover:bg-violet-600/50 rounded-lg text-sm transition-all duration-200 text-violet-300 hover:shadow-[0_0_12px_rgba(167,139,250,0.4)] hover:scale-105">
-                    <Library size={14} className="transition-transform group-hover:scale-110" />
-                    <span>文档资源库</span>
-                  </Link>
-                  <Link href="/request" className="group flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500/20 to-pink-500/20 hover:from-amber-500/40 hover:to-pink-500/40 rounded-lg text-sm transition-all duration-200 text-amber-200 hover:shadow-[0_0_12px_rgba(245,158,11,0.4)] hover:scale-105 border border-amber-400/30">
-                    <Sparkles size={14} className="transition-transform group-hover:scale-110" />
-                    <span>求片专区</span>
-                  </Link>
-                  <Link href="/activate" className="group flex items-center gap-1.5 px-3 py-1.5 bg-pink-600/30 hover:bg-pink-600/60 rounded-lg text-sm transition-all duration-200 text-pink-200 hover:shadow-[0_0_12px_rgba(236,72,153,0.4)] hover:scale-105">
-                    <Gift size={14} className="transition-transform group-hover:scale-110" />
-                    <span>兑换中心</span>
-                  </Link>
-                  <Link href="/login" className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition">登录 / 注册</Link>
-                </div>
-              )}
-            </div>
+            {/* 2026-08-14: 工具栏 9 入口重排 -> 3 下拉 + 2 单链接 (NavMenu 组件) */}
+            <NavMenu user={user} onLogout={handleLogout} />
           </div>
 
-          {/* Search - 2026-07-25 改: 玻璃态输入框 */}
-          <div className="relative flex gap-2">
-            <input type="text" value={query} onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') fetchItems(1); }}
-              placeholder="输入片名、类型、分类搜索..."
-              className="flex-1 bg-white/[0.03] border border-white/[0.06] rounded-xl px-5 py-3 pl-12 text-white placeholder-white/30 focus:outline-none focus:border-violet-400/50 focus:ring-2 focus:ring-violet-500/15 focus:bg-white/[0.05] transition backdrop-blur-sm" />
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30 pointer-events-none">🔍</span>
-            <button onClick={() => fetchItems(1)} className="px-5 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:opacity-90 rounded-xl text-white font-medium transition shrink-0 shadow-[0_0_12px_rgba(168,85,247,0.2)]">搜索</button>
-          </div>
+          {/* 2026-08-14: 搜索框已挪到 banner 上方 (SearchBox 组件), nav 工具栏不再放搜索 */}
 
           {/* 2026-07-20: 显示重复切换 + 按 TMDB 分组按钮 (搜出多条同名时显示) */}
           {groups.length > 1 && (
@@ -743,6 +651,11 @@ export default function HomePage() {
       </header>
 
       {/* 2026-08-04: 4ktop 风格首页模块 (Banner + 4 模块行) */}
+      {/* 2026-08-14: 搜索框从 nav 顶部挪到 hero 区域上方 (Banner 之前), 大尺寸玻璃态输入框 */}
+      <div className="max-w-7xl mx-auto px-4 pt-4 md:pt-6">
+        <SearchBox initial={query} onSearch={(q) => { setQuery(q); fetchItems(1); }} size="lg" />
+      </div>
+
       <div className="max-w-7xl mx-auto px-4 pt-6">
         {/* 1. 顶部 banner 轮播 */}
         <HomeBanner />
@@ -1767,6 +1680,9 @@ export default function HomePage() {
           </div>
         </div>
       )}
+
+      {/* 2026-08-14: 移动端底部 4 Tab (fixed), PC 端 (md+) 不显示 */}
+      <MobileNav user={user} />
       </div>
     </div>
   );

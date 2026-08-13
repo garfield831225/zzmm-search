@@ -16,7 +16,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
-const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
+const TMDB_IMAGE_BASE = 'https://image.zzmm-search.uk/t/p/w500';  // 2026-08-14: 切到国内 CF Worker 反代 (国内快, 跨太平洋慢/丢包)
 
 export async function GET(req: NextRequest) {
   const sql = neon(process.env.DATABASE_URL || '', {
