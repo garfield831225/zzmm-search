@@ -65,6 +65,9 @@ export async function GET(req: NextRequest) {
   const pageSize = Math.min(60, Math.max(1, parseInt(searchParams.get('pageSize') || '30')));
   const userGroup = (searchParams.get('userGroup') || 'user').toLowerCase();
   const q = (searchParams.get('q') || '').trim();
+  // 2026-08-14: 短剧打标转发 - 业务规则: 短剧是打标不是分类, nonfilm 虽不主要
+  //   但保持跟 search 一致, BFF 透传 tag query
+  const tag = (searchParams.get('tag') || '').trim();
 
   if (cat !== '全部' && !NONFILM_CATS.has(cat)) {
     return errJson('invalid_cat', `cat 必须是 全部/音乐/体育/游戏/电子书/精品课/文档 之一`, `实际: ${cat}`, 400);
@@ -81,6 +84,7 @@ export async function GET(req: NextRequest) {
   searchUrl.searchParams.set('page', String(page));
   searchUrl.searchParams.set('pageSize', String(pageSize));
   if (q) searchUrl.searchParams.set('q', q);
+  if (tag) searchUrl.searchParams.set('tag', tag);
 
   try {
     const r = await fetch(searchUrl, {

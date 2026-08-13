@@ -29,6 +29,7 @@ export interface SectionItem {
   link?: string;             // 2026-08-09: 网盘直链, linkMode 时卡片 onClick 直接开
   lumenCost?: number;        // 2026-08-09: 流明消耗 (code payType 用)
   noPoster?: boolean;        // 2026-08-09: true 时走 source 卡片 (无海报, 用 source icon 兜底)
+  isShortDrama?: boolean;    // 2026-08-14: 短剧打标 (不影响分类, 纯 tag)
 }
 
 interface SectionProps {
@@ -207,8 +208,14 @@ export default function HomeSection({ title, titleEn, emoji, href, items, accent
                           {it.sourceDisplay || it.source}
                         </div>
                       </div>
-                      {/* VIP 锁 / code 解锁 角标 */}
+                      {/* VIP 锁 / code 解锁 / 短剧 角标 */}
                       <div className="absolute top-1.5 right-1.5 flex flex-col gap-1 items-end">
+                        {it.isShortDrama && (
+                          // 2026-08-14: 短剧打标 (noPoster 卡片也支持, 短剧多在网盘资源里)
+                          <span className="px-1.5 py-0.5 rounded bg-pink-500/85 text-[9px] text-white font-medium shadow-sm shadow-pink-500/30">
+                            🎬 短剧
+                          </span>
+                        )}
                         {it.accessLevel === 'vip' && (
                           <span className="px-1.5 py-0.5 rounded bg-amber-500/80 text-[9px] text-white font-medium">
                             🔒 VIP
@@ -243,6 +250,13 @@ export default function HomeSection({ title, titleEn, emoji, href, items, accent
                         {it.tmdbType && (
                           <span className="px-1.5 py-0.5 rounded bg-black/70 text-[9px] text-white/90 backdrop-blur">
                             {it.tmdbType === 'movie' ? '🎬' : '📺'}
+                          </span>
+                        )}
+                        {it.isShortDrama && (
+                          // 2026-08-14: 短剧打标 - 粉色 chip, 跟泽泽妈粉紫区分 (单色纯粉)
+                          //   位置: top-left, 跟其他角标并列; 不影响分类, 只是打标
+                          <span className="px-1.5 py-0.5 rounded bg-pink-500/85 text-[9px] text-white font-medium shadow-sm shadow-pink-500/30">
+                            🎬 短剧
                           </span>
                         )}
                         {it.importChannel === 'zezhe' && (

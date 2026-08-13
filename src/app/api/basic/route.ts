@@ -56,7 +56,11 @@ export async function GET(req: NextRequest) {
         MIN(r.category) as category,
         MIN(r.access_level) as access_level,
         MIN(r.name) as resource_name,
-        COUNT(*) as resource_count
+        COUNT(*) as resource_count,
+        -- 2026-08-14: 短剧打标 - 业务规则: 短剧不是分类, 是 tag
+        --   按 tmdb_id GROUP BY, 该 tmdb 下任一资源是短剧 → isShortDrama=true
+        --   检测: r.name 包含 "短剧" 或 r.tags 数组里含 "短剧"
+        BOOL_OR(r.name ILIKE '%短剧%' OR array_to_string(r.tags, ',') ILIKE '%短剧%') as is_short_drama
       FROM xx_resources r
       JOIN xx_tmdb_cache t ON t.tmdb_id = r.tmdb_id
       WHERE r.import_channel='zezhe'
@@ -103,6 +107,7 @@ export async function GET(req: NextRequest) {
       resourceCount: parseInt(r.resource_count || '1'),
       accessLevel: r.access_level,
       category: r.category,
+      isShortDrama: !!r.is_short_drama,  // 2026-08-14: 短剧打标
     }));
 
     return NextResponse.json({

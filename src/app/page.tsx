@@ -202,6 +202,7 @@ export default function HomePage() {
       payType: it.payType ?? it.pay_type,
       category: it.category,
       tmdbType: it.tmdbType ?? it.tmdb_type,
+      isShortDrama: !!it.isShortDrama,  // 2026-08-14: 短剧打标透传
     };
   }
 

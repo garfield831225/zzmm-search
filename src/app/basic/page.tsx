@@ -21,6 +21,7 @@ interface BasicItem {
   resourceCount: number;
   accessLevel: string;
   category: string;
+  isShortDrama?: boolean;  // 2026-08-14: 短剧打标
 }
 
 type Tab = 'all' | 'movie' | 'tv';
@@ -187,6 +188,10 @@ function BasicCard({ item }: { item: BasicItem }) {
           )}
           {item.accessLevel === 'basic' && (
             <span className="px-1 py-0.5 bg-amber-500/90 text-black text-[9px] rounded">👑 泽泽妈</span>
+          )}
+          {/* 2026-08-14: 短剧打标 - 粉色 chip, 跟 Section.tsx 风格对齐 */}
+          {item.isShortDrama && (
+            <span className="px-1 py-0.5 bg-pink-500/85 text-white text-[9px] rounded font-medium">🎬 短剧</span>
           )}
         </div>
 

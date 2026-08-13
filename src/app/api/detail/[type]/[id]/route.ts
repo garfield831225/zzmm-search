@@ -118,7 +118,8 @@ export async function GET(req: NextRequest, { params }: { params: { type: string
     const rows = await sql`
       SELECT id, name, link, link_code, source, size, lumen_cost,
              access_tier, access_level, access_tier, import_channel, doc_sheet,
-             sub_type, status, pay_type, code_price, created_at, updated_at
+             sub_type, status, pay_type, code_price, created_at, updated_at,
+             tags
       FROM xx_resources
       WHERE tmdb_id = ${tmdbId} AND status = 'active'
         AND (type IS NULL OR type = '' OR type = 'other' OR type = ${type})
@@ -131,6 +132,12 @@ export async function GET(req: NextRequest, { params }: { params: { type: string
       const src = r.source || 'unknown';
       if (!bySourceMap.has(src)) bySourceMap.set(src, []);
       const locked = isLocked(r, userGroup);
+      // 2026-08-14: 短剧打标 - 业务规则: 短剧不是分类, 是 tag
+      //   跟 /api/search 一致: name 包含 "短剧" 或 tags 数组含 "短剧"
+      const tagsArr: string[] = r.tags ? (Array.isArray(r.tags) ? r.tags : []) : [];
+      const isShortDrama =
+        (typeof r.name === 'string' && r.name.includes('短剧')) ||
+        tagsArr.some((t: string) => typeof t === 'string' && t.includes('短剧'));
       bySourceMap.get(src)!.push({
         id: r.id,
         name: r.name,
@@ -142,6 +149,7 @@ export async function GET(req: NextRequest, { params }: { params: { type: string
         accessLevel: r.access_level,
         importChannel: r.import_channel,
         payType: r.pay_type,
+        isShortDrama,  // 2026-08-14: 短剧打标
         locked,
         createdAt: r.created_at,
       });
@@ -154,6 +162,10 @@ export async function GET(req: NextRequest, { params }: { params: { type: string
         return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
       })
       .map(([code, items]) => ({ source: code, count: items.length, items }));
+
+    // 2026-08-14: 短剧打标 - top-level 标志: 任一 link 是短剧 → true
+    //   跟 /api/search 一致, 业务规则: 短剧是打标不是分类
+    const isShortDrama = links.some(group => group.items.some((it: any) => it.isShortDrama));
 
     // 6. 返回结构
     return NextResponse.json({
@@ -176,6 +188,7 @@ export async function GET(req: NextRequest, { params }: { params: { type: string
       total: rows.length,
       userGroup,
       hasMore: false,
+      isShortDrama,  // 2026-08-14: 短剧打标 (top-level)
     }, { headers: CORS_HEADERS });
   } catch (e: any) {
     console.error('[api/detail] error:', e.message);

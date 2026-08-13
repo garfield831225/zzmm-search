@@ -161,6 +161,18 @@ export async function GET(request: NextRequest) {
       addCond('(r.name ILIKE $1 OR r.category ILIKE $1)', `%${q.trim()}%`);
     }
 
+    // 2026-08-14: ?tag=短剧 过滤 (不影响分类, 只在 name/tags 里找)
+    //   业务规则: 短剧是打标, 不是分类. 客户端传 tag=短剧 时只返含此 tag 的资源
+    //   跟 zone=nonfilm / category=电影 等独立, 可叠加: ?zone=film&tag=短剧
+    const tagFilter = (searchParams.get('tag') || '').trim();
+    if (tagFilter) {
+      const safeTag = tagFilter.replace(/[%_\\]/g, '\\$&').slice(0, 30);
+      addCond(
+        "(r.name ILIKE $1 OR array_to_string(r.tags, ',') ILIKE $1)",
+        `%${safeTag}%`
+      );
+    }
+
     const regionCodes = REGION_CODES[region];
     if (regionCodes) {
       const regionParts: string[] = [];
@@ -500,6 +512,13 @@ export async function GET(request: NextRequest) {
       const tmdbOk = !cacheInfo || !exp || cacheInfo.tmdb_type === exp;
       const subLinks = linksMap.get(item.id);
       const hasSubLinks = subLinks && subLinks.length > 0;
+      // 2026-08-14: 短剧打标 - 业务规则: 短剧不是分类, 是 tag
+      //   检测: name 包含 "短剧" 或 tags 数组里有 "短剧"/"短剧榜"/"短剧合集" 等
+      //   前端用 isShortDrama 字段决定是否显示角标
+      const tagsArr: string[] = item.tags ? (Array.isArray(item.tags) ? item.tags : []) : [];
+      const isShortDrama =
+        (typeof item.name === 'string' && item.name.includes('短剧')) ||
+        tagsArr.some(t => typeof t === 'string' && t.includes('短剧'));
       return {
         id: item.id,
         name: item.name,
@@ -510,7 +529,8 @@ export async function GET(request: NextRequest) {
         category: item.category || '',
         size: item.size || '',
         type: item.type || '',
-        tags: item.tags ? (Array.isArray(item.tags) ? item.tags : []) : [],
+        tags: tagsArr,
+        isShortDrama,  // 2026-08-14: 短剧打标
         docSheet: item.doc_sheet || '',
         subType: item.sub_type || '',
         tmdbIdRaw: item.tmdb_id || '',
