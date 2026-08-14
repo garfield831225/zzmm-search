@@ -11,6 +11,7 @@ import {
   Sparkles, TrendingUp, Calendar, Activity, Shield, Trash2, X,
   CheckCircle2, AlertCircle, LogOut, Home, MessageCircle, Edit3, Lock, Unlock, Coins
 } from 'lucide-react';
+import { useRequireAuth } from '@/lib/use-require-auth';
 
 interface UserInfo {
   id: number;
@@ -68,6 +69,8 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 export default function ProfilePage() {
+  // 2026-08-15: client-side 鉴权 (替代不跑的 middleware)
+  const { authChecked } = useRequireAuth('/profile');
   const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<UserInfo | null>(null);
@@ -82,6 +85,11 @@ export default function ProfilePage() {
   const [pwForm, setPwForm] = useState({ old: '', new: '', confirm: '' });
   const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // 未登录 / 鉴权中 → 显示加载, useRequireAuth 内部会跳 /login
+  if (!authChecked) {
+    return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white/50 text-sm">加载中...</div>;
+  }
 
   const showToast = (type: 'success' | 'error', msg: string) => {
     setToast({ type, msg });

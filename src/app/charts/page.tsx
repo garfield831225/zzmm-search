@@ -7,12 +7,19 @@ import ChartsSection from '@/components/charts/ChartsSection';
 import CalendarSection from '@/components/charts/CalendarSection';
 import NavMenu from '@/components/NavMenu';
 import MobileNav from '@/components/MobileNav';
+import { useRequireAuth } from '@/lib/use-require-auth';
 
 type Tab = 'charts' | 'calendar';
 
 function ChartsPageInner() {
+  // 2026-08-15: client-side 鉴权 (替代不跑的 middleware)
+  const { authChecked } = useRequireAuth('/charts');
   const searchParams = useSearchParams();
   const initialTab: Tab = searchParams.get('tab') === 'calendar' ? 'calendar' : 'charts';
+
+  if (!authChecked) {
+    return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white/50 text-sm">加载中...</div>;
+  }
   const [tab, setTab] = useState<Tab>(initialTab);
 
   // 2026-08-14: 观影推荐页
