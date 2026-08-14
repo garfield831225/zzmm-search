@@ -42,6 +42,12 @@ const TMDB_KEYS = [
   process.env.TMDB_API_KEY_2,
 ].filter(Boolean) as string[];
 
+// 2026-08-14: NAS 内网连不上 api.themoviedb.org (GFW), 改走 CF quick tunnel 反代
+//   - 临时方案: trycloudflare.com (Windows 本地 Node 反代 + cloudflared 暴露)
+//   - 长期方案: 部署正式 Cloudflare Worker (用户需给 account scope token)
+//   - 读 env 变量让切换简单
+const TMDB_API_BASE = process.env.TMDB_API_BASE || 'https://api.themoviedb.org';
+
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;  // 6 小时
 
 export async function OPTIONS() {
@@ -120,7 +126,7 @@ export async function GET(req: NextRequest) {
 
   let tmdbData: any = null;
   for (let i = 0; i < TMDB_KEYS.length; i++) {
-    const url = `https://api.themoviedb.org/3${endpoint}?api_key=${TMDB_KEYS[i]}${lang}${watchRegionParam}${withWatchProvidersParam}${sortBy}${pageParam}&include_adult=false`;
+    const url = `${TMDB_API_BASE}/3${endpoint}?api_key=${TMDB_KEYS[i]}${lang}${watchRegionParam}${withWatchProvidersParam}${sortBy}${pageParam}&include_adult=false`;
     try {
       const r = await fetch(url, { cache: 'no-store' });
       if (!r.ok) continue;
