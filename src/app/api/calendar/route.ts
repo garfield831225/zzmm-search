@@ -57,14 +57,24 @@ interface CalendarItem {
 }
 
 async function fetchSimkl(start: string, days: number): Promise<CalendarItem[]> {
+  // 2026-08-14: SIMKL 公共日历需要 OAuth (Authorization Bearer access_token)
+  //   - 用户的 client_id + client_secret 拿到了, 但 v1 X-Simkl-Api-Key header 412 "client_id_failed"
+  //   - v2 OAuth 流程用户没跑, 没 access_token, 暂时返空
+  //   - 后续用户跑完 OAuth 后, 把 access_token 加到 .env.production SIMKL_ACCESS_TOKEN 即可启用
   if (!SIMKL_CLIENT_ID) return [];
+  const SIMKL_TOKEN = process.env.SIMKL_ACCESS_TOKEN;
+  if (!SIMKL_TOKEN) {
+    // 公共日历 (no auth) 也不通, 暂时返空, 全部走 TVMaze
+    return [];
+  }
   const url = `${SIMKL_API_BASE}/calendar/all?type=tv&start=${start}&days=${days}&extended=overview`;
   try {
     const r = await fetch(url, {
       headers: {
-        'X-Simkl-Api-Key': SIMKL_CLIENT_ID,
-        'Accept': 'application/json',
+        'Authorization': `Bearer ${SIMKL_TOKEN}`,
         'simkl-api-key': SIMKL_CLIENT_ID,
+        'Accept': 'application/json',
+        'User-Agent': 'zzmm-search/1.0',
       },
       cache: 'no-store',
     });
@@ -74,7 +84,6 @@ async function fetchSimkl(start: string, days: number): Promise<CalendarItem[]> 
     }
     const data = await r.json();
     const items: CalendarItem[] = [];
-    // SIMKL 公共日历格式: [{ date, episodes: [{ show, episode }] }]
     for (const dayEntry of (data || [])) {
       for (const ep of (dayEntry.episodes || [])) {
         const show = ep.show || {};
@@ -118,11 +127,16 @@ async function fetchTVMaze(start: string, days: number): Promise<CalendarItem[]>
       const data = await r.json();
       for (const ep of (data || [])) {
         const show = ep._embedded?.show || {};
-        // TVMaze externals 字段: tmdb / tvdb / imdb
-        // tmdb 优先 (跟 SIMKL 字段对齐), 没有就 null
-        const tmdbId = show.externals?.tmdb
-          ? String(show.externals.tmdb)
-          : null;
+        // 2026-08-14: 过滤掉非剧情类 (新闻/脱口秀/游戏节目/真人秀/体育/谈话)
+        //   TVMaze type: "Scripted" (剧情) | "Animation" | "Reality" | "Talk Show" | "Game Show" | "News" | "Sports" | "Variety" | "Panel Show"
+        //   - 首字母大写, 我之前 lowercase 比较错配
+        //   - 加 genres.length > 0 (新闻类 genres 通常为空)
+        const showType = show.type || '';
+        const isScripted = showType === 'Scripted' || showType === 'Animation';
+        const hasGenre = Array.isArray(show.genres) && show.genres.length > 0;
+        if (!isScripted || !hasGenre) continue;
+        // TMDB id 优先
+        const tmdbId = show.externals?.tmdb ? String(show.externals.tmdb) : null;
         allItems.push({
           id: `tvmaze-${ep.id}`,
           source: 'tvmaze',
@@ -138,7 +152,7 @@ async function fetchTVMaze(start: string, days: number): Promise<CalendarItem[]>
             title: ep.name || null,
           } : null,
           overview: ep.summary ? ep.summary.replace(/<[^>]+>/g, '').slice(0, 200) : null,
-          poster: show.image?.medium || null,
+          poster: show.image?.medium || show.image?.original || null,
         });
       }
     } catch (e: any) {

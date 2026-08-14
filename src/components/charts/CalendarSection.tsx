@@ -181,6 +181,19 @@ export default function CalendarSection() {
                       key={it.id}
                       className="flex gap-3 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-violet-400/30 hover:bg-white/[0.04] transition"
                     >
+                      {/* 2026-08-14: 加海报 (TVMaze image.medium, 210x295) */}
+                      <div className="w-12 h-16 rounded-md overflow-hidden bg-white/[0.06] flex-shrink-0">
+                        {it.poster ? (
+                          <img
+                            src={it.poster}
+                            alt={it.title}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-white/20 text-xs">无图</div>
+                        )}
+                      </div>
                       <div className="flex-1 min-w-0">
                         {it.tmdbId ? (
                           <Link href={`/tmdb/tv/${it.tmdbId}`} className="block">
