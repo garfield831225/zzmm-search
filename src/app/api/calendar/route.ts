@@ -401,8 +401,16 @@ export async function GET(req: NextRequest) {
   // 3. 去重 + 按日期排
   let allItems = dedupeByTmdbId([...filteredSimklItems, ...filteredTvmazeItems, ...filteredAnilistItems]);
   // type 过滤
-  if (type !== 'all') {
-    allItems = allItems.filter(it => it.type === type);
+  //   - 'tv'    → tv + anime (anime 算 tv 一种, 用户拍板"加日本动漫"是合并到 tv 日历)
+  //   - 'movie' → movie
+  //   - 'anime' → 只 anime
+  //   - 'all'   → 全
+  if (type === 'tv') {
+    allItems = allItems.filter(it => it.type === 'tv' || it.type === 'anime');
+  } else if (type === 'movie') {
+    allItems = allItems.filter(it => it.type === 'movie');
+  } else if (type === 'anime') {
+    allItems = allItems.filter(it => it.type === 'anime');
   }
   allItems.sort((a, b) => {
     if (a.airDate !== b.airDate) return a.airDate.localeCompare(b.airDate);
