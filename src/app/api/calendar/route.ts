@@ -51,6 +51,7 @@ interface CalendarItem {
   episode: { season: number; number: number; title: string | null } | null;
   overview: string | null;
   poster: string | null;
+  country?: string;        // 2026-08-14: TVMaze 来源国家 (US/GB/CN/JP/KR 等)
   // 关联 xx_resources
   localResourceCount?: number;
   localSources?: string[];
@@ -111,16 +112,22 @@ async function fetchSimkl(start: string, days: number): Promise<CalendarItem[]> 
 
 async function fetchTVMaze(start: string, days: number): Promise<CalendarItem[]> {
   const allItems: CalendarItem[] = [];
-  // TVMaze schedule: 每天一次请求, 串行 (避免 rate limit)
+  // 2026-08-14: 多国 (US/GB/CA/AU/DE/FR/JP/KR/CN) 并行
+  //   串行按天 + 并行国家, 总请求 30 天 × 9 国 = 270 次, ~14 秒完成
+  const COUNTRIES = ['US', 'GB', 'CA', 'AU', 'DE', 'FR', 'JP', 'KR', 'CN'];
   for (let i = 0; i < days; i++) {
     const d = new Date(start);
     d.setUTCDate(d.getUTCDate() + i);
     const dateStr = ymd(d);
-    const url = `${TVMAZE_API_BASE}/schedule/web?date=${dateStr}&country=US`;
-    try {
-      const r = await fetch(url, { cache: 'no-store' });
-      if (!r.ok) continue;
-      const data = await r.json();
+    // 9 国并发, 一国返 0 不影响其他
+    const results = await Promise.allSettled(
+      COUNTRIES.map(c => fetch(`${TVMAZE_API_BASE}/schedule/web?date=${dateStr}&country=${c}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : []))
+    );
+    for (let ci = 0; ci < COUNTRIES.length; ci++) {
+      const r = results[ci];
+      const country = COUNTRIES[ci];
+      if (r.status !== 'fulfilled') continue;
+      const data = r.value || [];
       for (const ep of (data || [])) {
         const show = ep._embedded?.show || {};
         // 2026-08-14: 过滤掉非剧情类 (新闻/脱口秀/游戏节目/真人秀/体育/谈话)
@@ -131,7 +138,6 @@ async function fetchTVMaze(start: string, days: number): Promise<CalendarItem[]>
         const isScripted = showType === 'Scripted' || showType === 'Animation';
         const hasGenre = Array.isArray(show.genres) && show.genres.length > 0;
         if (!isScripted || !hasGenre) continue;
-        // TMDB id 优先
         const tmdbId = show.externals?.tmdb ? String(show.externals.tmdb) : null;
         allItems.push({
           id: `tvmaze-${ep.id}`,
@@ -149,11 +155,9 @@ async function fetchTVMaze(start: string, days: number): Promise<CalendarItem[]>
           } : null,
           overview: ep.summary ? ep.summary.replace(/<[^>]+>/g, '').slice(0, 200) : null,
           poster: show.image?.medium || show.image?.original || null,
+          country,  // 2026-08-14: 标记国家
         });
       }
-    } catch (e: any) {
-      console.warn(`[calendar] TVMaze ${dateStr} failed:`, e.message);
-      continue;
     }
   }
   return allItems;
@@ -181,6 +185,7 @@ export async function GET(req: NextRequest) {
   const type = (searchParams.get('type') || 'tv').toLowerCase();
   const useSimkl = searchParams.get('simkl') !== '0';
   const useTVMaze = searchParams.get('tvmaze') !== '0';
+  const region = (searchParams.get('region') || 'all').toLowerCase();
 
   if (type !== 'tv' && type !== 'movie' && type !== 'all') {
     return NextResponse.json(
@@ -195,7 +200,7 @@ export async function GET(req: NextRequest) {
   endDate.setUTCDate(endDate.getUTCDate() + days - 1);
   const end = ymd(endDate);
 
-  const cacheKey = `calendar:${start}:${days}:${type}:${useSimkl?'1':'0'}:${useTVMaze?'1':'0'}`;
+  const cacheKey = `calendar:${start}:${days}:${type}:${region}:${useSimkl?'1':'0'}:${useTVMaze?'1':'0'}`;
 
   // 1. 查 cache
   const sql = neon(process.env.DATABASE_URL || '');
@@ -223,6 +228,9 @@ export async function GET(req: NextRequest) {
     useSimkl ? fetchSimkl(start, days) : Promise.resolve([]),
     useTVMaze ? fetchTVMaze(start, days) : Promise.resolve([]),
   ]);
+
+  // 2026-08-14: region 提前定义 (用于 cache key + 过滤)
+  // (region 已在 line 188 定义)
 
   // 2026-08-14: SIMKL 没 type/genre 字段, if 链过滤 (避开 swc minifier 改 regex)
   //   - 剔除: 体育/新闻/真人秀/纪录片/脱口秀/烹饪/家装/钓鱼/购物/旅游/生活类
@@ -264,6 +272,12 @@ export async function GET(req: NextRequest) {
     if (t.includes('commentary') || t.includes('episode 0')) return true;
     return false;
   }
+  // 2026-08-14: 每国每日期限条数 (避免 CN 19 条刷屏)
+  //   - SIMKL (欧美): 5/天
+  //   - 欧美 TVMaze (US/GB/CA/AU/DE/FR): 3/天/国
+  //   - 亚洲 TVMaze (CN/JP/KR/TW/HK): 3/天/国
+  const SIMKL_DAILY_LIMIT = 5;
+  const TVMAZE_DAILY_PER_COUNTRY = 3;
   const filteredSimklItems: CalendarItem[] = [];
   const simklByDate: Record<string, CalendarItem[]> = {};
   for (const it of simklItems) {
@@ -272,12 +286,27 @@ export async function GET(req: NextRequest) {
     simklByDate[it.airDate].push(it);
   }
   for (const date in simklByDate) {
-    simklByDate[date].sort((a, b) => 0);  // 保持原顺序
-    filteredSimklItems.push(...simklByDate[date].slice(0, 5));
+    filteredSimklItems.push(...simklByDate[date].slice(0, SIMKL_DAILY_LIMIT));
+  }
+
+  // TVMaze 多国每国每日期限
+  const tvmazeByDateCountry: Record<string, Record<string, CalendarItem[]>> = {};
+  const filteredTvmazeItems: CalendarItem[] = [];
+  for (const it of tvmazeItems) {
+    const date = it.airDate;
+    const c = it.country || 'US';
+    if (!tvmazeByDateCountry[date]) tvmazeByDateCountry[date] = {};
+    if (!tvmazeByDateCountry[date][c]) tvmazeByDateCountry[date][c] = [];
+    tvmazeByDateCountry[date][c].push(it);
+  }
+  for (const date in tvmazeByDateCountry) {
+    for (const c in tvmazeByDateCountry[date]) {
+      filteredTvmazeItems.push(...tvmazeByDateCountry[date][c].slice(0, TVMAZE_DAILY_PER_COUNTRY));
+    }
   }
 
   // 3. 去重 + 按日期排
-  let allItems = dedupeByTmdbId([...filteredSimklItems, ...tvmazeItems]);
+  let allItems = dedupeByTmdbId([...filteredSimklItems, ...filteredTvmazeItems]);
   // type 过滤
   if (type !== 'all') {
     allItems = allItems.filter(it => it.type === type);
@@ -315,7 +344,22 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // 5. 按日期分桶
+  // 5. 按 region 过滤 (UI 切换 全部/亚洲/欧美)
+  //   SIMKL 算欧美
+  //   TVMaze: CN/JP/KR/TW/HK 算亚洲, 其他算欧美
+  if (region === 'asia') {
+    allItems = allItems.filter(it => {
+      if (it.source === 'simkl') return false;
+      return ['CN', 'JP', 'KR', 'TW', 'HK'].includes(it.country || '');
+    });
+  } else if (region === 'eu') {
+    allItems = allItems.filter(it => {
+      if (it.source === 'simkl') return true;
+      return !['CN', 'JP', 'KR', 'TW', 'HK'].includes(it.country || '');
+    });
+  }
+
+  // 6. 按日期分桶
   const byDate: Record<string, CalendarItem[]> = {};
   for (const it of allItems) {
     if (!byDate[it.airDate]) byDate[it.airDate] = [];
@@ -327,6 +371,7 @@ export async function GET(req: NextRequest) {
     endDate: end,
     days,
     type,
+    region,
     totalItems: allItems.length,
     simklCount: simklItems.length,
     tvmazeCount: tvmazeItems.length,

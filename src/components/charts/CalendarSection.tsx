@@ -14,6 +14,7 @@ interface CalendarItem {
   episode: { season: number; number: number; title: string | null } | null;
   overview: string | null;
   poster: string | null;
+  country?: string;
   localResourceCount: number;
   localSources: string[];
 }
@@ -23,8 +24,17 @@ interface CalendarItem {
 // - 按日期分桶
 // - 卡片: 标题 + SxxExx + 集标题 + 本地资源数
 // - 日期切换 (今天 / 14 天 / 30 天)
+type Region = 'all' | 'eu' | 'asia';
+
+const REGIONS: { id: Region; name: string; emoji: string }[] = [
+  { id: 'all', name: '全部', emoji: '🌐' },
+  { id: 'eu', name: '欧美', emoji: '🌎' },
+  { id: 'asia', name: '亚洲', emoji: '🌏' },
+];
+
 export default function CalendarSection() {
   const [days, setDays] = useState<number>(30);
+  const [region, setRegion] = useState<Region>('all');
   const [startDate, setStartDate] = useState<string>(() => {
     const d = new Date();
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
@@ -41,7 +51,7 @@ export default function CalendarSection() {
       setLoading(true);
       setError(null);
       try {
-        const url = `/api/calendar?start=${startDate}&days=${days}&type=tv`;
+        const url = `/api/calendar?start=${startDate}&days=${days}&type=tv&region=${region}`;
         const r = await fetch(url, { cache: 'no-store' });
         if (!r.ok) {
           const data = await r.json().catch(() => ({}));
@@ -60,7 +70,7 @@ export default function CalendarSection() {
     };
     fetchData();
     return () => { cancelled = true; };
-  }, [startDate, days]);
+  }, [startDate, days, region]);
 
   // 滚动到今天的日期
   const todayStr = useMemo(() => {
@@ -111,6 +121,22 @@ export default function CalendarSection() {
 
         <div className="flex-1 min-w-0 text-xs text-white/50 truncate">
           {startDate} 起 {days} 天 · 共 {items.length} 集
+        </div>
+
+        {/* 2026-08-14: 区域切换 (全部/欧美/亚洲) */}
+        <div className="flex gap-1 shrink-0">
+          {REGIONS.map((r) => (
+            <button
+              key={r.id}
+              onClick={() => setRegion(r.id)}
+              className={`px-2.5 py-1 rounded-lg text-xs transition flex items-center gap-1 ${
+                region === r.id ? 'bg-fuchsia-500/30 text-white border border-fuchsia-400/50' : 'bg-white/[0.03] text-white/50 hover:text-white/80 border border-white/[0.05]'
+              }`}
+            >
+              <span>{r.emoji}</span>
+              <span>{r.name}</span>
+            </button>
+          ))}
         </div>
 
         <div className="flex gap-1 shrink-0">
@@ -181,8 +207,8 @@ export default function CalendarSection() {
                       key={it.id}
                       className="flex gap-3 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-violet-400/30 hover:bg-white/[0.04] transition"
                     >
-                      {/* 2026-08-14: 加海报 (TVMaze image.medium, 210x295) */}
-                      <div className="w-12 h-16 rounded-md overflow-hidden bg-white/[0.06] flex-shrink-0">
+                      {/* 2026-08-14: 加海报 (TVMaze image.medium, 210x295) - 改 80x120 大图 */}
+                      <div className="w-20 h-[120px] rounded-md overflow-hidden bg-white/[0.06] flex-shrink-0">
                         {it.poster ? (
                           <img
                             src={it.poster}
@@ -226,6 +252,13 @@ export default function CalendarSection() {
                           )}
                           {it.source && (
                             <span className="text-[10px] text-white/25">via {it.source}</span>
+                          )}
+                          {it.country && (
+                            <span className={`text-[10px] px-1 rounded font-mono ${
+                              ['CN', 'JP', 'KR', 'TW', 'HK'].includes(it.country)
+                                ? 'bg-amber-500/15 text-amber-300/80'
+                                : 'bg-blue-500/15 text-blue-300/80'
+                            }`}>{it.country}</span>
                           )}
                           {it.airTime && (
                             <span className="text-[10px] text-white/30 ml-auto">{it.airTime}</span>
