@@ -41,6 +41,10 @@ interface SectionProps {
   accent?: 'cyan' | 'violet' | 'amber' | 'pink' | 'emerald';
   loading?: boolean;
   linkMode?: boolean;     // 2026-08-09: 网盘资源模式, 卡片 onClick 直接 window.open(it.link) 不跳详情页
+  // 2026-08-14: VIP 锁补漏 - 双保险, 后端 /api/catalog 过滤了 access_tier='vip' 给 basic 看不到,
+  //   前端这里 basic + accessLevel='vip' 也不直开, 调 onLockedClick 弹 toast
+  userGroup?: 'admin' | 'vip' | 'basic' | 'member' | 'user' | null;
+  onLockedClick?: (msg: string) => void;
 }
 
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
@@ -75,7 +79,7 @@ const accentColor: Record<string, { bg: string; text: string; border: string; gl
   emerald: { bg: 'from-emerald-500/10 to-green-500/10', text: 'text-emerald-300', border: 'border-emerald-500/30', glow: 'shadow-emerald-500/10' },
 };
 
-export default function HomeSection({ title, titleEn, emoji, href, items, accent = 'cyan', loading, linkMode }: SectionProps) {
+export default function HomeSection({ title, titleEn, emoji, href, items, accent = 'cyan', loading, linkMode, userGroup, onLockedClick }: SectionProps) {
   const color = accentColor[accent] || accentColor.cyan;
   const scrollerRef = useRef<HTMLDivElement>(null);
   const [canLeft, setCanLeft] = useState(false);
@@ -178,6 +182,13 @@ export default function HomeSection({ title, titleEn, emoji, href, items, accent
                   onClick={() => {
                     // 2026-08-09: linkMode (网盘资源) 优先开网盘直链, 不跳详情页
                     if (linkMode && it.link) {
+                      // 2026-08-14: VIP 锁补漏 - 双保险, basic + accessLevel='vip' 不直开
+                      //   后端 /api/catalog 已过滤 (basic 拿不到 access_tier='vip'),
+                      //   前端这里再挡一次防御性, 防止脏数据 (access_tier='document' + access_level='vip') 漏
+                      if (userGroup === 'basic' && it.accessLevel === 'vip') {
+                        onLockedClick?.('🔒 VIP 资源，basic 用户不可直接打开，请升级 VIP');
+                        return;
+                      }
                       try {
                         window.open(it.link, '_blank', 'noopener,noreferrer');
                       } catch {}

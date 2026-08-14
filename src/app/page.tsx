@@ -703,6 +703,9 @@ export default function HomePage() {
           items={secVip}
           loading={secLoading}
           linkMode
+          // 2026-08-14: VIP 锁补漏 - 传 userGroup + onLockedClick 双保险 (后端 /api/catalog 已过滤 access_tier)
+          userGroup={(user?.group ?? null) as any}
+          onLockedClick={(m) => addToast('error', m)}
         />
 
         {/* 5. 主题专区 (横排卡片) */}

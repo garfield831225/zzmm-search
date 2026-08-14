@@ -18,6 +18,7 @@ interface ResourceItem {
   size: string | null;
   lumen_cost: number;
   access_tier: string;
+  access_level?: string;  // 2026-08-14: VIP 锁补漏 - 双保险, basic + access_level='vip' 拦打开/复制
   import_channel: string | null;
   doc_sheet: string | null;
   created_at: string;
@@ -70,10 +71,16 @@ export default function TmdbDetailPage() {
   const [loading, setLoading] = useState(true);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [imgError, setImgError] = useState(false);
+  // 2026-08-14: VIP 锁补漏 - 拿 user.group 二次过滤 (后端 /api/tmdb-resources 已按 access_tier 过滤)
+  const [userGroup, setUserGroup] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
     setImgError(false);
+    // 2026-08-14: VIP 锁补漏 - 拉 user.group (跟 /api/auth/me 一样, 只读 group)
+    fetch('/api/auth/me').then(r => r.ok ? r.json() : null).then(u => {
+      setUserGroup(u?.group || null);
+    }).catch(() => setUserGroup(null));
     Promise.all([
       fetch(`/api/tmdb-resources/${type}/${tmdbId}`).then(r => r.json()).catch(() => null),
       fetch(`/api/tmdb-credits/${type}/${tmdbId}`).then(r => r.json()).catch(() => null),
@@ -84,12 +91,28 @@ export default function TmdbDetailPage() {
     });
   }, [type, tmdbId]);
 
-  const copyLink = useCallback(async (id: number, link: string, code: string | null) => {
+  const copyLink = useCallback(async (id: number, link: string, code: string | null, accessLevel?: string) => {
+    // 2026-08-14: VIP 锁补漏 - basic + accessLevel='vip' 不复制
+    if (userGroup === 'basic' && accessLevel === 'vip') {
+      alert('🔒 VIP 资源，basic 用户不可复制，请升级 VIP');
+      return;
+    }
     const text = code ? `${link}\n提取码: ${code}` : link;
     await navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
-  }, []);
+  }, [userGroup]);
+
+  // 2026-08-14: VIP 锁补漏 - basic + accessLevel='vip' 不直开
+  const handleOpen = useCallback((link: string, accessLevel?: string) => {
+    if (userGroup === 'basic' && accessLevel === 'vip') {
+      alert('🔒 VIP 资源，basic 用户不可直接打开，请升级 VIP');
+      return;
+    }
+    try {
+      window.open(link, '_blank', 'noopener,noreferrer');
+    } catch {}
+  }, [userGroup]);
 
   if (loading) {
     return (
@@ -272,6 +295,9 @@ export default function TmdbDetailPage() {
                             <div className="flex-1 min-w-0">
                               <div className="text-sm text-white truncate" title={item.name}>
                                 {item.name}
+                                {item.access_level === 'vip' && (
+                                  <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-500/80 text-[10px] text-white font-medium align-middle">🔒 VIP</span>
+                                )}
                               </div>
                               <div className="flex flex-wrap gap-2 mt-1 text-[11px] text-gray-500">
                                 {item.size && <span>📦 {item.size}</span>}
@@ -285,7 +311,7 @@ export default function TmdbDetailPage() {
                             </div>
 
                             <button
-                              onClick={() => copyLink(item.id, item.link, item.link_code)}
+                              onClick={() => copyLink(item.id, item.link, item.link_code, item.access_level)}
                               className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded text-xs flex items-center gap-1 transition-colors"
                               title="复制链接+提取码"
                             >
@@ -293,14 +319,13 @@ export default function TmdbDetailPage() {
                               {copiedId === item.id ? '已复制' : '复制'}
                             </button>
 
-                            <a
-                              href={item.link}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            {/* 2026-08-14: VIP 锁补漏 - basic + accessLevel='vip' 走 handleOpen 拦截, 不裸 href */}
+                            <button
+                              onClick={() => handleOpen(item.link, item.access_level)}
                               className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 rounded text-xs flex items-center gap-1 transition-colors"
                             >
                               <ExternalLink size={12} /> 打开
-                            </a>
+                            </button>
                           </div>
                         </div>
                       ))}

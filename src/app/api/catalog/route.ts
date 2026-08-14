@@ -22,6 +22,8 @@
 //   修法: sheet 分类列表加一个 "未分类 (sheet=NULL)" 按钮, 显示 sheet=NULL 的资源数
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
+import { jwtVerify } from 'jose';
+import { cookies } from 'next/headers';
 
 // 2026-08-01: 修 Neon HTTP endpoint 偶发返 stale data bug
 //   (catalog 看到 7/31 11:00 那 13 条外语电影 link 没插入前的 7516, 但 DB 实际 7529)
@@ -36,6 +38,23 @@ const sql = neon(process.env.DATABASE_URL || '', {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
+
+// 2026-08-14: VIP 锁补漏 — /api/catalog 跟 /api/tmdb-resources 一样按 user group 分级
+//  之前 /api/catalog 任何人 (未登录 + basic) 都能拿到 section=vip 资源 metadata (含 accessLevel='vip'),
+//  配合 Section.tsx:180 linkMode 直接 window.open() 绕过前端 isVipLocked,
+//  详情页 /tmdb/.../page.tsx:296 打开按钮裸 href, 双层漏。
+//  修法: 加 JWT 鉴权 + access_tier 过滤 (跟 /api/tmdb-resources 4 分支保持一致)
+const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
+
+async function getUserGroup(): Promise<string> {
+  try {
+    const cookieStore = await cookies();
+    const token = cookieStore.get('zzmm_token')?.value || cookieStore.get('token')?.value;
+    if (!token) return 'user';
+    const payload = await jwtVerify(token, new TextEncoder().encode(JWT_SECRET));
+    return (payload.payload as any)?.group || 'user';
+  } catch { return 'user'; }
+}
 
 const SOURCE_DISPLAY_MAP: Record<string, string> = {
   '115': '115网盘', 'baidu': '百度网盘', 'quark': '夸克网盘',
@@ -94,6 +113,20 @@ export async function GET(request: NextRequest) {
       condVals.push(...vals);
     };
     addCond('r.status = $1', 'active');
+    // 2026-08-14: VIP 锁补漏 — 按 user group 加 access_tier 过滤, 跟 /api/tmdb-resources 一致
+    //  admin → 全部; vip → document+vip; basic/member → document only (看不到 vip section);
+    //  user (未激活) → document only + lumen_cost=0 (也看不到 vip section)
+    const group = await getUserGroup();
+    if (group === 'admin') {
+      // 不过滤, 看全部
+    } else if (group === 'vip') {
+      conds.push("r.access_tier IN ('document', 'vip')");
+    } else if (group === 'basic' || group === 'member') {
+      conds.push("r.access_tier = 'document'");
+    } else {
+      // user (未激活) — 加 lumen_cost=0 限制, 防止 vip 资源虽然 access_tier='document' 但 lumen_cost>0 漏
+      conds.push("r.access_tier = 'document' AND (r.lumen_cost IS NULL OR r.lumen_cost = 0)");
+    }
     if (section !== '') conds.push(sectionFilter);
     // sheet 过滤: 普通 sheet 用等值, "未分类" 用 IS NULL
     if (isUnclassifiedSheet) {
