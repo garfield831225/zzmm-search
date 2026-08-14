@@ -187,6 +187,14 @@ const PUBLIC_PATHS = [
   //   - 共享 100 req/s admin TMDB 限速, 不额外限速
   '/api/match-single',
   '/api/match-batch',
+  // 2026-08-14: 观影推荐 + 追剧日历 (公开浏览, 路由内自鉴权)
+  //   - /api/charts: 公共榜单 (TMDB discover)
+  //   - /api/calendar: 公共追剧日历 (SIMKL + TVMaze)
+  //   - /api/watchlist: 用户追剧清单 (Bearer/cookie 鉴权, 路由内自鉴权)
+  '/api/charts',
+  '/api/calendar',
+  '/api/watchlist',
+  '/charts',
   // 2026-08-13: 公共 API batch 2+3 (moviezone + 子站)
   //   - /api/search 已有 CORS (route.ts 内 OPTIONS + headers), 不影响现有
   //   - /api/detail /api/nonfilm /api/search/suggest /api/exclusive-zone 全 Bearer 鉴权在 route 内

@@ -1,0 +1,90 @@
+============================================== 
+Daily match-rules-analysis report - 2026-08-14 06:39 
+============================================== 
+=== 1. 取 7 天没匹配资源 (仅 电影+电视剧+动漫+纪录片+真人秀) 1000 条 ===
+(node:32516) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/temp_zzmm/zzmm-search/src/lib/match-engine.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to C:\temp_zzmm\zzmm-search\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+取到 1000 条 (含 5 个目标类型)
+  分类分布:
+    电影: 677
+    动漫: 225
+    剧集: 96
+    综艺: 2
+
+=== 2. cleanFolderName 输出质量 ===
+  garbled (乱码):          0 (0.0%)
+  emptyClean:              0 (0.0%)
+  tooShort (< 2):          0 (0.0%)
+  hasQualitySuffix:        0 (0.0%)
+  hasChinese:              1000
+  pureEnglish:             0
+  hasSeason (检出 Sxx):    102
+  cleanName 平均长度:      14.3
+
+=== 3. 失败样本 ===
+
+=== 4. 找 quality suffix 漏掉的 (cleanName 还含 4K/1080p) ===
+
+=== 5. season 命中但 category 不是剧集 (subTypeToTmdb 漏判) ===
+  category=电影 subType=null season=3 name=龙之家族 第三季 (2026 ) 4K HDR & Dv  全8集 内封简繁字幕
+    clean: 龙之家族
+  category=电影 subType=null season=6 name=茶啊二中 第六季(2026)4K 更新至04集
+    clean: 茶啊二中
+  category=电影 subType=null season=3 name=龙之家族 第三季(2026) 4K DV&HDR 更新至07集
+    clean: 龙之家族
+  category=电影 subType=null season=1 name=《胜者即是正义 第1季》蓝光原盘REMUX [内封简日双字]
+    clean: 内封简日双字
+  category=电影 subType=null season=11 name=称：行尸走肉 第十一季 The Walking Dead Season 11(2022/0304更新之S11E09#剧情
+    clean: 称：行尸走肉 The Walking Dead (2022/0304更新之#剧情 #惊悚 #恐怖
+  category=电影 subType=null season=2 name=不良一族寻爱记 (2026) 第2季1080P内嵌至07
+    clean: 不良一族寻爱记 内嵌至07
+  category=电影 subType=null season=5 name=九门(2026)web.4k 60FPS.HQ.DV杜比视界 DTS5.1简体字幕 第22集
+    clean: 九门web
+  category=电影 subType=null season=5 name=九门‎ (2026) 4K SDR HDR DV杜比视界 高码率 DTS5.1DDP5.1 中字 更22集，陈伟霆.陈瑶
+    clean: 九门‎ 杜比视界率 DT
+  category=电影 subType=null season=3 name=母狮  S03 [内封简繁字幕][更新至02集]
+    clean: 母狮 [][]
+  category=电影 subType=null season=3 name=龙之家族 第三季 4K [MAX][DV&HDR][内封多国语字幕][更新至08集]
+    clean: 内封多国语字幕
+
+=== 6. 按 category 分桶的失败原因 (电影+剧集) ===
+  电影: 总677 | garbled:0 | emptyClean:0 | hasQS:0
+  剧集: 总96 | garbled:0 | emptyClean:0 | hasQS:0
+  动漫: 总225 | garbled:0 | emptyClean:0 | hasQS:0
+  综艺: 总2 | garbled:0 | emptyClean:0 | hasQS:0
+
+=== 7. 5 类型失败样本 (各 3 条) ===
+
+  [电影]
+    原: 九门 (2026) 4K  更新 E01 - 24 集
+    清: 九门 更新
+    原: 天才，女友(2026) 4K 更新至23集
+    清: 天才，女友
+    原: 龙之家族 第三季 (2026 ) 4K HDR & Dv  全8集 内封简繁字幕
+    清: 龙之家族
+
+  [剧集]
+    原: 小羊肖恩 第二季 Shaun the Sheep Season 2 (2009)
+    清: 小羊肖恩 Shaun the Sheep
+    原: 老友记 第二季 Friends Season 2 (1995)
+    清: 老友记 Friends
+    原: 从21世纪安全撤离 (2024)
+    清: 从21世纪安全撤离
+
+  [动漫]
+    原: 遮天   国漫  4K 更新175集
+    清: 遮天 国漫
+    原: 光阴之外(2025) 4K HQ 高码 更至34集
+    清: 光阴之外 HQ 更至34集
+    原: 分歧者 1-3 系列合集 2160p HDR BluRay 国英音轨 内封特效/ 外挂双语 FRDS【已刮削】
+    清: 分歧者 1-3 系列合集 国英音轨 内封特效/ 外挂 FRDS【已刮削】
+
+  [综艺]
+    原: 说唱巅峰对决2026 中国说唱巅峰对决2026  中国新说唱8 (2026) 更新 2026 0809期 更新中  【综艺】
+    清: 说唱巅峰对决2026 中国说唱巅峰对决2026 中国新说唱80809期 更新中 【综艺】
+    原: 说唱巅峰对决2026 中国说唱巅峰对决2026  中国新说唱8 (2026) 更新 2026 0809期 更新中  【综艺】
+    清: 说唱巅峰对决2026 中国说唱巅峰对决2026 中国新说唱80809期 更新中 【综艺】
+ 
+=== Done === 

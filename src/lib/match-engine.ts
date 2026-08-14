@@ -87,7 +87,10 @@ export function cleanFolderName(raw: string): { cleanName: string; year: string;
   }
 
   let season: number | null = null;
-  const seasonMatch = raw.match(/第([一二三四五六七八九十\d]+)季|S(\d{1,2})/i);
+  // 2026-08-14: 加 negative lookahead (?!集) - "第N季" 后面不跟"集" 才是真正的季
+  //   避免 "第22集" / "第2季第3集" 里"第2季"被误识别成 season=2
+  //   (虽然前面 regex 已经把 "第N集" 剥了, 这里加 lookahead 是双保险)
+  const seasonMatch = raw.match(/第([一二三四五六七八九十\d]+)季(?!集)|S(\d{1,2})(?![集\d])/i);
   if (seasonMatch) {
     season = seasonMatch[1] ? chineseToNumber(seasonMatch[1]) : parseInt(seasonMatch[2]);
   }
@@ -97,12 +100,25 @@ export function cleanFolderName(raw: string): { cleanName: string; year: string;
   // 例：「老友记 第一季（1994）」→ 「老友记」（不剥 year 不然搜不到 Friends 1994）
   // 2026-07-09: 新加常见后缀 token 剥除
   // 2026-07-09: 智能续集识别 - "真人快打2" 搜不到时, 降级搜 "真人快打" (TMDB 用系列名)
+  // 2026-08-14: 调 match-engine 规则 - 提高 电影/电视剧/动漫/纪录片/真人秀 命中率
+  //   关键: 通用 quality suffix 剥除 (4K/HDR/1080p/720p/集数) 保留 - 适用于所有类型
+  //   移除: 短剧专属剥除 (横屏短剧/微短剧/全集【】) - 用户撤销短剧, 不要
+  //   移除: 演员描述剥除 (主演/演员名) - 电影常用 "丹尼尔·克雷格 主演" 不能瞎剥
+  //   保留: 集数描述 - "全76集"/"更新至20集"/"全8集" 都能帮搜更准 (TMDB 搜剧名比搜全名准)
   raw = raw
     .replace(/第[一二三四五六七八九十\d]+季/g, '')
     .replace(/S\d{1,2}(?=[^\d]|$)/gi, '')
     .replace(/Season\s*\d{1,2}/gi, '')
     .replace(/[（(]\s*\d{4}\s*[)）]/g, '')
-    .replace(/\s+(杜比视界|杜比音效|Dolby\s*Vision|Dolby\s*Atmos|IMAX\s*Enhanced|IMAX|4K\s*修复|导演剪辑版?|终极版|加长版|特别版|抢先版|正式版|国语配音|国配|港版|台版|美版|日版|韩版|欧版|东南亚版|英版|重制版|修复版|高码|高码率)\s*$/i, '')
+    // 集数描述 - 任意位置 (电影/电视剧/动漫/纪录片 都有, 集数信息对 TMDB 搜索是噪声)
+    .replace(/\s*(?:更新[至]?\s*\d{1,4}\s*集?|全\s*\d{1,4}\s*集?|更\s*\d{1,4}\s*集?|\d{1,4}\s*集\s*全|E\s*\d{1,3}\s*[-~]\s*\d{1,3}\s*集|E\s*\d{1,3})/gi, '')
+    // HDR 描述 (任意位置)
+    .replace(/\s*(?:HDR\s*10\s*\+|HDR10\s*\+|Dolby\s*Vision\s*HDR|HDR\s*&\s*DV|DV\s*&\s*HDR|HDR|SDR|高码|高码率)/gi, '')
+    // 字幕/语言描述
+    .replace(/\s*(?:内封简繁字幕|内嵌简中|中字|简繁|双语字幕|双语|国配|国语配音|国粤双语)/g, '')
+    // 规格 token (任意位置, 包含 4K/1080p/2160p/720p/BluRay/BDMV/REMUX/HDTV/WEB-DL/HEVC/AVC/H264/H265/TrueHD/Atmos/DTS-HD)
+    .replace(/\b(?:4K|8K|2160p|1080p|720p|480p|UHD|HDTV|Blu-?ray|Bluray|BDMV|REMUX|WEB-?DL|HEVC|AVC|x\.?264|x\.?265|HDR10|HDR10\+|TrueHD|Atmos|DTS-?HD|DTS|DV|杜比视界|杜比音效|杜比|Dolby\s*Vision|Dolby\s*Atmos|IMAX\s*Enhanced|IMAX|4K\s*修复|导演剪辑版?|终极版|加长版|特别版|抢先版|正式版|国语配音|国配|港版|台版|美版|日版|韩版|欧版|东南亚版|英版|重制版|修复版|高码|高码率)\b/gi, '')
+    .replace(/\s+(?:杜比视界|杜比音效|Dolby\s*Vision|Dolby\s*Atmos|IMAX\s*Enhanced|IMAX|4K\s*修复|导演剪辑版?|终极版|加长版|特别版|抢先版|正式版|国语配音|国配|港版|台版|美版|日版|韩版|欧版|东南亚版|英版|重制版|修复版|高码|高码率)\s*$/i, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
 
@@ -357,7 +373,7 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, 
       const t = c.result.title || c.result.name || '';
       if (!t) continue;
       const tn = norm(t);
-      if (bigramSim(cn, tn) >= 0.6) {
+      if (bigramSim(cn, tn) >= 0.5) {  // 2026-08-14: 0.6 → 0.5 (用户拍板, 更宽松, 多匹配些)
         return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
       }
     }
@@ -370,7 +386,7 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, 
         if (tn.length < 2) continue;
         const d = levenshtein(cn, tn);
         const maxLen = Math.max(cn.length, tn.length);
-        const allow = Math.max(2, Math.floor(maxLen * 0.3));
+        const allow = Math.max(2, Math.floor(maxLen * 0.4));  // 2026-08-14: 0.3 → 0.4 (更宽松)
         if (d <= allow) {
           return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
         }
@@ -454,7 +470,10 @@ export async function matchOne(rawName: string, category: string, subType: strin
       ];
 
     let typeOrder: ('tv' | 'movie')[];
-    if (category === '演唱会') {
+    // 2026-08-14: season 优先级提到最前 - 检到 "第X季" 就先试 tv (短剧/剧集都标了"电影"category, 实际是 tv)
+    if (season !== null) {
+      typeOrder = ['tv', 'movie'];
+    } else if (category === '演唱会') {
       typeOrder = ['movie', 'tv'];
     } else if (category === '纪录片') {
       typeOrder = ['tv', 'movie'];
@@ -465,8 +484,6 @@ export async function matchOne(rawName: string, category: string, subType: strin
       typeOrder = ['tv'];
     } else if (['电影', '华语电影', '外语电影', '动画电影', 'REMUX', '系列电影'].includes(category)) {
       typeOrder = ['movie', 'tv'];
-    } else if (season !== null) {
-      typeOrder = ['tv'];
     } else {
       typeOrder = ['movie', 'tv'];
     }
