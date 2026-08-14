@@ -45,6 +45,7 @@ interface CalendarItem {
   tmdbId: string | null;
   tvdbId: string | null;
   title: string;
+  titleZh?: string;        // 2026-08-14: TMDB 中文名 (zh-CN) 优先显示
   type: 'tv' | 'movie' | 'anime';
   airDate: string;        // YYYY-MM-DD
   airTime: string | null; // HH:MM UTC
@@ -341,6 +342,105 @@ export async function GET(req: NextRequest) {
       const local = resourceMap.get(it.tmdbId);
       it.localResourceCount = local?.count || 0;
       it.localSources = local?.sources || [];
+    }
+  }
+
+  // 2026-08-14: 批量查 TMDB 中文名 (复用 xx_tmdb_cache.title_zh 字段)
+  //   - 7 天 30-50 个 unique tmdbId, 200+ 截断 (避免首次拉 35 天 2000+ 个拖慢)
+  //   - 走 trycloudflare 反代 (TMDB_API_BASE)
+  //   - 2 阶段: (1) 有 tmdbId 的查 /tv/{id} (2) 没 tmdbId 的查 /search/tv?query=
+  const TMDB_BASE = process.env.TMDB_API_BASE || 'https://api.themoviedb.org';
+  const TMDB_KEYS = [process.env.TMDB_API_KEY_1, process.env.TMDB_API_KEY_2].filter(Boolean) as string[];
+  const titleZhMap = new Map<string, string>();
+  try {
+    if (TMDB_KEYS.length === 0) throw new Error('no TMDB keys');
+
+    // ===== Phase 1: 有 tmdbId 的查 /tv/{id} =====
+    const allTmdbIds = allItems.map(it => it.tmdbId).filter((id): id is string => !!id);
+    const uniqueTmdbIds: string[] = Array.from(new Set(allTmdbIds)).slice(0, 200);
+    if (uniqueTmdbIds.length > 0) {
+      const cached = await sql`
+        SELECT tmdb_id, title_zh
+        FROM xx_tmdb_cache
+        WHERE tmdb_id = ANY(${uniqueTmdbIds})
+          AND title_zh IS NOT NULL
+      ` as any[];
+      for (const r of (cached || [])) {
+        if (r.title_zh) titleZhMap.set(String(r.tmdb_id), r.title_zh);
+      }
+      const missing = uniqueTmdbIds.filter(id => !titleZhMap.has(id)).slice(0, 200);
+      const concurrency = 5;
+      for (let i = 0; i < missing.length; i += concurrency) {
+        const batch = missing.slice(i, i + concurrency);
+        await Promise.allSettled(batch.map(async (id) => {
+          for (let ki = 0; ki < TMDB_KEYS.length; ki++) {
+            const url = `${TMDB_BASE}/3/tv/${id}?api_key=${TMDB_KEYS[ki]}&language=zh-CN`;
+            try {
+              const r = await fetch(url, { cache: 'no-store' });
+              if (!r.ok) continue;
+              const data: any = await r.json();
+              const titleZh = data.name || data.original_name;
+              if (titleZh) {
+                titleZhMap.set(id, titleZh);
+                await sql`
+                  INSERT INTO xx_tmdb_cache (tmdb_id, title_zh, tmdb_type, cached_at)
+                  VALUES (${id}, ${titleZh}, 'tv', NOW())
+                  ON CONFLICT (tmdb_id) DO UPDATE SET title_zh = EXCLUDED.title_zh, cached_at = NOW()
+                `.catch(() => {});
+                break;
+              }
+            } catch (e) { /* try next key */ }
+          }
+        }));
+      }
+    }
+
+    // ===== Phase 2: 没 tmdbId 的 (主要是 TVMaze CN/JP/KR) 用 /search/tv 找 =====
+    // key = normalized title, value = 中文名
+    const noTmdb = allItems.filter(it => !it.tmdbId && it.title && !titleZhMap.has(it.id));
+    if (noTmdb.length > 0) {
+      // 去重 title, 避免重复 search
+      const uniqueTitles = Array.from(new Set(noTmdb.map(it => it.title)));
+      console.log(`[calendar] Phase 2: searching ${uniqueTitles.length} titles on TMDB`);
+      const concurrency = 3;
+      for (let i = 0; i < uniqueTitles.length; i += concurrency) {
+        const batch = uniqueTitles.slice(i, i + concurrency);
+        await Promise.allSettled(batch.map(async (title) => {
+          for (let ki = 0; ki < TMDB_KEYS.length; ki++) {
+            const url = `${TMDB_BASE}/3/search/tv?api_key=${TMDB_KEYS[ki]}&query=${encodeURIComponent(title)}&language=zh-CN`;
+            try {
+              const r = await fetch(url, { cache: 'no-store' });
+              if (!r.ok) continue;
+              const data: any = await r.json();
+              const first = data.results?.[0];
+              if (first?.name) {
+                titleZhMap.set(title, first.name);
+                // 写缓存 (用查到的 tmdb_id 存, 后续 /tv/{id} 走 phase 1)
+                if (first.id) {
+                  await sql`
+                    INSERT INTO xx_tmdb_cache (tmdb_id, title_zh, tmdb_type, cached_at)
+                    VALUES (${String(first.id)}, ${first.name}, 'tv', NOW())
+                    ON CONFLICT (tmdb_id) DO UPDATE SET title_zh = EXCLUDED.title_zh, cached_at = NOW()
+                  `.catch(() => {});
+                }
+                break;
+              }
+            } catch (e) { /* try next key */ }
+          }
+        }));
+      }
+    }
+  } catch (e: any) {
+    console.warn('[calendar] TMDB zh-name batch failed:', e.message);
+  }
+
+  // ===== 给 item 加 titleZh =====
+  for (const it of allItems) {
+    if (it.titleZh) continue; // phase 1 already set
+    if (it.tmdbId && titleZhMap.has(it.tmdbId)) {
+      it.titleZh = titleZhMap.get(it.tmdbId);
+    } else if (!it.tmdbId && titleZhMap.has(it.title)) {
+      it.titleZh = titleZhMap.get(it.title);
     }
   }
 

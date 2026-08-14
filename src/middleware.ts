@@ -194,7 +194,8 @@ const PUBLIC_PATHS = [
   '/api/charts',
   '/api/calendar',
   '/api/watchlist',
-  '/charts',
+  // 2026-08-14 修正: /charts 页面要登录 (用户拍板"未登录只能在登录页")
+  // '/charts',
   // 2026-08-13: 公共 API batch 2+3 (moviezone + 子站)
   //   - /api/search 已有 CORS (route.ts 内 OPTIONS + headers), 不影响现有
   //   - /api/detail /api/nonfilm /api/search/suggest /api/exclusive-zone 全 Bearer 鉴权在 route 内

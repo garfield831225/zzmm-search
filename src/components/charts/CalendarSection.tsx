@@ -9,6 +9,7 @@ interface CalendarItem {
   source: string;
   tmdbId: string | null;
   title: string;
+  titleZh?: string;
   airDate: string;
   airTime: string | null;
   episode: { season: number; number: number; title: string | null } | null;
@@ -212,7 +213,7 @@ export default function CalendarSection() {
                         {it.poster ? (
                           <img
                             src={it.poster}
-                            alt={it.title}
+                            alt={it.titleZh || it.title}
                             className="w-full h-full object-cover"
                             loading="lazy"
                           />
@@ -223,13 +224,13 @@ export default function CalendarSection() {
                       <div className="flex-1 min-w-0">
                         {it.tmdbId ? (
                           <Link href={`/tmdb/tv/${it.tmdbId}`} className="block">
-                            <div className="text-sm font-medium text-white/90 line-clamp-1 hover:text-violet-300 transition">
-                              {it.title}
+                            <div className="text-sm font-medium text-white/90 line-clamp-1 hover:text-violet-300 transition" title={it.titleZh ? `${it.titleZh} (${it.title})` : it.title}>
+                              {it.titleZh || it.title}
                             </div>
                           </Link>
                         ) : (
-                          <div className="text-sm font-medium text-white/90 line-clamp-1">
-                            {it.title}
+                          <div className="text-sm font-medium text-white/90 line-clamp-1" title={it.titleZh ? `${it.titleZh} (${it.title})` : it.title}>
+                            {it.titleZh || it.title}
                           </div>
                         )}
                         <div className="text-[11px] text-white/50 mt-0.5 flex items-center gap-1.5">
