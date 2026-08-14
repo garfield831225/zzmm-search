@@ -9,7 +9,7 @@ import Link from 'next/link';
 import {
   User, Key, FileText, Bell, Crown, Tag, AppWindow, BookOpen, Store,
   Sparkles, TrendingUp, Calendar, Activity, Shield, Trash2, X,
-  CheckCircle2, AlertCircle, LogOut, Home, MessageCircle, Edit3, Lock, Unlock, Coins
+  CheckCircle2, AlertCircle, LogOut, Home, MessageCircle, Edit3, Lock, Unlock, Coins, Upload
 } from 'lucide-react';
 
 interface UserInfo {
@@ -46,6 +46,38 @@ interface UnlockRecord {
   unlocked_at: string;
 }
 
+// 2026-08-15: 我的上传 (xx_pending_resources)
+interface MyUpload {
+  id: number;
+  tmdbId: string;
+  tmdbTitle: string;
+  tmdbType: string | null;
+  tmdbPosterUrl: string | null;
+  name: string;
+  type: string;
+  links: string[];
+  linkCount: number;
+  size: string | null;
+  sizeUnit: string | null;
+  note: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  submittedAt: string;
+  reviewedAt: string | null;
+  rejectionReason: string | null;
+}
+
+// 2026-08-15: 积分流水 (xx_point_logs)
+interface PointLog {
+  id: number;
+  type: 'upload_reward' | 'checkin' | 'redeem' | 'admin_adjust' | string;
+  amount: number;
+  refId: number | null;
+  note: string | null;
+  uploadName: string | null;
+  uploadType: string | null;
+  createdAt: string;
+}
+
 interface NavItem {
   key: string;
   label: string;
@@ -58,7 +90,9 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { key: 'profile', label: '个人中心', icon: User, active: true },
   { key: 'invite', label: '邀请码', icon: Key, href: '/activate' },
-  { key: 'lumen', label: '积分记录', icon: Coins, href: '/profile#lumen' },
+  { key: 'lumen', label: '流明记录', icon: Coins, href: '/profile#lumen' },
+  { key: 'points', label: '积分流水', icon: Activity, href: '/profile#points' },
+  { key: 'uploads', label: '我的上传', icon: Upload, href: '/profile#uploads' },
   { key: 'inbox', label: '站内信', icon: Bell, href: '/profile#inbox' },
   { key: 'sub', label: '我的订阅', icon: Crown, href: '/activate' },
   { key: 'apps', label: '我的应用', icon: AppWindow },
@@ -74,6 +108,9 @@ export default function ProfilePage() {
   const [lumenBalance, setLumenBalance] = useState(0);
   const [records, setRecords] = useState<ActivationRecord[]>([]);
   const [unlocks, setUnlocks] = useState<UnlockRecord[]>([]);
+  // 2026-08-15: 我上传的资源 + 积分流水 (替代 /api/admin/pending 看不到的 user 视角)
+  const [myUploads, setMyUploads] = useState<MyUpload[]>([]);
+  const [pointLogs, setPointLogs] = useState<PointLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [editOpen, setEditOpen] = useState(false);
@@ -150,6 +187,13 @@ export default function ProfilePage() {
         if (r3.ok) { const d3 = await r3.json(); setUnlocks(d3.items || []); }
         if (r4.ok) { const d4 = await r4.json(); if (typeof d4.lumen_balance === 'number') setLumenBalance(d4.lumen_balance); }
         if (r5.ok) { const d5 = await r5.json(); if (d5 && typeof d5.used === 'number') setWeeklyCredit({ used: d5.used, total: d5.total, weekStart: d5.week_start }); }
+        // 2026-08-15: 加载我的上传 + 积分流水
+        const [r6, r7] = await Promise.all([
+          fetch('/api/my-uploads', { headers: { Authorization: 'Bearer ' + t } }),
+          fetch('/api/point-logs/me', { headers: { Authorization: 'Bearer ' + t } }),
+        ]);
+        if (r6.ok) { const d6 = await r6.json(); setMyUploads(d6.items || []); }
+        if (r7.ok) { const d7 = await r7.json(); setPointLogs(d7.items || []); }
         // 2026-08-04 P6.3: 加载签到状态
         loadCheckin();
       } catch (e: any) { setError(e.message); }
@@ -622,6 +666,78 @@ export default function ProfilePage() {
                     <span className="text-fuchsia-300 whitespace-nowrap">💎{u.lumen_cost}</span>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 2026-08-15: 我的上传 + 积分流水 (user 视角) */}
+        <div id="uploads" className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+          <div className="rounded-2xl p-5 border border-white/5 bg-white/[0.02]">
+            <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              <Upload className="w-4 h-4 text-cyan-400" /> 我的上传 <span className="text-xs text-white/40">({myUploads.length})</span>
+            </h2>
+            {myUploads.length === 0 ? (
+              <div className="text-center py-6 text-white/40 text-xs">还没上传过, 去 <Link href="/upcoming" className="text-cyan-400 hover:underline">最新上映</Link> 找资源提交</div>
+            ) : (
+              <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                {myUploads.slice(0, 15).map(u => {
+                  const statusBadge =
+                    u.status === 'approved' ? <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 rounded text-[10px]">✅ 通过</span> :
+                    u.status === 'rejected' ? <span className="px-1.5 py-0.5 bg-red-500/20 text-red-300 rounded text-[10px]">❌ 拒绝</span> :
+                    <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded text-[10px]">⏳ 待审</span>;
+                  return (
+                    <div key={u.id} className="flex items-start gap-2 text-xs py-1.5 border-b border-white/5">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          {statusBadge}
+                          <span className="px-1 py-0.5 bg-cyan-500/20 text-cyan-300 rounded text-[10px]">{u.type}</span>
+                          <span className="text-white/40 text-[10px]">{u.linkCount} 链</span>
+                        </div>
+                        <div className="text-white/80 truncate" title={u.tmdbTitle}>{u.tmdbTitle}</div>
+                        <div className="text-white/40 text-[10px]">{new Date(u.submittedAt).toISOString().slice(0, 10).replace(/-/g, '/')}</div>
+                        {u.status === 'rejected' && u.rejectionReason && (
+                          <div className="text-red-300/80 text-[10px] mt-0.5">原因: {u.rejectionReason}</div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div id="points" className="rounded-2xl p-5 border border-white/5 bg-white/[0.02]">
+            <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+              <Activity className="w-4 h-4 text-amber-400" /> 积分流水 <span className="text-xs text-white/40">({pointLogs.length})</span>
+            </h2>
+            {pointLogs.length === 0 ? (
+              <div className="text-center py-6 text-white/40 text-xs">暂无积分流水, 签到或上传审核通过可获积分</div>
+            ) : (
+              <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                {pointLogs.slice(0, 15).map(p => {
+                  const isPositive = p.amount > 0;
+                  const typeLabel =
+                    p.type === 'upload_reward' ? '🎁 上传奖励' :
+                    p.type === 'checkin' ? '📅 签到' :
+                    p.type === 'redeem' ? '💱 兑换流明' :
+                    p.type === 'admin_adjust' ? '🔧 管理员调整' :
+                    p.type;
+                  return (
+                    <div key={p.id} className="flex items-start gap-2 text-xs py-1.5 border-b border-white/5">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <span className={`font-mono font-semibold ${isPositive ? 'text-emerald-300' : 'text-red-300'}`}>
+                            {isPositive ? '+' : ''}{p.amount}
+                          </span>
+                          <span className="text-white/60">{typeLabel}</span>
+                          <span className="text-white/30 text-[10px] ml-auto">{new Date(p.createdAt).toISOString().slice(5, 10).replace('-', '/')}</span>
+                        </div>
+                        {p.note && <div className="text-white/50 text-[10px] truncate" title={p.note}>{p.note}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

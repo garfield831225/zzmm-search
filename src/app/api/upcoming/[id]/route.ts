@@ -55,14 +55,15 @@ export async function GET(
       ORDER BY created_at DESC LIMIT 20
     `;
 
-    // 我自己的 pending
+    // 我自己的所有 status (pending / approved / rejected) — 2026-08-15 改: 之前只查 pending,
+    //   导致用户看不到自己通过/拒绝的, 以为丢失了。改成查全部。
     const user = await getUser(request);
     let pendingRows: any[] = [];
     if (user) {
       pendingRows = await sql`
-        SELECT id, name, type, links, size, size_unit, note, status, submitted_at
+        SELECT id, name, type, links, size, size_unit, note, status, submitted_at, reviewed_at, rejection_reason
         FROM xx_pending_resources
-        WHERE tmdb_id = ${String(tmdb.tmdb_id)} AND user_id = ${user.id} AND status = 'pending'
+        WHERE tmdb_id = ${String(tmdb.tmdb_id)} AND user_id = ${user.id}
         ORDER BY submitted_at DESC
       `;
     }
@@ -100,6 +101,8 @@ export async function GET(
         note: p.note,
         status: p.status,
         submittedAt: p.submitted_at,
+        reviewedAt: p.reviewed_at,
+        rejectionReason: p.rejection_reason,
       })),
       currentUser: user ? { id: user.id, group: user.group, username: user.username } : null,
     });
