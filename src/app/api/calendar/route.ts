@@ -57,58 +57,54 @@ interface CalendarItem {
 }
 
 async function fetchSimkl(start: string, days: number): Promise<CalendarItem[]> {
-  // 2026-08-14: SIMKL 公共日历需要 OAuth (Authorization Bearer access_token)
-  //   - 用户的 client_id + client_secret 拿到了, 但 v1 X-Simkl-Api-Key header 412 "client_id_failed"
-  //   - v2 OAuth 流程用户没跑, 没 access_token, 暂时返空
-  //   - 后续用户跑完 OAuth 后, 把 access_token 加到 .env.production SIMKL_ACCESS_TOKEN 即可启用
-  if (!SIMKL_CLIENT_ID) return [];
-  const SIMKL_TOKEN = process.env.SIMKL_ACCESS_TOKEN;
-  if (!SIMKL_TOKEN) {
-    // 公共日历 (no auth) 也不通, 暂时返空, 全部走 TVMaze
-    return [];
-  }
-  const url = `${SIMKL_API_BASE}/calendar/all?type=tv&start=${start}&days=${days}&extended=overview`;
+  // 2026-08-14: SIMKL 公共日历用 CDN 公开 endpoint (no auth)
+  //   URL: https://data.simkl.in/calendar/tv.json
+  //   返 4498 条 / 35 天, 含 ids.tmdb 可拼 TMDB poster
+  //   不要 client_id 也不要 OAuth, 直连直读
+  const url = `https://data.simkl.in/calendar/tv.json`;
   try {
-    const r = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${SIMKL_TOKEN}`,
-        'simkl-api-key': SIMKL_CLIENT_ID,
-        'Accept': 'application/json',
-        'User-Agent': 'zzmm-search/1.0',
-      },
-      cache: 'no-store',
-    });
+    const r = await fetch(url, { cache: 'no-store' });
     if (!r.ok) {
-      console.warn(`[calendar] SIMKL ${r.status}`);
+      console.warn(`[calendar] SIMKL CDN ${r.status}`);
       return [];
     }
     const data = await r.json();
+    const startDate = new Date(start);
+    const endDate = new Date(start);
+    endDate.setUTCDate(endDate.getUTCDate() + days - 1);
+    const startStr = ymd(startDate);
+    const endStr = ymd(endDate);
+
     const items: CalendarItem[] = [];
-    for (const dayEntry of (data || [])) {
-      for (const ep of (dayEntry.episodes || [])) {
-        const show = ep.show || {};
-        items.push({
-          id: `sim-${show.ids?.simkl || show.ids?.tmdb || show.title || Math.random()}`,
-          source: 'simkl',
-          tmdbId: show.ids?.tmdb ? String(show.ids.tmdb) : null,
-          tvdbId: show.ids?.tvdb ? String(show.ids.tvdb) : null,
-          title: show.title || '',
-          type: 'tv',
-          airDate: dayEntry.date || start,
-          airTime: ep.runtime ? String(ep.runtime).slice(0, 5) : null,
-          episode: ep.season && ep.number ? {
-            season: ep.season,
-            number: ep.number,
-            title: ep.title || null,
-          } : null,
-          overview: ep.overview || show.overview || null,
-          poster: show.poster || null,
-        });
-      }
+    // 用 SIMKL poster 路径拼完整 URL (e.g. https://simkl.in/posters/11/111007766a924bf140_m.webp)
+    // 失败也没事, 后面 UI 用 TMDB poster 兜底
+    for (const it of (data || [])) {
+      if (!it.date) continue;
+      const dateStr = it.date.slice(0, 10);  // YYYY-MM-DD
+      if (dateStr < startStr || dateStr > endStr) continue;
+      const tmdbId = it.ids?.tmdb ? String(it.ids.tmdb) : null;
+      const simklPoster = it.poster ? `https://simkl.in/posters/${it.poster}_m.webp` : null;
+      items.push({
+        id: `simkl-${it.ids?.simkl_id || it.ids?.tmdb || it.title || Math.random()}-${dateStr}-${it.episode?.season || 0}-${it.episode?.episode || 0}`,
+        source: 'simkl',
+        tmdbId,
+        tvdbId: it.ids?.tvdb ? String(it.ids.tvdb) : null,
+        title: it.title || '',
+        type: 'tv',
+        airDate: dateStr,
+        airTime: null,
+        episode: it.episode ? {
+          season: it.episode.season,
+          number: it.episode.episode,
+          title: null,
+        } : null,
+        overview: null,
+        poster: simklPoster,
+      });
     }
     return items;
   } catch (e: any) {
-    console.warn('[calendar] SIMKL failed:', e.message);
+    console.warn('[calendar] SIMKL CDN failed:', e.message);
     return [];
   }
 }
@@ -228,8 +224,60 @@ export async function GET(req: NextRequest) {
     useTVMaze ? fetchTVMaze(start, days) : Promise.resolve([]),
   ]);
 
+  // 2026-08-14: SIMKL 没 type/genre 字段, if 链过滤 (避开 swc minifier 改 regex)
+  //   - 剔除: 体育/新闻/真人秀/纪录片/脱口秀/烹饪/家装/钓鱼/购物/旅游/生活类
+  //   - 关键词要具体, 别加 "garden" (会误伤 garden-of-sinners 之类的)
+  function isSimklJunk(title: string): boolean {
+    const t = title.toLowerCase();
+    if (t.includes('sport')) return true;
+    if (t.includes('racing') || t.includes('race') || t.includes('championship')) return true;
+    if (t.includes('world cup') || t.includes('masters') || t.includes('olympic')) return true;
+    if (t.includes('football') || t.includes('soccer') || t.includes('basketball') || t.includes('baseball')) return true;
+    if (t.includes('jays') || t.includes('tennis') || t.includes('golf')) return true;
+    if (t.includes('boxing') || t.includes('mma') || t.includes('ufc') || t.includes('wrestling')) return true;
+    if (t.includes('poker') || t.includes('cricket') || t.includes('rugby') || t.includes('hockey')) return true;
+    if (t.includes('fishing') || t.includes('hunter')) return true;
+    if (t.includes('cooking') || t.includes('bake off') || t.includes('baking')) return true;
+    if (t.includes('chef') || t.includes('kitchen') || t.includes('recipe')) return true;
+    if (t.includes('home cook') || t.includes('home and away')) return true;
+    if (t.includes('gardening') || t.includes('house hunters') || t.includes('antiques')) return true;
+    if (t.includes('roadshow') || t.includes('travel show') || t.includes('expedition') || t.includes('tourism')) return true;
+    if (t.includes('news') || t.includes('newsroom') || t.includes('breaking')) return true;
+    if (t.includes('spiegel') || t.includes('zdf.') || t.includes('reportage')) return true;
+    if (t.includes('documentary') || t.includes('investigation')) return true;
+    if (t.includes('talk show') || t.includes('game show') || t.includes('variety') || t.includes('panel show')) return true;
+    if (t.includes('award') || t.includes('red carpet') || t.includes('fashion week')) return true;
+    if (t.includes('concert tour') || t.includes('festival') || t.includes('karaoke')) return true;
+    if (t.includes('behind the scenes') || t.includes('highlights') || t.includes('backstage')) return true;
+    if (t.includes('recap') || t.includes('preview') || t.includes('teaser') || t.includes('trailer')) return true;
+    if (t.includes('special') || t.includes('pilot special')) return true;
+    if (t.includes('cabin masters') || t.includes('blind box') || t.includes('butter please')) return true;
+    if (t.includes('ca pousse') || t.includes('schloss') || t.includes('haus ')) return true;
+    if (t.includes('top 10') || t.includes('best of') || t.includes('roundup') || t.includes('rewind')) return true;
+    if (t.includes('flashback') || t.includes('throwback') || t.includes('weekly') || t.includes('monthly')) return true;
+    if (t.includes('daily show') || t.includes('today show') || t.includes('tonight show') || t.includes('late night')) return true;
+    if (t.includes('morning show') || t.includes('daytime') || t.includes('mid season') || t.includes('finale')) return true;
+    if (t.includes('marathon') || t.includes('recap') || t.includes('sneak peek') || t.includes('first look')) return true;
+    if (t.includes('press conference') || t.includes('town hall') || t.includes('fan meet') || t.includes('premiere')) return true;
+    if (t.includes('red carpet') || t.includes('launch party') || t.includes('opening ceremony')) return true;
+    if (t.includes('blooper') || t.includes('outtake') || t.includes('deleted scene') || t.includes('director')) return true;
+    if (t.includes('commentary') || t.includes('episode 0')) return true;
+    return false;
+  }
+  const filteredSimklItems: CalendarItem[] = [];
+  const simklByDate: Record<string, CalendarItem[]> = {};
+  for (const it of simklItems) {
+    if (isSimklJunk(it.title)) continue;
+    if (!simklByDate[it.airDate]) simklByDate[it.airDate] = [];
+    simklByDate[it.airDate].push(it);
+  }
+  for (const date in simklByDate) {
+    simklByDate[date].sort((a, b) => 0);  // 保持原顺序
+    filteredSimklItems.push(...simklByDate[date].slice(0, 5));
+  }
+
   // 3. 去重 + 按日期排
-  let allItems = dedupeByTmdbId([...simklItems, ...tvmazeItems]);
+  let allItems = dedupeByTmdbId([...filteredSimklItems, ...tvmazeItems]);
   // type 过滤
   if (type !== 'all') {
     allItems = allItems.filter(it => it.type === type);
