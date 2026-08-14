@@ -11,22 +11,79 @@ const JWT_SECRET = new TextEncoder().encode(JWT_SECRET_RAW);
 const VIP_ALLOWED_GROUPS = new Set(['basic', 'vip', 'admin']);
 
 // 不需要登录的路径（放行）
+// 2026-08-14 收紧: 用户拍板"未登录只能在首页"
+//   - 页面级路径: 只放行 / + /login + /register + /activate + /upgrade + /terms + /lovemovie
+//   - API 级: 放行首页数据 + 登录 + 跨域 moviezone
+//   - 拿掉 /basic /upcoming /nonfilm /library /vip /tmdb /charts /profile /request 等用户级页面
 const PUBLIC_PATHS = [
+  // 首页 (匿名能看)
+  '/',
+  // 公开引导页
   '/login',
   '/register',
   '/activate',
-  '/upgrade',           // 2026-07-29 闲鱼 VIP 购买引导 (公开页, 未登录也能看)
+  '/upgrade',
+  '/terms',
+  // iframe 公开镜像
+  '/lovemovie',
+  // 详情页 (无 token 走 'user' 权限)
+  '/tmdb',
+  // 验证页 (验证码 2015)
+  '/titles-verify',
+  // 登录 + 验证 API
   '/api/auth/login',
   '/api/auth/register',
   '/api/auth/me',
-  '/api/auth/logout', // 2026-07-17 退出登录 (清 httpOnly cookie)
+  '/api/auth/logout',
   '/api/captcha',
+  // 首页数据 API (给 / 调)
+  '/api/basic',
+  '/api/upcoming',
+  '/api/themes',
+  '/api/catalog',
+  '/api/tmdb/videos',
+  '/api/nonfilm',
+  // 搜索公开
   '/api/search',
+  '/api/search/suggest',
+  // 公共 API (跨域 moviezone + 子站)
+  '/api/match-single',
+  '/api/match-batch',
+  '/api/charts',
+  '/api/calendar',
+  // 详情页 (无 token 走 'user' 权限)
+  '/api/tmdb-resources',
+  '/api/tmdb-credits',
+  // 公开目录 + 标题
+  '/api/titles',
+  // 内部 API (Bearer 鉴权在 route.ts 内)
+  '/api/internal/lumen/credit',
+  '/api/auth/sso/redirect',
+  '/api/auth/sso/callback',
+  // 鉴权在 route.ts 内的 API (Bearer/cookie)
+  '/api/watchlist',
+  '/api/vip',
+  '/api/vip-videos',
+  '/api/vip-videos/hot',
+  '/api/feedback',
+  '/api/upload',
+  '/api/requests',
+  '/api/points/redeem',
+  '/api/user/balance',
+  '/api/user/activations',
+  '/api/user/delete-account',
+  '/api/user/weekly-credit',
+  '/api/user/unlocks',
+  '/api/user/activate',
+  '/api/auth/activate',
+  '/api/checkin',
+  // admin (鉴权在 route.ts 内)
+  '/api/admin/pending',
+  '/api/admin/themes',
+  '/api/admin/links',
+  '/api/admin/resources',
+  '/api/admin/feedback',
   '/api/admin/match-stats',
-  '/api/admin/match-stats',
-  '/api/stats2',
-  '/api/hello',
-  '/api/admin/blacklist',
   '/api/admin/stats',
   '/api/admin/codes',
   '/api/admin/users',
@@ -48,154 +105,87 @@ const PUBLIC_PATHS = [
   '/api/admin/migrate-tmdb-id',
   '/api/admin/add-sub-type',
   '/api/admin/reset-yuancategory',
-  '/api/tmdb-films',
-  '/tmdb-films',
-  '/vip-videos',
-  '/api/vip-videos',
-  '/api/user/activate',
-  '/api/auth/activate',  // 2026-08-13: 公共 API 别名 (moviezone + 子站跨域调用, 转发到 /api/user/activate)
-  '/activate',
-  '/profile',
-  '/api/user/activations',
-  '/terms',
-  '/api/vip-videos/hot',
+  '/api/admin/blacklist',
   '/api/admin/import/quick',
-  '/api/games',          // 游戏中心 API (后端 requireAccess 自鉴权)
-  '/api/debug/games-test', // debug 端
-  '/api/admin/games/match',  // 游戏匹配 (admin 鉴权, 后端判)
-  '/api/admin/games',       // 游戏管理 API (admin 鉴权)
-  // v1.2 跨站流明体系
-  '/api/auth/sso/redirect',  // SSO 跳板 (免登录)
-  '/api/auth/sso/callback',  // SSO 回调 (免登录, 内部验 token + 签 JWT)
-  '/api/internal/lumen/credit',  // 内部 API: Moviezone 调加流明 (Bearer INTERNAL_API_TOKEN 鉴权)
-  '/api/user/balance',         // 查余额 (后端 Bearer 鉴权)
-  '/api/admin/bridge-health',  // 2026-08-01 同步桥健康 (admin/dashboard 调, 路由内自鉴权)
-  '/api/admin/bridge-reconnect', // 2026-08-01 同步桥手动重连 (POST, 路由内 JWT 鉴权)
-  '/api/admin/bridge-status',   // 2026-08-01 同步桥死信队列 (admin 鉴权)
-  '/api/user/delete-account',  // 2026-07-28 注销账号 (后端 Bearer 鉴权)
-  '/api/user/weekly-credit',   // 2026-07-28 周免费额度 (后端 Bearer 鉴权)
-  // v2.1.4 单条定价 + admin 补全
-  '/api/user/unlocks',         // 解锁记录列表 (后端 Bearer 鉴权)
-  '/api/admin/pay-config',     // pay-config CRUD (后端 adminOnly 鉴权)
-  '/api/admin/stats',          // 详细统计 (后端 adminOnly 鉴权, 含 /detailed 子路径)
-  '/api/admin/invites',        // 邀请码管理 (后端 adminOnly 鉴权)
-  '/api/admin/test-tmdb',      // TMDB 调试 endpoint (临时)
-  '/api/admin/diag-cache',     // 2026-07-14 临时诊断: 看 batch 是否写入 xx_tmdb_cache
-  '/api/admin/diag-tables',    // 2026-07-15 临时诊断: 看 cover 表是否存在
-  '/api/admin/diag-bearer',    // 2026-07-15 临时诊断: 模拟 basic 用户调 search
-  '/api/admin/diag-reclassify', // 2026-07-15 临时诊断: 查非 zezhe 资源分布 + 关键词命中
-  '/api/admin/diag-null',       // 2026-07-15 临时诊断: 查 16k NULL 实际是 115 还是其他
-  '/api/admin/diag-all',        // 2026-07-15 临时诊断: 全面调研 (xx_games/非115/关键词)
-  '/api/admin/diag-access',     // 2026-07-15 临时诊断: 按 access_level 查 3 段分类逻辑
-  '/api/admin/diag-full',       // 2026-07-16 临时诊断: 全库表 + vip 文档找法
-  '/api/admin/diag-exclusive',  // 2026-07-16 临时诊断: exclusive_zone + resources 表深查
-  '/api/admin/diag-inactive',   // 2026-07-16 临时诊断: 16k inactive 详查
-  '/api/admin/dryrun-activate', // 2026-07-16 临时诊断: 16k inactive 激活预览+执行
-  '/api/admin/fix-109',         // 2026-07-16 临时诊断: 把 109 tg 资源改成 vip 一致性
-  '/api/admin/diag-migrate-tg-l3', // 2026-07-16 TG L3 一次性迁移 (l3_from 列 + xx_telegram_l3_queue 表)
-  '/api/admin/diag-migrate-resource-links', // 2026-07-17 资源-链接 1对N 一次性迁移 (xx_resource_links + xx_link_feedback)
-  '/api/admin/migrate-old-data',  // 2026-07-17 老数据入副表 (xx_resources → xx_resource_links)
-  '/api/admin/links',             // 2026-07-17 admin 改/删资源链接
-  '/api/admin/resources',         // 2026-07-20 admin 删整个资源 (双轨鉴权)
-  '/api/admin/sync-pooler',      // 2026-07-20 admin 强制同步 Neon read replica (防 Vercel 函数 lag)
-  '/api/admin/diag-direct',      // 2026-07-20 临时诊断 Vercel neon endpoint
-  '/api/admin/diag-tg-analyze',  // 2026-07-21 临时诊断: 重跑 TG JSON 只统计不入库
-  '/api/admin/sync-now',         // 2026-07-21 临时: 强制主 endpoint 同步 (修 read replica lag)
-  '/api/admin/diag-replica',     // 2026-07-21 临时: 看 read replica 状态 + replication lag
-  '/api/admin/check-by-id',       // 2026-07-21 临时: 查指定 id 真实状态 (主 endpoint 走 sync-now)
-  '/api/resource/links-by-tmdb',  // 2026-07-31 详情页 modal 拿同剧所有 link (路由内自鉴权 userGroup)
-  '/api/cron/prepull-tmdb',      // 2026-07-31 凌晨 3 点 NAS cron 调 (路由内 CRON_SECRET 鉴权)
-  // 2026-07-24 zzmm-vip 影视区: API 层鉴权, 走 page 层 JWT 解码
-  '/api/vip',                       // 列表/详情 API (由路由内自己校验 group)
-  // 2026-07-24 zzmm-vip 影视区 (页面层鉴权在 middleware 里, API 自己读 JWT 二次验证)
-  '/api/vip',                       // 列表 API (中间件只挡 /vip/* 页面, API 由路由内 user_group 校验)
-  '/api/feedback',                // 2026-07-17 用户失效反馈 (Bearer 内部鉴权)
-  '/api/admin/feedback',          // 2026-07-17 admin 反馈处理 (Bearer 内部鉴权)
-  '/api/diag-multi-link',         // 2026-07-17 diag: 找多网盘资源示例
-  '/api/diag-delete-link',        // 2026-07-17 diag: 验证 admin/links DELETE 端点
-  '/api/diag-import-result',      // 2026-07-18 diag: TG 导入 + 匹配统计
-  '/api/diag-recent-tg',          // 2026-07-18 diag: 最近 N 小时 TG 新增
-  '/api/diag-migrate-unique',     // 2026-07-18 diag: 改 UNIQUE 约束
-  '/api/diag-by-source-cat',       // 2026-07-18 diag: 按 source/category 分布
-  '/api/admin/backfill-sort1',    // 2026-07-18 一次性 - 回填 sort=1 副表
-  '/api/diag-test-tg-import',     // 2026-07-18 diag: 模拟 admin 测 tg-json 端点
-  '/api/diag-schema',             // 2026-07-18 diag: 查 schema
-  '/api/admin/dedup-links',       // 2026-07-18 链接去重 (按 url 保留最新)
-  '/api/admin/cleanup-dmhy-nav',  // 2026-07-18 清理 dmhy 导航站脏数据 (业务规则: 导航站直接删)
-  '/api/admin/reclassify-magnet', // 2026-07-18 重分类 "磁力" 分类 (关键词库升级后老数据未自动重分类)
-  '/api/catalog',                // 2026-07-18 /titles 独立目录页 API (无登录, 纯目录)
-  '/api/library/sheets',         // 2026-07-18 /library 泽泽妈妈区 sheet 列表 (公开浏览, 后端按权限过滤)
-  '/api/admin/diag-magnet-vip',  // 2026-07-18 临时诊断: VIP magnet 为什么只 2 条
-  '/api/admin/diag-route-source', // 2026-07-18 临时诊断: 查 search API 部署源码
-  '/api/admin/trigger-match',    // 2026-07-18 admin 强制触发 match-task (绕过 read replica lag)
-  '/titles',                     // 2026-07-18 独立目录页 (无登录, 纯目录浏览, 无导航入口)
-  '/titles-verify',              // 2026-08-04 /titles 进入前验证码门 (输入 2015)
-  '/api/admin/seed-multi-link-demo', // 2026-07-17 diag: 给老资源加示例多网盘链接
-  '/api/admin/test-unnest',       // 2026-07-17 调试 UNNEST (已删, 白名单保留无影响)
-  '/api/admin/diag-admin-group',  // 2026-07-16 查 admin 用户真实 group
-  '/api/admin/diag-cookies',     // 2026-07-17 查服务端实际收到什么 cookie
-  '/api/admin/diag-library-zones',  // 2026-07-16 验证 /library 三区 SQL 过滤
-  '/admin',                       // 2026-07-17 极简化: 客户端 localStorage 鉴权, middleware 不挡
-  '/api/admin/import/tg-json',   // 2026-07-16 TG JSON 上传导入 (VIP/admin, 内部鉴权)
-  '/api/admin/import/tg-l3-worker', // 2026-07-16 TG L3 worker (status + process, VIP/admin)
-  '/api/cron',                    // 2026-07-16 Vercel cron 调用 (match-task, tg-l3-worker)
-  // 2026-08-03 首页改版 5 模块: 最新上映 (公开, 未登录也能看)
-  '/api/upcoming',
-  '/upcoming',
-  // 2026-08-03 P3: basic 专区 (泽泽妈 115 文档, 公开)
-  '/api/basic',
-  '/basic',
-  // 2026-08-03 P4: vip 专区 (vip 资源, 公开浏览, 进详情才鉴权)
-  '/api/vip',
-  // 2026-08-03 P5.1: 主题专区 (公开浏览, admin CRUD 鉴权在路由内)
-  '/api/themes',
-  '/themes',
-  '/api/admin/themes',  // P5.2 admin 主题 CRUD, 鉴权在 route.ts 内
-  // 2026-08-03 P5.3: 主题内容管理 (admin, 鉴权在 route.ts 内)
-  '/api/admin/tmdb-search',
-  // 2026-08-03 P6.2: admin pending 审核 (auth route.ts 内)
-  '/api/admin/pending',
-  // 2026-08-04 P6.3: 签到 (auth route.ts 内)
-  '/api/checkin',
-  // 2026-08-03 P6.1: 待上传详情 + 上传 API (auth 路由内做, 返 401 JSON)
-  '/api/upcoming',
-  // /api/resources/unlock 资源解锁 (后端 Bearer 鉴权, 双模式) - 用 startsWith 通配
-  // /api/resources/[id]/unlock-status 动态路由也走 unlock 路径检查
-  // 2026-08-05: /api/tmdb-resources + /api/tmdb-credits 详情页用, 路由内 getUserGroup 走 cookie 鉴权, 无 token 返 'user' 公开浏览
-  '/api/tmdb-resources',
-  '/api/tmdb-credits',
-  // 2026-08-05: 详情页公开浏览 (有 cookie 进, 无 cookie 走 'user' 权限)
-  '/tmdb',
-  // 2026-08-08: 静态资源 (HDZZMM logo 等 public/ 下文件)
+  '/api/admin/games/match',
+  '/api/admin/games',
+  '/api/admin/games',
+  '/api/admin/bridge-health',
+  '/api/admin/bridge-reconnect',
+  '/api/admin/bridge-status',
+  '/api/admin/invites',
+  '/api/admin/pay-config',
+  '/api/admin/test-tmdb',
+  '/api/admin/import/tg-json',
+  '/api/admin/import/tg-l3-worker',
+  '/api/admin/trigger-match',
+  '/api/admin/sync-pooler',
+  '/api/admin/sync-now',
+  '/api/admin/cleanup-dmhy-nav',
+  '/api/admin/reclassify-magnet',
+  '/api/admin/backfill-sort1',
+  '/api/admin/dedup-links',
+  '/api/admin/seed-multi-link-demo',
+  '/api/admin/test-unnest',
+  '/api/admin/diag-cache',
+  '/api/admin/diag-tables',
+  '/api/admin/diag-bearer',
+  '/api/admin/diag-reclassify',
+  '/api/admin/diag-null',
+  '/api/admin/diag-all',
+  '/api/admin/diag-access',
+  '/api/admin/diag-full',
+  '/api/admin/diag-exclusive',
+  '/api/admin/diag-inactive',
+  '/api/admin/dryrun-activate',
+  '/api/admin/fix-109',
+  '/api/admin/diag-migrate-tg-l3',
+  '/api/admin/diag-migrate-resource-links',
+  '/api/admin/diag-magnet-vip',
+  '/api/admin/diag-route-source',
+  '/api/admin/diag-direct',
+  '/api/admin/diag-tg-analyze',
+  '/api/admin/diag-replica',
+  '/api/admin/diag-admin-group',
+  '/api/admin/diag-cookies',
+  '/api/admin/diag-library-zones',
+  '/api/admin/check-by-id',
+  '/api/admin/migrate-old-data',
+  '/api/admin/diag-full',
+  // diag 临时
+  '/api/diag-multi-link',
+  '/api/diag-delete-link',
+  '/api/diag-import-result',
+  '/api/diag-recent-tg',
+  '/api/diag-migrate-unique',
+  '/api/diag-by-source-cat',
+  '/api/diag-test-tg-import',
+  '/api/diag-schema',
+  '/api/debug/games-test',
+  // 资源 link (路由内自鉴权)
+  '/api/resource/links-by-tmdb',
+  // cron
+  '/api/cron',
+  '/api/cron/prepull-tmdb',
+  // 其他
+  '/api/library/sheets',
+  '/api/tmdb-films',
+  '/api/tmdb-search',
+  '/api/stats2',
+  '/api/hello',
+  // admin 页面 (客户端鉴权)
+  '/admin',
+  // 静态资源
   '/logo',
   '/favicon',
   '/icon',
   '/manifest',
-  // 2026-08-08: VIP 影视 2 区 (iframe 嵌入外部镜像站, 公开访问, 鉴权在 page.tsx Link 入口做 user_group 判断)
-  '/lovemovie',
-  // 2026-08-08: 首页 TrailerRow 用的 TMDB 预告片 API (无 token 也能访问, NAS IP 限流时返 stale)
-  '/api/tmdb/videos',
-  // 2026-08-09: 求片专区 (5 个新功能 cherry-pick from feature/admin-upload-rules)
-  //   - /api/requests + /api/requests/[id]/claim 路由内 getUser 鉴权 (Bearer + cookie)
-  //   - /api/points/redeem 同上
-  //   - /api/upload 同上
-  '/api/requests',
-  '/api/points/redeem',
-  '/api/upload',
-  // 2026-08-12: 公共 TMDB 匹配 API (跨服务调用, moviezone / 未来子站)
-  //   - Bearer admin/vip token 鉴权在 route 内
-  //   - 共享 100 req/s admin TMDB 限速, 不额外限速
-  '/api/match-single',
-  '/api/match-batch',
-  // 2026-08-14: 观影推荐 + 追剧日历 (公开浏览, 路由内自鉴权)
-  //   - /api/charts: 公共榜单 (TMDB discover)
-  //   - /api/calendar: 公共追剧日历 (SIMKL + TVMaze)
-  //   - /api/watchlist: 用户追剧清单 (Bearer/cookie 鉴权, 路由内自鉴权)
-  '/api/charts',
-  '/api/calendar',
-  '/api/watchlist',
-  // 2026-08-14 修正: /charts 页面要登录 (用户拍板"未登录只能在登录页")
-  // '/charts',
+  // 2026-08-14 拿掉的页面 (保留作为注释):
+  // '/basic', '/upcoming', '/themes', '/nonfilm', '/library', '/vip', '/vip-videos',
+  // '/tmdb', '/tmdb-films', '/request', '/profile', '/games', '/bounty', '/charts', '/titles', '/terms'
+  // 2026-08-14 拿掉的页面 (用户级):
+  // '/basic', '/upcoming', '/themes', '/nonfilm', '/library', '/vip', '/vip-videos',
+  // '/tmdb', '/tmdb-films', '/request', '/profile', '/games', '/bounty', '/charts', '/titles', '/terms'
   // 2026-08-13: 公共 API batch 2+3 (moviezone + 子站)
   //   - /api/search 已有 CORS (route.ts 内 OPTIONS + headers), 不影响现有
   //   - /api/detail /api/nonfilm /api/search/suggest /api/exclusive-zone 全 Bearer 鉴权在 route 内

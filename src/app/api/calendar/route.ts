@@ -40,10 +40,11 @@ function ymd(d: Date): string {
 }
 
 interface CalendarItem {
-  id: string;            // 唯一 ID (simkl:sim-{id} | tvmaze:{id})
-  source: 'simkl' | 'tvmaze';
+  id: string;            // 唯一 ID (simkl:sim-{id} | tvmaze:{id} | anilist:{id})
+  source: 'simkl' | 'tvmaze' | 'anilist';
   tmdbId: string | null;
   tvdbId: string | null;
+  malId?: string | null;   // 2026-08-14: AniList MAL ID
   title: string;
   titleZh?: string;        // 2026-08-14: TMDB 中文名 (zh-CN) 优先显示
   type: 'tv' | 'movie' | 'anime';
@@ -52,7 +53,7 @@ interface CalendarItem {
   episode: { season: number; number: number; title: string | null } | null;
   overview: string | null;
   poster: string | null;
-  country?: string;        // 2026-08-14: TVMaze 来源国家 (US/GB/CN/JP/KR 等)
+  country?: string;        // 2026-08-14: TVMaze/AniList 来源国家 (默认 JP)
   // 关联 xx_resources
   localResourceCount?: number;
   localSources?: string[];
@@ -107,6 +108,83 @@ async function fetchSimkl(start: string, days: number): Promise<CalendarItem[]> 
     return items;
   } catch (e: any) {
     console.warn('[calendar] SIMKL CDN failed:', e.message);
+    return [];
+  }
+}
+
+async function fetchAnilist(start: string, days: number): Promise<CalendarItem[]> {
+  // 2026-08-14: AniList GraphQL 公共 API, 拿 7 天 airing schedules
+  //   - POST https://graphql.anilist.co, 不需鉴权
+  //   - 7 天 airingAt 范围, 50 条足够
+  //   - 字段: episode / airingAt / media { id, title { romaji english native userPreferred }, coverImage, externalLinks, siteUrl }
+  //   - 4 标题: romaji/english/native(日本原文)/userPreferred (AniList 默认, 通常是 romaji 或 english)
+  //   - AniList 全是动漫, 不用 genre 过滤
+  const startDate = new Date(start);
+  const endDate = new Date(start);
+  endDate.setUTCDate(endDate.getUTCDate() + days - 1);
+  const airingAtGreater = Math.floor(startDate.getTime() / 1000);  // 秒
+  const airingAtLesser = Math.floor(endDate.getTime() / 1000) + 86400;
+
+  const query = `
+    query ($airingAt_greater: Int, $airingAt_lesser: Int) {
+      Page(perPage: 50) {
+        airingSchedules(airingAt_greater: $airingAt_greater, airingAt_lesser: $airingAt_lesser) {
+          episode
+          airingAt
+          media {
+            id
+            idMal
+            siteUrl
+            title { romaji english native userPreferred }
+            coverImage { color large medium }
+          }
+        }
+      }
+    }
+  `;
+
+  try {
+    const r = await fetch('https://graphql.anilist.co', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ query, variables: { airingAt_greater: airingAtGreater, airingAt_lesser: airingAtLesser } }),
+      cache: 'no-store',
+    });
+    if (!r.ok) {
+      console.warn(`[calendar] AniList ${r.status}`);
+      return [];
+    }
+    const data: any = await r.json();
+    const schedules = data?.data?.Page?.airingSchedules || [];
+    const items: CalendarItem[] = [];
+    for (const s of schedules) {
+      const m = s.media;
+      if (!m) continue;
+      const airingAt = s.airingAt;  // unix seconds
+      const d = new Date(airingAt * 1000);
+      const dateStr = ymd(d);
+      // 2026-08-14: 用户优先 romaji (日本动漫多数用罗马字); 后续会查 TMDB 中文名替换
+      const title = m.title?.userPreferred || m.title?.romaji || m.title?.english || m.title?.native || '';
+      if (!title) continue;
+      items.push({
+        id: `anilist-${m.id}-${s.episode}-${dateStr}`,
+        source: 'anilist',
+        tmdbId: null,        // AniList 没 TMDB external link
+        tvdbId: null,
+        malId: m.idMal ? String(m.idMal) : null,
+        title,
+        type: 'anime',         // 2026-08-14: AniList 全部是动漫
+        airDate: dateStr,
+        airTime: `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`,
+        episode: s.episode ? { season: 1, number: s.episode, title: null } : null,
+        overview: null,
+        poster: m.coverImage?.large || m.coverImage?.medium || null,
+        country: 'JP',         // AniList 默认日本
+      });
+    }
+    return items;
+  } catch (e: any) {
+    console.warn('[calendar] AniList failed:', e.message);
     return [];
   }
 }
@@ -186,11 +264,12 @@ export async function GET(req: NextRequest) {
   const type = (searchParams.get('type') || 'tv').toLowerCase();
   const useSimkl = searchParams.get('simkl') !== '0';
   const useTVMaze = searchParams.get('tvmaze') !== '0';
+  const useAnilist = searchParams.get('anilist') !== '0';  // 2026-08-14: 日本动漫
   const region = (searchParams.get('region') || 'all').toLowerCase();
 
-  if (type !== 'tv' && type !== 'movie' && type !== 'all') {
+  if (type !== 'tv' && type !== 'movie' && type !== 'anime' && type !== 'all') {
     return NextResponse.json(
-      { error: { code: 'invalid_type', message: 'type 必须是 tv/movie/all', hint: `实际: ${type}` } },
+      { error: { code: 'invalid_type', message: 'type 必须是 tv/movie/anime/all', hint: `实际: ${type}` } },
       { status: 400, headers: CORS_HEADERS }
     );
   }
@@ -201,7 +280,7 @@ export async function GET(req: NextRequest) {
   endDate.setUTCDate(endDate.getUTCDate() + days - 1);
   const end = ymd(endDate);
 
-  const cacheKey = `calendar:${start}:${days}:${type}:${region}:${useSimkl?'1':'0'}:${useTVMaze?'1':'0'}`;
+  const cacheKey = `calendar:${start}:${days}:${type}:${region}:${useSimkl?'1':'0'}:${useTVMaze?'1':'0'}:${useAnilist?'1':'0'}`;
 
   // 1. 查 cache
   const sql = neon(process.env.DATABASE_URL || '');
@@ -224,10 +303,11 @@ export async function GET(req: NextRequest) {
     console.warn('[calendar] cache read failed:', e.message);
   }
 
-  // 2. miss -> 并行调 SIMKL + TVMaze
-  const [simklItems, tvmazeItems] = await Promise.all([
+  // 2. miss -> 并行调 SIMKL + TVMaze + AniList
+  const [simklItems, tvmazeItems, anilistItems] = await Promise.all([
     useSimkl ? fetchSimkl(start, days) : Promise.resolve([]),
     useTVMaze ? fetchTVMaze(start, days) : Promise.resolve([]),
+    useAnilist ? fetchAnilist(start, days) : Promise.resolve([]),
   ]);
 
   // 2026-08-14: region 提前定义 (用于 cache key + 过滤)
@@ -306,8 +386,20 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // 2026-08-14: AniList 每日期限 5 条 (避免某热门日漫刷屏)
+  const ANILIST_DAILY_LIMIT = 5;
+  const anilistByDate: Record<string, CalendarItem[]> = {};
+  for (const it of anilistItems) {
+    if (!anilistByDate[it.airDate]) anilistByDate[it.airDate] = [];
+    anilistByDate[it.airDate].push(it);
+  }
+  const filteredAnilistItems: CalendarItem[] = [];
+  for (const date in anilistByDate) {
+    filteredAnilistItems.push(...anilistByDate[date].slice(0, ANILIST_DAILY_LIMIT));
+  }
+
   // 3. 去重 + 按日期排
-  let allItems = dedupeByTmdbId([...filteredSimklItems, ...filteredTvmazeItems]);
+  let allItems = dedupeByTmdbId([...filteredSimklItems, ...filteredTvmazeItems, ...filteredAnilistItems]);
   // type 过滤
   if (type !== 'all') {
     allItems = allItems.filter(it => it.type === type);
@@ -447,14 +539,17 @@ export async function GET(req: NextRequest) {
   // 5. 按 region 过滤 (UI 切换 全部/亚洲/欧美)
   //   SIMKL 算欧美
   //   TVMaze: CN/JP/KR/TW/HK 算亚洲, 其他算欧美
+  //   AniList (anime): 默认 JP, 算亚洲
   if (region === 'asia') {
     allItems = allItems.filter(it => {
       if (it.source === 'simkl') return false;
+      if (it.source === 'anilist') return true;  // 2026-08-14: AniList 全是日本动漫, 算亚洲
       return ['CN', 'JP', 'KR', 'TW', 'HK'].includes(it.country || '');
     });
   } else if (region === 'eu') {
     allItems = allItems.filter(it => {
       if (it.source === 'simkl') return true;
+      if (it.source === 'anilist') return false;  // 2026-08-14: AniList 排除欧美区域
       return !['CN', 'JP', 'KR', 'TW', 'HK'].includes(it.country || '');
     });
   }
@@ -475,6 +570,7 @@ export async function GET(req: NextRequest) {
     totalItems: allItems.length,
     simklCount: simklItems.length,
     tvmazeCount: tvmazeItems.length,
+    anilistCount: anilistItems.length,  // 2026-08-14: AniList 数量
     items: allItems,
     byDate,
     cached: false,
@@ -487,7 +583,7 @@ export async function GET(req: NextRequest) {
   try {
     await sql`
       INSERT INTO xx_calendar_cache (cache_key, start_date, end_date, source, data, expires_at)
-      VALUES (${cacheKey}, ${start}, ${end}, ${'simkl+tvmaze'}, ${JSON.stringify(response)}::jsonb, NOW() + INTERVAL '24 hours')
+      VALUES (${cacheKey}, ${start}, ${end}, ${'simkl+tvmaze+anilist'}, ${JSON.stringify(response)}::jsonb, NOW() + INTERVAL '24 hours')
       ON CONFLICT (cache_key) DO UPDATE SET
         data = EXCLUDED.data,
         expires_at = EXCLUDED.expires_at,

@@ -208,8 +208,8 @@ export default function CalendarSection() {
                       key={it.id}
                       className="flex gap-3 p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-violet-400/30 hover:bg-white/[0.04] transition"
                     >
-                      {/* 2026-08-14: 加海报 (TVMaze image.medium, 210x295) - 改 80x120 大图 */}
-                      <div className="w-20 h-[120px] rounded-md overflow-hidden bg-white/[0.06] flex-shrink-0">
+                      {/* 2026-08-14: 加海报 (TVMaze image.medium 210x295 / AniList large) - 改 96x144 大图 */}
+                      <div className="w-24 h-36 rounded-md overflow-hidden bg-white/[0.06] flex-shrink-0">
                         {it.poster ? (
                           <img
                             src={it.poster}
@@ -260,6 +260,9 @@ export default function CalendarSection() {
                                 ? 'bg-amber-500/15 text-amber-300/80'
                                 : 'bg-blue-500/15 text-blue-300/80'
                             }`}>{it.country}</span>
+                          )}
+                          {it.source === 'anilist' && (
+                            <span className="text-[10px] px-1 rounded font-medium bg-fuchsia-500/20 text-fuchsia-300">🌸 动漫</span>
                           )}
                           {it.airTime && (
                             <span className="text-[10px] text-white/30 ml-auto">{it.airTime}</span>
