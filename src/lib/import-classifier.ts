@@ -294,8 +294,12 @@ export interface TgLink {
 }
 
 export function extractLinksFromTgMessage(msg: any): TgLink[] {
-  const rawLinks: TgLink[] = [];
-  if (!msg) return rawLinks;
+  // 2026-08-16 8-15 swc shadow bug fix:
+  //  变量名必须长 (≥10 字符), swc minify 不会短化到跟 for-of 循环变量同名,
+  //  否则闭包内 pushLink 会把 rawLinks.push 错指到 for-of 循环变量上 → 0 link 提取
+  //  旧名 rawLinks (8 字符) swc 会改成 e, 跟 for(let e of msg.text) 冲突
+  const extractedLinksForReturn: TgLink[] = [];
+  if (!msg) return extractedLinksForReturn;
 
   const pushLink = (url: string, pwd?: string) => {
     if (!url) return;
@@ -313,7 +317,7 @@ export function extractLinksFromTgMessage(msg: any): TgLink[] {
       }
     }
     if (!realUrl) return;
-    rawLinks.push({
+    extractedLinksForReturn.push({
       url: realUrl,
       password: pwd,
       type,
@@ -341,7 +345,7 @@ export function extractLinksFromTgMessage(msg: any): TgLink[] {
   }
 
   // 2. Fallback: 从 text_entities 拿 (老格式, 跟 text 平行)
-  if (rawLinks.length === 0) {
+  if (extractedLinksForReturn.length === 0) {
     const entities = msg.text_entities || [];
     for (const e of entities) {
       if (e.type === 'link' || e.type === 'text_link') {
@@ -356,7 +360,7 @@ export function extractLinksFromTgMessage(msg: any): TgLink[] {
   }
 
   // 2. Fallback: 从 text 字符串中 regex 找链接 (如果 entities 缺失)
-  if (rawLinks.length === 0 && Array.isArray(msg.text)) {
+  if (extractedLinksForReturn.length === 0 && Array.isArray(msg.text)) {
     const text = msg.text.filter((t: any) => typeof t === 'string').join('');
     // http/https
     const urlRegex = /https?:\/\/[^\s\u4e00-\u9fa5]+/g;
@@ -374,7 +378,7 @@ export function extractLinksFromTgMessage(msg: any): TgLink[] {
 
   // 2b. Fallback: text 字符串中 regex 找链接 (兼容 string text + array text)
   // 2026-08-01: 原来只对 Array.isArray(text) 走, string text 永远 0 link
-  if (rawLinks.length === 0 && (Array.isArray(msg.text) || typeof msg.text === 'string')) {
+  if (extractedLinksForReturn.length === 0 && (Array.isArray(msg.text) || typeof msg.text === 'string')) {
     let text = '';
     if (typeof msg.text === 'string') {
       text = msg.text;
@@ -399,7 +403,7 @@ export function extractLinksFromTgMessage(msg: any): TgLink[] {
 
   // 3. Dedup (by url) + 按 sort 排序 (1=115 优先)
   const seen = new Set<string>();
-  const dedup = rawLinks.filter(l => {
+  const dedup = extractedLinksForReturn.filter(l => {
     if (seen.has(l.url)) return false;
     seen.add(l.url);
     return true;
