@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
+import { useRequireAuth } from '@/lib/use-require-auth';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 
@@ -27,6 +28,7 @@ interface BasicItem {
 type Tab = 'all' | 'movie' | 'tv';
 
 export default function BasicPage() {
+  // 2026-08-15: 鉴权 (替代不跑的 middleware) - 所有 hooks 提前, 早期 return 放最后
   const [tab, setTab] = useState<Tab>('all');
   const [items, setItems] = useState<BasicItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -34,6 +36,11 @@ export default function BasicPage() {
   const [error, setError] = useState<string | null>(null);
   const pathname = usePathname();
   const hasLoadedRef = useRef(false);
+  const { isReady } = useRequireAuth('/basic');
+
+  if (!isReady) {
+    return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white/50 text-sm">加载中...</div>;
+  }
 
   useEffect(() => {
     let cancelled = false;
