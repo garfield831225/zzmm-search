@@ -35,10 +35,11 @@ export async function POST(req: NextRequest) {
     const { username, password, captcha, invite_code, application_path, wechat_name, wechat_id, application_reason } = await req.json();
     const isViewerApply = application_path === 'viewer_apply';
 
-    const storedCaptcha = req.cookies.get('captcha_code')?.value || '';
-    if (!captcha || !storedCaptcha || captcha.toLowerCase() !== storedCaptcha.toLowerCase()) {
-      return NextResponse.json({ error: '验证码错误' }, { status: 400, headers: CORS_HEADERS });
-    }
+    // 验证码校验（可选，跳过也不阻止注册 — 跟 login 路由一致，临时 hotfix）
+    //     const storedCaptcha = req.cookies.get('captcha_code')?.value || '';
+    //     if (captcha && storedCaptcha && captcha.toLowerCase() !== storedCaptcha.toLowerCase()) {
+    //       return NextResponse.json({ error: '验证码错误' }, { status: 400, headers: CORS_HEADERS });
+    //     }
 
     if (!username || !password) {
       return NextResponse.json({ error: '用户名和密码不能为空' }, { status: 400, headers: CORS_HEADERS });
