@@ -666,7 +666,16 @@ export function extractTitleFromTgMessage(msg: any): string {
     const v = m[1].trim();
     if (v) return v.slice(0, 200);
   }
-  return '';  // 没"名称/标题/片名/Title"字段 → 不入库 (业务规则)
+  // 3) 兜底: 第一段非空 plain text (普通 TG 频道没"名称:"字段)
+  //   - 2026-08-16: 2000 条动漫频道 result.json 全部用这种格式, 之前返空, 1 条都入库不了
+  //   - 拿最前一段长度 > 5 的 plain string, 截断到 200 字符
+  if (Array.isArray(msg.text)) {
+    const first = msg.text.find((t: any) => typeof t === 'string' && t.trim().length > 5);
+    if (first) {
+      return first.trim().slice(0, 200);
+    }
+  }
+  return '';  // 真没 plain text → 不入库
 }
 
 // ─── 9. extractTagsFromTgMessage(msg) ───────────────────────────────
