@@ -63,14 +63,14 @@ function isViewerAllowed(pathname: string | null): boolean {
 }
 
 // 2026-08-17: JWT payload 解析 (jose 库在 middleware 用了, 这里直接用 jwt-browser)
-function getJwtPayload(): { group?: string; id?: number } | null {
+function getJwtPayload(): { group?: string; id?: number; registration_source?: string } | null {
   try {
     const token = localStorage.getItem('zzmm_token') || localStorage.getItem('token');
     if (!token) return null;
     const parts = token.split('.');
     if (parts.length !== 3) return null;
     const payload = JSON.parse(atob(parts[1]));
-    return { group: payload.group || payload.user_group, id: payload.id };
+    return { group: payload.group || payload.user_group, id: payload.id, registration_source: payload.registration_source };
   } catch {
     return null;
   }
@@ -94,9 +94,11 @@ export default function AuthGuard() {
         return;
       }
 
-      // 2. 2026-08-17 viewer 档位限制: 只允许访问 library/profile/upgrade/shop/user-credits/pending-approval
+      // 2. 2026-08-17 viewer 档位限制: 只允许访问 library/profile/upgrade/shop/user-credits/pending-activation
+      //    双重检查: user_group='viewer' OR registration_source='viewer_apply' (后者覆盖升 vip 后的 viewer 用户)
       const payload = getJwtPayload();
-      if (payload?.group === 'viewer' && !isViewerAllowed(pathname)) {
+      const isViewerLike = payload?.group === 'viewer' || payload?.registration_source === 'viewer_apply';
+      if (isViewerLike && !isViewerAllowed(pathname)) {
         router.replace('/library?restricted=1');
         return;
       }

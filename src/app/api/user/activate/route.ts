@@ -126,15 +126,30 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 取用户当前 expire_at 和 user_group
-      const users: any = await sql`SELECT user_group, expire_at FROM xx_users WHERE id = ${userId}`;
+      // 取用户当前 expire_at 和 user_group + registration_source
+      const users: any = await sql`SELECT user_group, expire_at, registration_source FROM xx_users WHERE id = ${userId}`;
       if (!users[0]) return NextResponse.json({ error: '用户不存在' }, { status: 404, headers: CORS_HEADERS });
       const currentExpire = users[0].expire_at;
       const newExpire = calcNewExpire(currentExpire, c.duration);
 
+      // 2026-08-17 viewer-role: viewer 申请用户 (registration_source='viewer_apply')
+      //   即使有 VIP 码也只进 viewer 限制的页面 (拍板 B 方案: 升 user_group='vip' 但加 viewer_locked)
+      //   实现: 码标记已用, user_group 升 vip, **registration_source 不变** (让 AuthGuard 检查时仍走 viewer 限制)
+      //   写 lumen_logs 记录此次尝试
+      const isViewerApply = users[0].registration_source === 'viewer_apply';
+      const newUserGroup = isViewerApply ? 'vip' : 'vip';  // 两种都升 vip (viewer 通过 registration_source 标志被 AuthGuard 拦截)
+
       try {
         await sql`UPDATE xx_activation_codes SET is_used = true, used_by = ${userId}, used_at = NOW() WHERE id = ${c.id}`;
-        await sql`UPDATE xx_users SET user_group = 'vip', expire_at = ${newExpire}, updated_at = NOW() WHERE id = ${userId}`;
+        await sql`UPDATE xx_users SET user_group = ${newUserGroup}, expire_at = ${newExpire}, updated_at = NOW() WHERE id = ${userId}`;
+        // 写 lumen_logs (用户升 vip 行为日志, 含 viewer_apply 警告)
+        await sql`
+          INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description, created_at)
+          VALUES (${userId}, 0, 0, ${isViewerApply ? 'viewer_vip_blocked' : 'vip_upgrade'}, ${c.code}, ${isViewerApply
+            ? `viewer 申请用户 (registration_source=viewer_apply) 尝试激活 VIP 码, 码标记已用, user_group 升 vip 但 AuthGuard 会拦截 (需邀请码完整解封), 计划: ${c.duration === 0 ? '永久' : c.duration + ' 天'}`
+            : `VIP 升级 ${c.duration} 天, expire_at: ${newExpire || '永久'}`}, NOW())
+        `.catch(() => {});
+
         return NextResponse.json({
           success: true,
           code_type: 'vip',
@@ -146,10 +161,14 @@ export async function POST(req: NextRequest) {
           batch_id: c.batch_id,
           old_expire_at: currentExpire,
           new_expire_at: newExpire,
-          new_user_group: 'vip',
-          message: c.duration === 0
-            ? '🎉 永久 VIP 会员激活成功！享受全站资源'
-            : `🎉 ${c.duration} 天 VIP 会员激活成功！到期时间: ${newExpire ? new Date(newExpire).toLocaleString('zh-CN') : '永久'}`,
+          new_user_group: newUserGroup,
+          // 2026-08-17 viewer 申请用户返 viewer_locked=true 提示
+          viewer_locked: isViewerApply,
+          message: isViewerApply
+            ? `⚠️ 您是 viewer 档用户, VIP 码已标记使用 + user_group 已升 vip, 但仍受 viewer 限制 (仅 library + 个人主页 + 流明购买).\n\n💡 完整解封需邀请码 (向 admin 申请 basic 邀请码), 邀请码会改 registration_source='admin' 永久解封.\n\n拿到邀请码后去 /register 用邀请码注册新号, 再用 admin 后台 "用户列表" 合并原 viewer 账号的资源访问权限.`
+            : (c.duration === 0
+              ? '🎉 永久 VIP 会员激活成功！享受全站资源'
+              : `🎉 ${c.duration} 天 VIP 会员激活成功！到期时间: ${newExpire ? new Date(newExpire).toLocaleString('zh-CN') : '永久'}`),
         }, { headers: CORS_HEADERS });
       } catch (e: any) {
         return NextResponse.json({ error: '激活失败: ' + e.message }, { status: 500, headers: CORS_HEADERS });

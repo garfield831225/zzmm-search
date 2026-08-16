@@ -111,7 +111,7 @@ export async function POST(req: NextRequest) {
     recordLoginHistory(user.id, req).catch((e) => console.error('[login-history]', e.message));
 
     const token = jwt.sign(
-      { id: user.id, username: user.username, group: user.user_group },
+      { id: user.id, username: user.username, group: user.user_group, registration_source: user.registration_source || 'main' },
       JWT_SECRET,
       { expiresIn: '30d' }
     );
@@ -136,6 +136,7 @@ export async function POST(req: NextRequest) {
         username: user.username,
         group: user.user_group,
         expire_at: user.expire_at,
+        registration_source: user.registration_source || 'main',  // 2026-08-17: viewer_locked 检查
       },
     }, { headers: CORS_HEADERS });
   } catch (e: any) {
