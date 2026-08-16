@@ -127,6 +127,133 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // ============ 2026-08-17: 批量创建 (Excel/TXT 导入用) ============
+  if (mode === 'batch_create') {
+    // 拍板: 整批不过 (3) + 重复 link 跳过 (4A) + 不限上限 (5C, 前端流式分批 500/批)
+    const { items } = body;
+    if (!Array.isArray(items) || items.length === 0) {
+      return NextResponse.json({ error: 'items 必须是非空数组' }, { status: 400 });
+    }
+    const validCats = ['电影', '剧集', '动漫', '纪录片', '综艺', '演唱会', '连载', '原盘', 'REMUX', '系列电影', '合集', '音乐', '体育', '电子书', '其他'];
+    const validPayTypes = ['free', 'lumen', 'code'];
+
+    // 1) 整批校验 (任一行不过, 整批 reject, 不入库)
+    const errors: { index: number; name?: string; error: string }[] = [];
+    items.forEach((it: any, idx: number) => {
+      if (!it.name) errors.push({ index: idx, error: 'name 必填' });
+      else if (!it.category) errors.push({ index: idx, name: it.name, error: 'category 必填' });
+      else if (!validCats.includes(it.category)) errors.push({ index: idx, name: it.name, error: `category 非法: ${it.category}` });
+      else if (!it.sub_type) errors.push({ index: idx, name: it.name, error: 'sub_type 必填' });
+      else if (!it.link) errors.push({ index: idx, name: it.name, error: 'link 必填' });
+      else if (!it.pay_type || !validPayTypes.includes(it.pay_type)) errors.push({ index: idx, name: it.name, error: `pay_type 必须 free/lumen/code` });
+      else {
+        const lumen = Number(it.lumen_cost || 1);
+        if (!Number.isInteger(lumen) || lumen < 1 || lumen > 100) {
+          errors.push({ index: idx, name: it.name, error: `lumen_cost 必须 1-100 整数` });
+        }
+      }
+    });
+    if (errors.length > 0) {
+      return NextResponse.json({
+        error: `整批校验失败, ${errors.length} 条不合规, 已拒绝`,
+        errors: errors.slice(0, 20),  // 最多返 20 条错误明细
+        total_errors: errors.length,
+        total_items: items.length,
+      }, { status: 400 });
+    }
+
+    // 2) 查 DB 中已存在的 link (去重跳过)
+    const allLinks = items.map((it: any) => String(it.link).trim()).filter(Boolean);
+    const existingRows = await sql`
+      SELECT link FROM xx_resources WHERE link = ANY(${allLinks}) AND link != ''
+    ` as any[];
+    const existingLinks = new Set<string>(existingRows.map(r => r.link));
+
+    // 3) 过滤掉重复 + 准备 tags 字面量
+    const toInsert: { name: string; category: string; sub_type: string; size: string; link: string; tags: string; pay_type: string; code_price: string; lumen_cost: number; access_level: string }[] = [];
+    const skipped: { index: number; name: string; reason: string }[] = [];
+    items.forEach((it: any, idx: number) => {
+      const link = String(it.link).trim();
+      if (existingLinks.has(link)) {
+        skipped.push({ index: idx, name: it.name, reason: 'link 已存在' });
+        return;
+      }
+      const accessLevel = it.pay_type === 'code' ? 'code' : 'basic';
+      const tagArr = it.description ? [String(it.description).slice(0, 500)] : [];
+      const tagsLiteral = '{' + tagArr.map(s => '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"').join(',') + '}';
+      const lumen = Number(it.lumen_cost || 1);
+      const codePrice = it.pay_type === 'code' ? Number(it.code_price || 0).toFixed(2) : '0.00';
+      toInsert.push({
+        name: String(it.name).trim(),
+        category: it.category,
+        sub_type: it.sub_type,
+        size: String(it.size || ''),
+        link,
+        tags: tagsLiteral,
+        pay_type: it.pay_type,
+        code_price: codePrice,
+        lumen_cost: lumen,
+        access_level: accessLevel,
+      });
+    });
+
+    if (toInsert.length === 0) {
+      return NextResponse.json({
+        success: true,
+        inserted: 0,
+        skipped: skipped.length,
+        skipped_details: skipped,
+        message: `全部 ${items.length} 条都已存在 (重复 link), 未插入`,
+      });
+    }
+
+    // 4) 批量插入 (Neon 不支持多行 VALUES 单条 SQL, 用 unnest)
+    // 用 VALUES 列表 + JOIN 插入, 比 N 次单条快 100x
+    try {
+      const inserted: any[] = [];
+      // 分批插, 每次 200 条, 避免 SQL 太长
+      const BATCH = 200;
+      for (let i = 0; i < toInsert.length; i += BATCH) {
+        const batch = toInsert.slice(i, i + BATCH);
+        // 用 jsonb 参数把整批传过去, 在 SQL 里 unnest
+        const batchJson = JSON.stringify(batch);
+        const result = await sql`
+          INSERT INTO xx_resources
+            (name, category, sub_type, size, link, tags, pay_type, code_price, lumen_cost, access_level, import_channel, source, status, created_at, updated_at)
+          SELECT
+            (r->>'name')::text,
+            (r->>'category')::text,
+            (r->>'sub_type')::text,
+            (r->>'size')::text,
+            (r->>'link')::text,
+            (r->>'tags')::text::text[],
+            (r->>'pay_type')::text,
+            (r->>'code_price')::numeric,
+            (r->>'lumen_cost')::int,
+            (r->>'access_level')::text,
+            'admin_manual',
+            'admin',
+            'active',
+            NOW(),
+            NOW()
+          FROM jsonb_array_elements(${batchJson}::jsonb) AS r
+          RETURNING id, name, pay_type
+        ` as any[];
+        inserted.push(...result);
+      }
+      return NextResponse.json({
+        success: true,
+        inserted: inserted.length,
+        skipped: skipped.length,
+        skipped_details: skipped.slice(0, 50),
+        items: inserted,
+        message: `✅ 批量导入: 插入 ${inserted.length} 条, 跳过 ${skipped.length} 条 (重复 link)`,
+      });
+    } catch (e: any) {
+      return NextResponse.json({ error: '批量插入失败: ' + e.message }, { status: 500 });
+    }
+  }
+
   // ============ 更新模式 (默认) ============
   if (!id) return NextResponse.json({ error: 'missing id' }, { status: 400 });
   if (pay_type && !['free', 'code', 'lumen'].includes(pay_type)) {
