@@ -26,6 +26,8 @@ const PUBLIC_PATHS = [
   '/terms',
   // iframe 公开镜像
   '/lovemovie',
+  // 2026-08-16 viewer-role: viewer 待审查看页 (公开, 不需要 token)
+  '/pending-approval',
   // 详情页 (无 token 走 'user' 权限)
   '/tmdb',
   // 验证页 (验证码 2015)
@@ -79,6 +81,7 @@ const PUBLIC_PATHS = [
   '/api/checkin',
   // admin (鉴权在 route.ts 内)
   '/api/admin/pending',
+  '/api/admin/pending-users',
   '/api/admin/themes',
   '/api/admin/links',
   '/api/admin/resources',
@@ -175,6 +178,7 @@ const PUBLIC_PATHS = [
   '/api/hello',
   // admin 页面 (客户端鉴权)
   '/admin',
+  '/admin/pending-users',
   // 静态资源
   '/logo',
   '/favicon',
@@ -233,8 +237,19 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // v2.1.3 悬赏专区 API (免登录浏览, 操作要登录)
-  if (pathname.startsWith('/api/bounty/list') || pathname === '/bounty') {
+  // 2026-08-16 viewer-role: viewer 用户能进 /library 路径 (文档资源浏览)
+  //   - /library 已从 PUBLIC_PATHS 移除 (没登录会跳 login)
+  //   - viewer pending 用户 status != 'active' → 后面会跳 login
+  //   - viewer active / basic+ → 放行进 /library
+  //   - 实现: 满足任意已登录 user_group 都放行
+  if (pathname.startsWith('/library')) {
+    return NextResponse.next();
+  }
+
+  // 2026-08-16 viewer-role: /pending-approval viewer 待审查看页 (公开, 不需要 token)
+  //   - 用户从 register/login 跳过来, 还没 token, 也能看
+  //   - 页面有 status check 拿 /api/auth/me 验真实状态
+  if (pathname === '/pending-approval' || pathname.startsWith('/pending-approval/')) {
     return NextResponse.next();
   }
 

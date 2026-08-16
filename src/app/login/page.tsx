@@ -91,6 +91,13 @@ export default function LoginPage() {
         return;
       }
 
+      // 2026-08-16 viewer-role: pending 用户跳 /pending-approval
+      if (data.pending) {
+        localStorage.setItem('viewer_pending_user', JSON.stringify(data.user));
+        router.push('/pending-approval');
+        return;
+      }
+
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       // 2026-07-20: 同步 zzmm_token, 让 admin 子页面 (老代码) 也能读

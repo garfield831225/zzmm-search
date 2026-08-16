@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import {
   BarChart3, Users, Key, FileText, Target, Upload, DollarSign, MessageSquareWarning,
   ShieldOff, Code2, Settings, ListChecks, Database, Network, Activity,
-  Zap, Server, AlertCircle, Tv, ExternalLink, RefreshCw, CheckCircle2, XCircle, ShieldAlert,
+  Zap, Server, AlertCircle, Tv, ExternalLink, RefreshCw, CheckCircle2, XCircle, ShieldAlert, UserPlus,
 } from 'lucide-react';
 
 interface Card {
@@ -31,6 +31,7 @@ const CARDS: Card[] = [
   { id: 'match-now', title: '立即匹配', desc: '批量自动匹配全表', icon: RefreshCw, href: '/admin/match-now', category: '资源管理', color: 'text-emerald-700', bg: 'bg-emerald-50 hover:bg-emerald-100' },
   { id: 'tg-organize', title: 'TG 群整理', desc: '115 群消息审核入库', icon: ListChecks, href: '/admin/tg-organize', category: '资源管理', color: 'text-cyan-700', bg: 'bg-cyan-50 hover:bg-cyan-100' },
   { id: 'pending', title: '审核队列', desc: 'user 上传待审 / 批量通过', icon: ListChecks, href: '/admin/pending', category: '资源管理', color: 'text-pink-700', bg: 'bg-pink-50 hover:bg-pink-100' },
+  { id: 'pending-users', title: '待审 viewer 审核', desc: '2026-08-16 viewer-role: 无邀请码用户申请 (执行 viewer 账号)', icon: UserPlus, href: '/admin/pending-users', category: '用户管理', color: 'text-amber-700', bg: 'bg-amber-50 hover:bg-amber-100' },
   { id: 'feedback', title: '失效反馈', desc: '用户链接失效反馈处理', icon: MessageSquareWarning, href: '/admin/feedback', category: '资源管理', color: 'text-amber-700', bg: 'bg-amber-50 hover:bg-amber-100' },
   { id: 'pay-config', title: '单条付费配置', desc: '按类别/资源设 unlock 价格', icon: DollarSign, href: '/admin/pay-config', category: '资源管理', color: 'text-emerald-700', bg: 'bg-emerald-50 hover:bg-emerald-100' },
   { id: 'publish', title: '手动发布资源', desc: '发布单条到主站', icon: FileText, href: '/admin/publish', category: '资源管理', color: 'text-amber-700', bg: 'bg-amber-50 hover:bg-amber-100' },
