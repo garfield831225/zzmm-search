@@ -273,10 +273,12 @@ export default function PayConfigPage() {
             />
           </div>
           <select value={payType} onChange={e => { setPayType(e.target.value); }}
-            className="bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-white text-sm">
-            <option value="">全部付费类型</option>
-            <option value="free">免费</option>
-            <option value="code">付费 (code)</option>
+            className="bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-white text-sm" style={{ colorScheme: 'dark' }}>
+            <option value="" className="bg-[#0a0a0f] text-white">全部付费类型</option>
+            <option value="free" className="bg-[#0a0a0f] text-white">免费</option>
+            <option value="paid" className="bg-[#0a0a0f] text-white">付费 (code/lumen)</option>
+            <option value="code" className="bg-[#0a0a0f] text-white">仅激活码 (code)</option>
+            <option value="lumen" className="bg-[#0a0a0f] text-white">仅流明 (lumen)</option>
           </select>
           <button onClick={load} className="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm flex items-center gap-1">
             <Search className="w-3 h-3" /> 搜索

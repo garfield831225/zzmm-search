@@ -36,7 +36,12 @@ export async function GET(req: NextRequest) {
     };
     addCond('r.status = $1', 'active');
     if (q) addCond('(r.name ILIKE $1 OR r.id::text = $1)', `%${q}%`);
-    if (payType) addCond('r.pay_type = $1', payType);
+    // 2026-08-16: payType='paid' 包含 code + lumen 两种 (都是需要付费的资源)
+    if (payType === 'paid') {
+      addCond("r.pay_type IN ($1, $2)", 'code', 'lumen');
+    } else if (payType) {
+      addCond('r.pay_type = $1', payType);
+    }
     if (docSheet) addCond('r.doc_sheet = $1', docSheet);
     if (channel) addCond('r.import_channel = $1', channel);
     const whereSQL = 'WHERE ' + conds.join(' AND ');
