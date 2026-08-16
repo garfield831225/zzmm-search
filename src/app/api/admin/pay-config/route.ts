@@ -104,14 +104,15 @@ export async function POST(req: NextRequest) {
       //   pay_type='code' → access_level='code' (现有 21-sheet 资源兼容)
       //   pay_type='lumen' → access_level='basic' (basic/vip 都能流明解锁, 不锁)
       //   pay_type='free'  → access_level='basic'
-      //   备注/详情: xx_resources 没 description 字段, 合并到 tags 数组 (jsonb)
+      //   备注/详情: 存到 tags (text[]), 用 postgres ARRAY 字面量
       const accessLevel = pt === 'code' ? 'code' : 'basic';
-      const tags = description ? [description.slice(0, 500)] : [];
+      const tagArr = description ? [String(description).slice(0, 500)] : [];
+      const tagsLiteral = '{' + tagArr.map(s => '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"').join(',') + '}';
       const result = await sql`
         INSERT INTO xx_resources
           (name, category, sub_type, size, link, tags, pay_type, code_price, lumen_cost, access_level, import_channel, source, status, created_at, updated_at)
         VALUES
-          (${name}, ${category}, ${sub_type}, ${size || ''}, ${link}, ${JSON.stringify(tags)}, ${pt}, ${price.toFixed(2)}, ${lumen}, ${accessLevel}, 'admin_manual', 'admin', 'active', NOW(), NOW())
+          (${name}, ${category}, ${sub_type}, ${size || ''}, ${link}, ${tagsLiteral}::text[], ${pt}, ${price.toFixed(2)}, ${lumen}, ${accessLevel}, 'admin_manual', 'admin', 'active', NOW(), NOW())
         RETURNING id, name, category, sub_type, size, pay_type, code_price, lumen_cost, access_level, status
       ` as any[];
       const created = result[0];
