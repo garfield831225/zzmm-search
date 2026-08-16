@@ -121,7 +121,14 @@ export default function ProfilePage() {
   const [pwForm, setPwForm] = useState({ old: '', new: '', confirm: '' });
   const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // 2026-08-17: 鉴权必须在所有 useState 之后 (v2 hook 顺序规则, 否则 React 抛 "页面加载出错")
   const { isReady } = useRequireAuth('/profile');
+  // 2026-08-17 P0: 5 个 useState 提到 useRequireAuth 之前 (原来放 line 237+ 早期 return 之后 → 翻车)
+  const [weeklyCredit, setWeeklyCredit] = useState<{ used: number; total: number; weekStart: string | null }>({ used: 0, total: 0, weekStart: null });
+  const [checkinToday, setCheckinToday] = useState(false);
+  const [checkinRecent, setCheckinRecent] = useState<Array<{ id: number; points: number; createdAt: string; description: string }>>([]);
+  const [checkinLoading, setCheckinLoading] = useState(false);
+  const [pointsBalance, setPointsBalance] = useState(0);
 
   if (!isReady) {
     return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white/50 text-sm">加载中...</div>;
@@ -234,15 +241,12 @@ export default function ProfilePage() {
   const daysSinceLogin = user?.last_login ? Math.floor((Date.now() - new Date(user.last_login).getTime()) / 86400000) : 0;
   // 2026-07-28: 每周免费额度 - 真实读 xx_user_weekly_credit
   // VIP 每周 1 个免费解锁额度, 周日 0 点重置 (cron)
-  const [weeklyCredit, setWeeklyCredit] = useState<{ used: number; total: number; weekStart: string | null }>({ used: 0, total: 0, weekStart: null });
+  // 2026-08-17: useState 已上移到 useRequireAuth 之前 (line 130+), 这里不再重复
   const weeklyUsed = weeklyCredit.used;
   const weeklyTotal = isVip ? weeklyCredit.total : 0;  // 只 VIP/admin 有额度
 
   // 2026-08-04 P6.3: 签到状态 (积分系统, 跟流明分开!)
-  const [checkinToday, setCheckinToday] = useState(false);
-  const [checkinRecent, setCheckinRecent] = useState<Array<{ id: number; points: number; createdAt: string; description: string }>>([]);
-  const [checkinLoading, setCheckinLoading] = useState(false);
-  const [pointsBalance, setPointsBalance] = useState(0);
+  // 2026-08-17: useState 已上移到 useRequireAuth 之前 (line 130+), 这里不再重复
 
   const loadCheckin = async () => {
     try {

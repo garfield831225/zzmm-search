@@ -438,6 +438,11 @@ export default function LibraryPage() {
                   <span>👤</span><span className="hidden sm:inline">{userName}</span>
                 </Link>
               )}
+              {/* 2026-08-17 P0: 顶部统一 VIP 购买入口 (用户要求不要每条资源后, 改放顶部) */}
+              <button onClick={() => setUpgradeModal(true)}
+                className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-lg text-xs text-white font-medium transition flex items-center gap-1 whitespace-nowrap">
+                <span>💎</span><span className="hidden sm:inline">购买 VIP</span>
+              </button>
               <Link href="/" className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs transition text-gray-600">← 影视区</Link>
             </div>
           </div>
@@ -621,13 +626,7 @@ export default function LibraryPage() {
                   {isUnlocked && <span className="px-1.5 py-0.5 bg-green-500/20 text-green-700 rounded text-[10px]">✓ 已解锁</span>}
                   {isAdmin && <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-700 rounded text-[10px]">👑 免流明</span>}
                 </div>
-                {/* 2026-08-17: VIP 锁状态右侧加 "购买 VIP" 按钮 (弹框显示 https://zzmm-search.uk/upgrade) */}
-                {isVipLock && (
-                  <button onClick={() => setUpgradeModal(true)}
-                    className="px-2 py-1 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded text-[10px] text-white font-medium whitespace-nowrap">
-                    💎 购买 VIP
-                  </button>
-                )}
+                {/* 2026-08-17 P0: "购买 VIP" 按钮已移到顶部 header 统一入口, 这里不再每条重复 */}
                 {/* 操作 */}
                 <div className="flex gap-1 flex-wrap items-center">
                   {/* 2026-07-24: 多链接 (1对N 副链接) 优先显示, 副链接数>=2 加开全部按钮 */}
