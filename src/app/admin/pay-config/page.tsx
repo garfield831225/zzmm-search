@@ -613,15 +613,17 @@ export default function PayConfigPage() {
                   <div>
                     <label className="block text-sm text-white/60 mb-1.5">类别 (21 类) *</label>
                     <select value={newCategory} onChange={e => setNewCategory(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white">
-                      {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                      style={{ colorScheme: 'dark' }}
+                      className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-white">
+                      {CATEGORIES.map(c => <option key={c} value={c} className="bg-[#0a0a0f] text-white">{c}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm text-white/60 mb-1.5">资源类型 *</label>
                     <select value={newSubType} onChange={e => setNewSubType(e.target.value)}
-                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white">
-                      {SUB_TYPES.map(s => <option key={s} value={s}>{s}</option>)}
+                      style={{ colorScheme: 'dark' }}
+                      className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-white">
+                      {SUB_TYPES.map(s => <option key={s} value={s} className="bg-[#0a0a0f] text-white">{s}</option>)}
                     </select>
                   </div>
                 </div>
