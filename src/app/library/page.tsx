@@ -142,7 +142,8 @@ export default function LibraryPage() {
 
   const isCodeResource = (item: Resource): boolean => {
     // pay_type 优先 (更准), 兼容 access_level
-    return item.payType === 'code' || item.accessLevel === 'code';
+    // 2026-08-16: payType='lumen' 也算 (admin 手动发布的流明资源, 跟 code 资源一样需要流明解锁)
+    return item.payType === 'code' || item.payType === 'lumen' || item.accessLevel === 'code';
   };
 
   const codeResourceLocked = (item: Resource): boolean => {

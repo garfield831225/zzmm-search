@@ -73,7 +73,7 @@ interface ResourceItem {
   isCurrent?: boolean;
   credits?: { director: CreditPerson[]; cast: CreditPerson[] };
   // 2026-06-03 单资源付费
-  payType?: 'free' | 'code';
+  payType?: 'free' | 'code' | 'lumen';
   codePrice?: number;
   unlocked?: boolean;
   lumenCost?: number;  // 2026-06-25 单条定价流明
@@ -947,6 +947,17 @@ export default function HomePage() {
                       💎 {item.lumenCost ?? 1}
                     </span>
                   )}
+                  {/* 2026-08-16 流明付费标记 (admin 手动发布的 lumen 资源) */}
+                  {item.payType === 'lumen' && !item.unlocked && (
+                    <span className="px-2 py-0.5 bg-violet-500/90 text-white text-xs rounded font-medium">
+                      💎 {item.lumenCost ?? 1} 流明
+                    </span>
+                  )}
+                  {item.payType === 'lumen' && item.unlocked && (
+                    <span className="px-2 py-0.5 bg-green-500/90 text-white text-xs rounded font-medium">
+                      ✓ 已解锁
+                    </span>
+                  )}
                 </div>
 
                 {/* Overlay + Action */}
@@ -1341,6 +1352,16 @@ export default function HomePage() {
                       const allLinks: any[] = (selectedItem.tmdbLinks && selectedItem.tmdbLinks.length > 0)
                         ? selectedItem.tmdbLinks
                         : (selectedItem.links || []).map((l: any) => ({ ...l, resourceName: selectedItem.name, size: selectedItem.size, createdAt: '' }));
+                      // 2026-08-16: payType=lumen/code 资源未解锁 → 隐藏链接区
+                      if (selectedItem.payType && selectedItem.payType !== 'free' && !selectedItem.unlocked) {
+                        return (
+                          <div className="px-4 py-8 rounded-xl bg-gradient-to-br from-violet-500/10 to-fuchsia-500/5 border border-violet-500/20 text-center">
+                            <div className="text-4xl mb-2">🔒</div>
+                            <div className="text-sm font-medium text-violet-200 mb-1">链接已隐藏</div>
+                            <div className="text-xs text-white/60">解锁后即可查看 + 复制链接</div>
+                          </div>
+                        );
+                      }
                       if (allLinks.length === 0) {
                         return (
                           <div className="px-4 py-6 rounded-xl bg-white/5 text-white/40 text-center text-sm">
@@ -1479,6 +1500,50 @@ export default function HomePage() {
                         </div>
                       )}
                       {selectedItem.payType === 'code' && selectedItem.unlocked && (
+                        <div className="mt-3 p-2 bg-green-500/10 border border-green-500/20 rounded-lg text-sm text-green-300 flex items-center gap-2">
+                          ✓ 您已解锁此资源
+                        </div>
+                      )}
+                      {/* 2026-08-16 流明付费 - 解锁按钮 (admin 手动发布) */}
+                      {selectedItem.payType === 'lumen' && !selectedItem.unlocked && (
+                        <div className="mt-3 p-3 bg-violet-500/10 border border-violet-500/30 rounded-xl">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-medium text-violet-300">💎 此资源需要 {selectedItem.lumenCost ?? 1} 流明解锁</div>
+                              <div className="text-xs text-white/60 mt-1">流明可通过兑换码充值 · 解锁后永久免费查看</div>
+                            </div>
+                            <button onClick={async () => {
+                              const token = localStorage.getItem('zzmm_token');
+                              if (!token) { addToast('error', '请先登录'); return; }
+                              try {
+                                const r = await fetch('/api/resources/unlock', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                  body: JSON.stringify({ resource_id: selectedItem.id, use_lumen: true }),
+                                });
+                                const d = await r.json();
+                                if (d.success) {
+                                  addToast('success', d.message || '✅ 解锁成功');
+                                  // 立刻 mark unlocked=true → "已解锁" 绿色条出现 + 链接区从占位 → 真实链接
+                                  setSelectedItem(prev => prev ? { ...prev, unlocked: true } : prev);
+                                  // 同步 items 数组里这条的 unlocked 字段
+                                  setItems(prev => prev.map(i => i.id === selectedItem.id ? { ...i, unlocked: true } : i));
+                                  // 更新流明余额
+                                  if (typeof d.lumen_balance_after === 'number') setLumenBalance(d.lumen_balance_after);
+                                } else if (d.need === 'lumen') {
+                                  addToast('error', d.error || '流明不足');
+                                } else {
+                                  addToast('error', d.error || '解锁失败');
+                                }
+                              } catch (e: any) { addToast('error', e.message); }
+                            }}
+                              className="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium shrink-0">
+                              💎 {selectedItem.lumenCost ?? 1} 流明解锁
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {selectedItem.payType === 'lumen' && selectedItem.unlocked && (
                         <div className="mt-3 p-2 bg-green-500/10 border border-green-500/20 rounded-lg text-sm text-green-300 flex items-center gap-2">
                           ✓ 您已解锁此资源
                         </div>

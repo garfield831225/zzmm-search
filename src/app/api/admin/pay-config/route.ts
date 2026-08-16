@@ -70,14 +70,59 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   // 2026-07-28: 增强 - 支持独立设置 pay_type / code_price / lumen_cost
-  // 设 pay_type='code' 时自动同步 access_level='code'
+  // 2026-08-16: 加 mode='create' 支持新增资源 (admin 手动发布单资源付费)
+  //   pay_type='lumen' 也允许 (单条流明扣减, 无需激活码)
+  //   设 pay_type='code' 时自动同步 access_level='code'
   const sql = neon(process.env.DATABASE_URL || '');
   const body = await req.json().catch(() => ({}));
-  const { id, pay_type, code_price, lumen_cost } = body;
+  const { id, pay_type, code_price, lumen_cost, mode } = body;
 
+  // ============ 2026-08-16: 创建新资源 ============
+  if (mode === 'create') {
+    const { name, category, sub_type, size, link, description, code_price: cp, pay_type: pt, lumen_cost: lc } = body;
+    if (!name || !category || !sub_type || !link || !pt) {
+      return NextResponse.json({ error: '缺少必填: name/category/sub_type/link/pay_type' }, { status: 400 });
+    }
+    const validCats = ['电影', '剧集', '动漫', '纪录片', '综艺', '演唱会', '连载', '原盘', 'REMUX', '系列电影', '合集', '音乐', '体育', '电子书', '其他'];
+    if (!validCats.includes(category)) {
+      return NextResponse.json({ error: `category 必须是: ${validCats.join('/')}` }, { status: 400 });
+    }
+    if (!['free', 'lumen', 'code'].includes(pt)) {
+      return NextResponse.json({ error: 'pay_type 必须是 free/lumen/code' }, { status: 400 });
+    }
+    const lumen = pt === 'lumen' ? Number(lc || 1) : (lc ? Number(lc) : 1);
+    if (!Number.isInteger(lumen) || lumen < 1 || lumen > 100) {
+      return NextResponse.json({ error: 'lumen_cost 必须是 1-100 整数 (A 方案: 1-100 手填)' }, { status: 400 });
+    }
+    const price = pt === 'code' ? Number(cp || 0) : 0;
+    if (pt === 'code' && (isNaN(price) || price < 0 || price > 9999)) {
+      return NextResponse.json({ error: 'code_price 必须是 0-9999' }, { status: 400 });
+    }
+
+    try {
+      // 2026-08-16: admin 手动发布, 默认隐藏链接 (status='active', access_level 跟 pay_type 走)
+      //   pay_type='code' → access_level='code' (现有 21-sheet 资源兼容)
+      //   pay_type='lumen' → access_level='basic' (basic/vip 都能流明解锁, 不锁)
+      //   pay_type='free'  → access_level='basic'
+      const accessLevel = pt === 'code' ? 'code' : 'basic';
+      const result = await sql`
+        INSERT INTO xx_resources
+          (name, category, sub_type, size, link, description, pay_type, code_price, lumen_cost, access_level, import_channel, source, status, created_at, updated_at)
+        VALUES
+          (${name}, ${category}, ${sub_type}, ${size || ''}, ${link}, ${description || ''}, ${pt}, ${price.toFixed(2)}, ${lumen}, ${accessLevel}, 'admin_manual', 'admin', 'active', NOW(), NOW())
+        RETURNING id, name, category, sub_type, size, pay_type, code_price, lumen_cost, access_level, status
+      ` as any[];
+      const created = result[0];
+      return NextResponse.json({ success: true, item: created, message: `✅ 已发布资源 #${created.id}` });
+    } catch (e: any) {
+      return NextResponse.json({ error: e.message }, { status: 500 });
+    }
+  }
+
+  // ============ 更新模式 (默认) ============
   if (!id) return NextResponse.json({ error: 'missing id' }, { status: 400 });
-  if (pay_type && !['free', 'code'].includes(pay_type)) {
-    return NextResponse.json({ error: 'pay_type must be "free" or "code"' }, { status: 400 });
+  if (pay_type && !['free', 'code', 'lumen'].includes(pay_type)) {
+    return NextResponse.json({ error: 'pay_type must be "free", "code" or "lumen"' }, { status: 400 });
   }
   const priceNum = code_price !== undefined ? Number(code_price) : null;
   if (priceNum !== null && (isNaN(priceNum) || priceNum < 0 || priceNum > 9999)) {
@@ -100,8 +145,9 @@ export async function POST(req: NextRequest) {
     };
     if (pay_type) {
       addSet('pay_type = $1', pay_type);
-      // 同步 access_level: code → code, free → 维持原值 (默认 basic)
+      // 同步 access_level: code → code, lumen/free → basic
       if (pay_type === 'code') addSet('access_level = $1', 'code');
+      else if (pay_type === 'lumen' || pay_type === 'free') addSet('access_level = $1', 'basic');
     }
     if (priceNum !== null) addSet('code_price = $1', priceNum.toFixed(2));
     if (lumenNum !== null) addSet('lumen_cost = $1', lumenNum);

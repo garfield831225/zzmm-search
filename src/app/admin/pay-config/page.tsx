@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
-import { Search, Settings, Lock, Unlock, Copy, X, Sparkles, Coins, FileText } from 'lucide-react';
+import { Search, Settings, Lock, Unlock, Copy, X, Sparkles, Coins, FileText, Plus } from 'lucide-react';
 
 interface Item {
   id: number;
@@ -191,6 +191,61 @@ export default function PayConfigPage() {
   const [batchLumen, setBatchLumen] = useState(1);
   const [batchPayType, setBatchPayType] = useState<'code' | 'free'>('code');
 
+  // 2026-08-16: 新增资源弹窗 state
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newCategory, setNewCategory] = useState('其他');
+  const [newSubType, setNewSubType] = useState('独立');
+  const [newSize, setNewSize] = useState('');
+  const [newLink, setNewLink] = useState('');
+  const [newDescription, setNewDescription] = useState('');
+  const [newCreatePayType, setNewCreatePayType] = useState<'lumen' | 'free' | 'code'>('lumen');
+  const [newCreateLumen, setNewCreateLumen] = useState(10);
+  const [newCreatePrice, setNewCreatePrice] = useState(5);
+  const [creatingSaving, setCreatingSaving] = useState(false);
+
+  const CATEGORIES = ['电影', '剧集', '动漫', '纪录片', '综艺', '演唱会', '连载', '原盘', 'REMUX', '系列电影', '合集', '音乐', '体育', '电子书', '其他'];
+  const SUB_TYPES = ['独立', '合集', '原盘', 'REMUX', '系列'];
+
+  const handleCreate = async () => {
+    if (!token) return;
+    if (!newName.trim() || !newLink.trim()) {
+      showToast('error', '名称和链接必填');
+      return;
+    }
+    setCreatingSaving(true);
+    try {
+      const r = await fetch('/api/admin/pay-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          mode: 'create',
+          name: newName.trim(),
+          category: newCategory,
+          sub_type: newSubType,
+          size: newSize.trim(),
+          link: newLink.trim(),
+          description: newDescription.trim(),
+          pay_type: newCreatePayType,
+          lumen_cost: newCreatePayType === 'lumen' ? newCreateLumen : (newCreatePayType === 'code' ? newCreateLumen : 0),
+          code_price: newCreatePayType === 'code' ? newCreatePrice : 0,
+        }),
+      });
+      const data = await r.json();
+      if (data.success) {
+        showToast('success', data.message || '✅ 已发布');
+        setCreating(false);
+        // reset form
+        setNewName(''); setNewSize(''); setNewLink(''); setNewDescription('');
+        load();
+        loadSheets();
+      } else {
+        showToast('error', data.error || '失败');
+      }
+    } catch (e: any) { showToast('error', e.message); }
+    finally { setCreatingSaving(false); }
+  };
+
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white p-4 sm:p-6">
       <div className="max-w-7xl mx-auto">
@@ -198,7 +253,11 @@ export default function PayConfigPage() {
         <div className="flex items-center gap-3 mb-6">
           <button onClick={() => router.push('/admin')} className="p-2 hover:bg-white/10 rounded-lg">←</button>
           <h1 className="text-2xl font-bold">💎 单资源付费配置</h1>
-          <a href="/admin/codes" className="ml-auto text-sm text-violet-400 hover:underline">查看激活码 →</a>
+          <button onClick={() => setCreating(true)}
+            className="ml-auto px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium flex items-center gap-1.5">
+            <Plus className="w-4 h-4" /> 新增资源
+          </button>
+          <a href="/admin/codes" className="text-sm text-violet-400 hover:underline">查看激活码 →</a>
         </div>
 
         {/* 搜索栏 */}
@@ -527,6 +586,118 @@ export default function PayConfigPage() {
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
             className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl shadow-lg text-sm z-50 ${toast.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>
             {toast.msg}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 2026-08-16: 新增资源弹窗 */}
+      <AnimatePresence>
+        {creating && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50 overflow-y-auto" onClick={() => !creatingSaving && setCreating(false)}>
+            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
+              className="bg-[#12121a] rounded-2xl p-6 w-full max-w-2xl border border-violet-500/30 my-8" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold flex items-center gap-2"><Plus className="w-5 h-5 text-violet-400" /> 新增单资源付费</h3>
+                <button onClick={() => setCreating(false)} className="p-1 hover:bg-white/10 rounded"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="text-xs text-white/40 mb-4">填写后用户即可在 catalog 看到此资源（链接默认隐藏，付费/流明解锁后可见）</div>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm text-white/60 mb-1.5">标题 *</label>
+                  <input value={newName} onChange={e => setNewName(e.target.value)}
+                    placeholder="如：阿凡达：水之道 4K HDR"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-violet-500/50" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm text-white/60 mb-1.5">类别 (21 类) *</label>
+                    <select value={newCategory} onChange={e => setNewCategory(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white">
+                      {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-white/60 mb-1.5">资源类型 *</label>
+                    <select value={newSubType} onChange={e => setNewSubType(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white">
+                      {SUB_TYPES.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm text-white/60 mb-1.5">链接 *</label>
+                  <input value={newLink} onChange={e => setNewLink(e.target.value)}
+                    placeholder="如：https://pan.baidu.com/s/xxx 或 magnet:?xt=urn:btih:xxx"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 focus:outline-none focus:border-violet-500/50 font-mono text-xs" />
+                </div>
+                <div>
+                  <label className="block text-sm text-white/60 mb-1.5">大小 (可选)</label>
+                  <input value={newSize} onChange={e => setNewSize(e.target.value)}
+                    placeholder="如：12.5 GB / 1080P / 4K HDR"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30" />
+                </div>
+                <div>
+                  <label className="block text-sm text-white/60 mb-1.5">详情 / 备注 (可选)</label>
+                  <textarea value={newDescription} onChange={e => setNewDescription(e.target.value)}
+                    rows={3}
+                    placeholder="如：含中字、含特效字幕、4K 原盘转 REMUX..."
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white placeholder-white/30 resize-none" />
+                </div>
+                <div>
+                  <label className="block text-sm text-white/60 mb-1.5">付费方式 *</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button onClick={() => setNewCreatePayType('lumen')}
+                      className={`p-3 rounded-lg text-sm flex items-center justify-center gap-2 transition ${newCreatePayType === 'lumen' ? 'bg-violet-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>
+                      <Coins className="w-4 h-4" /> 流明 (推荐)
+                    </button>
+                    <button onClick={() => setNewCreatePayType('code')}
+                      className={`p-3 rounded-lg text-sm flex items-center justify-center gap-2 transition ${newCreatePayType === 'code' ? 'bg-yellow-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>
+                      <Lock className="w-4 h-4" /> 激活码
+                    </button>
+                    <button onClick={() => setNewCreatePayType('free')}
+                      className={`p-3 rounded-lg text-sm flex items-center justify-center gap-2 transition ${newCreatePayType === 'free' ? 'bg-emerald-600 text-white' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}>
+                      <Unlock className="w-4 h-4" /> 免费
+                    </button>
+                  </div>
+                </div>
+                {newCreatePayType === 'lumen' && (
+                  <div>
+                    <label className="block text-sm text-white/60 mb-1.5 flex items-center gap-1">
+                      <Coins className="w-3.5 h-3.5 text-violet-400" /> 流明定价 (1-100) *
+                    </label>
+                    <input type="number" min="1" max="100" value={newCreateLumen}
+                      onChange={e => setNewCreateLumen(parseInt(e.target.value) || 1)}
+                      className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white" />
+                    <div className="text-xs text-white/40 mt-1">用户用流明兑换解锁，建议 5-30 流明</div>
+                  </div>
+                )}
+                {newCreatePayType === 'code' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm text-white/60 mb-1.5">起步价 (¥)</label>
+                      <input type="number" min="0" max="9999" step="0.5" value={newCreatePrice}
+                        onChange={e => setNewCreatePrice(parseFloat(e.target.value) || 0)}
+                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-white/60 mb-1.5 flex items-center gap-1">
+                        <Coins className="w-3.5 h-3.5 text-fuchsia-400" /> 流明 (1-100)
+                      </label>
+                      <input type="number" min="1" max="100" value={newCreateLumen}
+                        onChange={e => setNewCreateLumen(parseInt(e.target.value) || 1)}
+                        className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white" />
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-2 mt-6 justify-end">
+                <button onClick={() => setCreating(false)} disabled={creatingSaving} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm disabled:opacity-50">取消</button>
+                <button onClick={handleCreate} disabled={creatingSaving} className="px-4 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium flex items-center gap-1 disabled:opacity-50">
+                  {creatingSaving ? '发布中...' : '🚀 发布资源'}
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

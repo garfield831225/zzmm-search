@@ -20,8 +20,15 @@
 // 2026-07-27 sheet 分类修复 (用户报: "zezemom_excel 都在全部里, 但按 sheet 分类没新的"):
 //   之前 sheet IS NULL 的资源 (~18868 条, 原盘类) 在 sheet 分类按钮里看不到
 //   修法: sheet 分类列表加一个 "未分类 (sheet=NULL)" 按钮, 显示 sheet=NULL 的资源数
+//
+// 2026-08-16: 鉴权 + unlocked 字段
+//   - 接收 Authorization Bearer token
+//   - 查 xx_user_unlocks 表, 拿到当前 user 已解锁的资源 id 集合
+//   - 在每个 item 加 unlocked 字段 (boolean)
+//   - 前端根据 unlocked 决定是否显示 link
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
+import jwt from 'jsonwebtoken';
 
 // 2026-08-01: 修 Neon HTTP endpoint 偶发返 stale data bug
 //   (catalog 看到 7/31 11:00 那 13 条外语电影 link 没插入前的 7516, 但 DB 实际 7529)
@@ -56,6 +63,17 @@ export async function GET(request: NextRequest) {
   // sql 已用 module-level Pool API (走 WebSocket + read-write, 修 HTTP endpoint stale bug)
   const { searchParams } = new URL(request.url);
 
+  // 2026-08-16: 鉴权 (拿 user_id, 用于查 unlock 状态)
+  const authHeader = request.headers.get('authorization');
+  let currentUserId: number | null = null;
+  if (authHeader?.startsWith('Bearer ')) {
+    try {
+      const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
+      const payload = jwt.verify(authHeader.replace('Bearer ', ''), JWT_SECRET) as any;
+      currentUserId = Number(payload.id) || null;
+    } catch { /* 匿名用户 */ }
+  }
+
   const q = (searchParams.get('q') || '').trim();
   const section = searchParams.get('section') || '';  // '' (全部) | zezhe | vip | code
   const sheet = searchParams.get('sheet') || '';        // zezhe 区分类
@@ -70,8 +88,8 @@ export async function GET(request: NextRequest) {
     let sectionFilter = '1=1';
     let sectionChannel = '';
     if (section === 'zezhe') {
-      // 兼容 'zezhe' + 'zezemom_excel' 两种命名
-      sectionFilter = "(r.import_channel IN ('zezhe', 'zezemom_excel'))";
+      // 兼容 'zezhe' + 'zezemom_excel' + 'admin_manual' (2026-08-16 admin 手动发布的 lumen/code 资源也算)
+      sectionFilter = "(r.import_channel IN ('zezhe', 'zezemom_excel', 'admin_manual'))";
       sectionChannel = 'zezhe';
     } else if (section === 'vip') {
       sectionFilter = "(r.access_level = 'vip')";
@@ -157,6 +175,24 @@ export async function GET(request: NextRequest) {
     const dbRows = await sql(listSQL, [...condVals, pageSize, offset]) as any[];
 
     // 6. Item 结构
+    // 2026-08-16: 查当前 user 的 unlock 状态, 给 item 加 unlocked 字段
+    //   - 只对 payType='lumen'/'code' 的资源有意义
+    //   - admin 默认全解锁
+    //   - 已解锁 → 前端显示 link; 未解锁 → 前端显示解锁按钮
+    const unlockedIds = new Set<number>();
+    if (currentUserId) {
+      try {
+        const uRows = await sql`SELECT id, user_group FROM xx_users WHERE id = ${currentUserId} LIMIT 1` as any[];
+        if (uRows[0]?.user_group === 'admin') {
+          // admin 全解锁 — 标所有 row.id
+          dbRows.forEach((r: any) => unlockedIds.add(r.id));
+        } else {
+          const unlocks = await sql`SELECT resource_id FROM xx_user_unlocks WHERE user_id = ${currentUserId}` as any[];
+          unlocks.forEach((u: any) => unlockedIds.add(u.resource_id));
+        }
+      } catch { /* 失败降级为全未解锁 */ }
+    }
+
     const items = dbRows.map((row: any) => {
       const subLinks = Array.isArray(row.sub_links) ? row.sub_links : (typeof row.sub_links === 'string' ? JSON.parse(row.sub_links) : []);
       const base: any = {
@@ -204,6 +240,8 @@ export async function GET(request: NextRequest) {
       } else {
         base.links = [];
       }
+      // 2026-08-16: 加 unlocked 字段 (供前端 payType=lumen/code 时决定显示链接)
+      base.unlocked = unlockedIds.has(row.id);
       return base;
     });
 
