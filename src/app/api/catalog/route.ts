@@ -226,9 +226,14 @@ export async function GET(request: NextRequest) {
         base.codePrice = row.code_price ? Number(row.code_price) : 0;
         base.payType = row.pay_type || 'free';
       }
-      if (subLinks && subLinks.length > 0) {
+      // 2026-08-16: 加 unlocked 字段 (供前端 payType=lumen/code 时决定显示链接)
+      base.unlocked = unlockedIds.has(row.id);
+      // 2026-08-16: payType='lumen'/'code' 且未解锁 → 隐藏 link/url
+      //   (admin 手动发布的单资源付费必须先流明解锁, 否则看不到)
+      const hideLink = (row.pay_type === 'lumen' || row.pay_type === 'code') && !base.unlocked;
+      if (subLinks && subLinks.length > 0 && !hideLink) {
         base.links = subLinks;
-      } else if (row.link) {
+      } else if (row.link && !hideLink) {
         base.links = [{
           source: row.source,
           url: row.link,
@@ -240,8 +245,10 @@ export async function GET(request: NextRequest) {
       } else {
         base.links = [];
       }
-      // 2026-08-16: 加 unlocked 字段 (供前端 payType=lumen/code 时决定显示链接)
-      base.unlocked = unlockedIds.has(row.id);
+      if (hideLink) {
+        base.link = '';
+        base.linkCode = '';
+      }
       return base;
     });
 
