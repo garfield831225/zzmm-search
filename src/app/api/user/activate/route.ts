@@ -130,11 +130,28 @@ export async function POST(req: NextRequest) {
       const users: any = await sql`SELECT user_group, expire_at FROM xx_users WHERE id = ${userId}`;
       if (!users[0]) return NextResponse.json({ error: '用户不存在' }, { status: 404, headers: CORS_HEADERS });
       const currentExpire = users[0].expire_at;
-      const newExpire = calcNewExpire(currentExpire, c.duration);
+      // 2026-08-17: 时区 bug 修法 (cherry-pick from feature/viewer-role commit 45815945)
+      //   根因: Neon server timezone=Asia/Shanghai, 'timestamp without time zone' 列
+      //     接收 'Z' ISO 字符串当 wall clock 减 8h 存, 返 JS 字符串 +8h 还原
+      //     实际 calcNewExpire toISOString 输出 UTC 9-16 09:11 → 存 wall clock 9-16 01:11
+      //     → 读出 9-16 09:11 CST (期望 9-16 17:11, 差 8h)
+      //   修法: SQL 端 (NOW() + INTERVAL) AT TIME ZONE 'Asia/Shanghai' 算 wall clock
+      //     直接存 wall clock 9-16 17:11 (期望), JS 看到 9-16 17:11 CST
+      const updatedUser = await sql`
+        UPDATE xx_users
+        SET user_group = 'vip',
+            expire_at = (CASE
+              WHEN expire_at IS NULL OR expire_at < NOW() THEN NOW() + (${c.duration} * INTERVAL '1 day')
+              ELSE expire_at + (${c.duration} * INTERVAL '1 day')
+            END) AT TIME ZONE 'Asia/Shanghai',
+            updated_at = NOW()
+        WHERE id = ${userId}
+        RETURNING expire_at
+      ` as any[];
+      const newExpire = updatedUser[0]?.expire_at ?? null;
 
       try {
         await sql`UPDATE xx_activation_codes SET is_used = true, used_by = ${userId}, used_at = NOW() WHERE id = ${c.id}`;
-        await sql`UPDATE xx_users SET user_group = 'vip', expire_at = ${newExpire}, updated_at = NOW() WHERE id = ${userId}`;
         return NextResponse.json({
           success: true,
           code_type: 'vip',
