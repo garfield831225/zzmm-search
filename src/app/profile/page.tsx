@@ -135,6 +135,8 @@ export default function ProfilePage() {
   //   第二次 render (isReady=true) 继续调 useEffect (hook 数 = N+1)
   //   → React 抛 "Rendered more hooks than during the previous render" (#310)
   //   修法: useEffect 提到 if 早期 return 之前
+  //   ⚠️ 进一步坑: useEffect 内不能引用"在 if 早期 return 之后才 declare"的 const (TDZ)
+  //   loadCheckin (line ~251) 在 if 之后, 不能在这里用, 改用 setCheckinXxx 内联
   useEffect(() => {
     const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
     if (!t) { router.push('/login?redirect=/profile'); return; }
@@ -163,8 +165,16 @@ export default function ProfilePage() {
         ]);
         if (r6.ok) { const d6 = await r6.json(); setMyUploads(d6.items || []); }
         if (r7.ok) { const d7 = await r7.json(); setPointLogs(d7.items || []); }
-        // 2026-08-04 P6.3: 加载签到状态
-        loadCheckin();
+        // 2026-08-04 P6.3: 加载签到状态 (内联, 不调 loadCheckin 避免 TDZ)
+        try {
+          const cr = await fetch('/api/checkin', { headers: { Authorization: 'Bearer ' + t, 'Cache-Control': 'no-cache' } });
+          if (cr.ok) {
+            const cd = await cr.json();
+            setCheckinToday(cd.already_checked_in);
+            setCheckinRecent(cd.recent || []);
+            if (typeof cd.points_balance === 'number') setPointsBalance(cd.points_balance);
+          }
+        } catch {}
       } catch (e: any) { setError(e.message); }
       finally { setLoading(false); }
     };
