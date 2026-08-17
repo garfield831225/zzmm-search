@@ -130,6 +130,47 @@ export default function ProfilePage() {
   const [checkinLoading, setCheckinLoading] = useState(false);
   const [pointsBalance, setPointsBalance] = useState(0);
 
+  // 2026-08-17 P0: useEffect 必须放在 if (!isReady) 早期 return 之前! 否则
+  //   第一次 render (isReady=false) 早期 return 不调 useEffect (hook 数 = N)
+  //   第二次 render (isReady=true) 继续调 useEffect (hook 数 = N+1)
+  //   → React 抛 "Rendered more hooks than during the previous render" (#310)
+  //   修法: useEffect 提到 if 早期 return 之前
+  useEffect(() => {
+    const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
+    if (!t) { router.push('/login?redirect=/profile'); return; }
+
+    const fetchData = async () => {
+      try {
+        const r1 = await fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + t, 'Cache-Control': 'no-cache' } });
+        if (!r1.ok) { setError('请先登录'); setLoading(false); return; }
+        const d1 = await r1.json();
+        setUser(d1.user);
+        setEditForm({ username: d1.user?.username || '' });
+        const [r2, r3, r4, r5] = await Promise.all([
+          fetch('/api/user/activations', { headers: { Authorization: 'Bearer ' + t } }),
+          fetch('/api/user/unlocks/list', { headers: { Authorization: 'Bearer ' + t } }),
+          fetch('/api/user/balance', { headers: { Authorization: 'Bearer ' + t } }),
+          fetch('/api/user/weekly-credit', { headers: { Authorization: 'Bearer ' + t } }),
+        ]);
+        if (r2.ok) { const d2 = await r2.json(); setRecords(d2.items || []); }
+        if (r3.ok) { const d3 = await r3.json(); setUnlocks(d3.items || []); }
+        if (r4.ok) { const d4 = await r4.json(); if (typeof d4.lumen_balance === 'number') setLumenBalance(d4.lumen_balance); }
+        if (r5.ok) { const d5 = await r5.json(); if (d5 && typeof d5.used === 'number') setWeeklyCredit({ used: d5.used, total: d5.total, weekStart: d5.week_start }); }
+        // 2026-08-15: 加载我的上传 + 积分流水
+        const [r6, r7] = await Promise.all([
+          fetch('/api/my-uploads', { headers: { Authorization: 'Bearer ' + t } }),
+          fetch('/api/point-logs/me', { headers: { Authorization: 'Bearer ' + t } }),
+        ]);
+        if (r6.ok) { const d6 = await r6.json(); setMyUploads(d6.items || []); }
+        if (r7.ok) { const d7 = await r7.json(); setPointLogs(d7.items || []); }
+        // 2026-08-04 P6.3: 加载签到状态
+        loadCheckin();
+      } catch (e: any) { setError(e.message); }
+      finally { setLoading(false); }
+    };
+    fetchData();
+  }, [router]);
+
   if (!isReady) {
     return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white/50 text-sm">加载中...</div>;
   }
@@ -179,42 +220,6 @@ export default function ProfilePage() {
       showToast('error', e.message);
     }
   };
-
-  useEffect(() => {
-    const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
-    if (!t) { router.push('/login?redirect=/profile'); return; }
-
-    const fetchData = async () => {
-      try {
-        const r1 = await fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + t, 'Cache-Control': 'no-cache' } });
-        if (!r1.ok) { setError('请先登录'); setLoading(false); return; }
-        const d1 = await r1.json();
-        setUser(d1.user);
-        setEditForm({ username: d1.user?.username || '' });
-        const [r2, r3, r4, r5] = await Promise.all([
-          fetch('/api/user/activations', { headers: { Authorization: 'Bearer ' + t } }),
-          fetch('/api/user/unlocks/list', { headers: { Authorization: 'Bearer ' + t } }),
-          fetch('/api/user/balance', { headers: { Authorization: 'Bearer ' + t } }),
-          fetch('/api/user/weekly-credit', { headers: { Authorization: 'Bearer ' + t } }),
-        ]);
-        if (r2.ok) { const d2 = await r2.json(); setRecords(d2.items || []); }
-        if (r3.ok) { const d3 = await r3.json(); setUnlocks(d3.items || []); }
-        if (r4.ok) { const d4 = await r4.json(); if (typeof d4.lumen_balance === 'number') setLumenBalance(d4.lumen_balance); }
-        if (r5.ok) { const d5 = await r5.json(); if (d5 && typeof d5.used === 'number') setWeeklyCredit({ used: d5.used, total: d5.total, weekStart: d5.week_start }); }
-        // 2026-08-15: 加载我的上传 + 积分流水
-        const [r6, r7] = await Promise.all([
-          fetch('/api/my-uploads', { headers: { Authorization: 'Bearer ' + t } }),
-          fetch('/api/point-logs/me', { headers: { Authorization: 'Bearer ' + t } }),
-        ]);
-        if (r6.ok) { const d6 = await r6.json(); setMyUploads(d6.items || []); }
-        if (r7.ok) { const d7 = await r7.json(); setPointLogs(d7.items || []); }
-        // 2026-08-04 P6.3: 加载签到状态
-        loadCheckin();
-      } catch (e: any) { setError(e.message); }
-      finally { setLoading(false); }
-    };
-    fetchData();
-  }, [router]);
 
   // 业务计算
   // 2026-08-01: 修 /api/auth/me 已返 ISO UTC 字符串 (parseNeonTime 修 tz 标记), 这里直接 new Date() 即可
