@@ -130,13 +130,15 @@ export async function POST(req: NextRequest) {
       const users: any = await sql`SELECT user_group, expire_at, registration_source FROM xx_users WHERE id = ${userId}`;
       if (!users[0]) return NextResponse.json({ error: '用户不存在' }, { status: 404, headers: CORS_HEADERS });
       const currentExpire = users[0].expire_at;
-      // 2026-08-17: 时区 bug 修法 (cherry-pick from feature/viewer-role commit 45815945)
-      //   根因: Neon server timezone=Asia/Shanghai, 'timestamp without time zone' 列
-      //     接收 'Z' ISO 字符串当 wall clock 减 8h 存, 返 JS 字符串 +8h 还原
-      //     实际 calcNewExpire toISOString 输出 UTC 9-16 09:11 → 存 wall clock 9-16 01:11
-      //     → 读出 9-16 09:11 CST (期望 9-16 17:11, 差 8h)
-      //   修法: SQL 端 (NOW() + INTERVAL) AT TIME ZONE 'Asia/Shanghai' 算 wall clock
-      //     直接存 wall clock 9-16 17:11 (期望), JS 看到 9-16 17:11 CST
+      // 2026-08-17: 时区 bug 根因 + 修法 (合并 feature/viewer-role 65ff533f + 45815945)
+      //   根因: Neon serverless driver 实际 server timezone=Asia/Shanghai (与 SHOW timezone='GMT' 不一致)
+      //     - timestamp without time zone 列, 存 wall clock
+      //     - 返 JS 时按 Asia/Shanghai 转 UTC (减 8h), 字符串挂 'Z' 标记但实际值是 wall - 8h
+      //     - JS 端 new Date('Z' 字符串) 当 UTC 解析, 跟 wall clock 差 8h
+      //   修法: 用 SQL 端 NOW() + INTERVAL 算 expire_at, AT TIME ZONE 'Asia/Shanghai' 强转
+      //     - NOW() + INTERVAL 是 timestamp with time zone (UTC)
+      //     - AT TIME ZONE 'Asia/Shanghai' 转成 wall clock, 当 timestamp without time zone 存
+      //     - 跟 wall clock 一致, JS 看到 9-16 17:11 CST (期望)
       const updatedUser = await sql`
         UPDATE xx_users
         SET user_group = 'vip',
@@ -159,8 +161,8 @@ export async function POST(req: NextRequest) {
 
       try {
         await sql`UPDATE xx_activation_codes SET is_used = true, used_by = ${userId}, used_at = NOW() WHERE id = ${c.id}`;
-        // 2026-08-17 merge: 上面 SQL UPDATE 已经在 head 里做完 (含 user_group + expire_at + AT TIME ZONE)
-        // 这里不重复 UPDATE, 只写 lumen_logs 行为日志
+        // 2026-08-17: 上面 SQL UPDATE 已经在 head 里做完 (含 user_group + expire_at + AT TIME ZONE)
+        // 这里不重复 UPDATE, 只写 lumen_logs 行为日志 (含 viewer_apply 警告)
         await sql`
           INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description, created_at)
           VALUES (${userId}, 0, 0, ${isViewerApply ? 'viewer_vip_blocked' : 'vip_upgrade'}, ${c.code}, ${isViewerApply

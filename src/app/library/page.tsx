@@ -247,8 +247,13 @@ export default function LibraryPage() {
       window.open(item.link, '_blank');
       return;
     }
-    if (userGroup !== 'basic' && userGroup !== 'vip' && userGroup !== 'admin') {
-      addToast('error', '请先登录');
+    // 2026-08-17 P0: viewer 也能解锁 (跟 basic/vip 一样流明扣减)
+    //   user (注册后未激活) 也能进流明解锁流程, 流明不够弹"需购买流明"提示
+    //   任何人登录后 status='active' 都能进, server 端 unlock API 鉴权
+    if (userGroup !== 'basic' && userGroup !== 'vip' && userGroup !== 'admin' && userGroup !== 'viewer') {
+      // 8-17 12:00: user (注册后未激活) 走流明解锁流程, 跟 basic 一样
+      // 此分支保留以便未来收紧 (例如 admin 控制 user 不能解锁)
+      addToast('error', '请先激活 basic / vip 会员后再解锁');
       return;
     }
     // 2026-07-28: 流明不足预检 (跟服务端 402 错对应, 直接弹购买提示)
@@ -866,34 +871,42 @@ export default function LibraryPage() {
         )}
       </AnimatePresence>
 
-      {/* 2026-08-17: VIP 购买弹框 (iframe 嵌入 https://zzmm-search.uk/upgrade) */}
+      {/* 2026-08-17: VIP 购买弹框 (iframe 跨域/sandbox 拦截 → 改用 window.open 新窗口打开) */}
       <AnimatePresence>
         {upgradeModal && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50"
             onClick={() => setUpgradeModal(false)}>
             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
-              className="bg-[#12121a] rounded-2xl w-full max-w-5xl h-[90vh] border border-amber-500/30 shadow-2xl flex flex-col overflow-hidden"
+              className="bg-[#12121a] rounded-2xl w-full max-w-md border border-amber-500/30 shadow-2xl overflow-hidden"
               onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 shrink-0">
+              <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
                 <div className="flex items-center gap-2">
                   <span className="text-amber-400 text-lg">💎</span>
                   <h3 className="text-base font-semibold text-white">购买 VIP 会员</h3>
-                  <span className="text-xs text-white/40 ml-2">来源: zzmm-search.uk/upgrade</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <button onClick={() => setUpgradeModal(false)}
+                  className="px-3 py-1 bg-white/10 hover:bg-white/20 rounded text-sm text-white/80">关闭</button>
+              </div>
+              <div className="px-5 py-5 space-y-3">
+                <p className="text-sm text-white/80">
+                  即将打开 VIP 购买页 <a href="https://zzmm-search.uk/upgrade" target="_blank" rel="noopener noreferrer" className="text-amber-300 underline">zzmm-search.uk/upgrade</a>
+                </p>
+                <p className="text-xs text-white/50">
+                  购买后系统会发 VIP 激活码，去 <a href="/activate" className="text-amber-300 underline">/activate</a> 页面输入即可生效。
+                </p>
+                <div className="flex gap-2 pt-2">
                   <a href="https://zzmm-search.uk/upgrade" target="_blank" rel="noopener noreferrer"
-                    className="px-3 py-1 bg-white/10 hover:bg-white/20 rounded text-xs text-white/80">
-                    🔗 新窗口打开
+                    onClick={() => setUpgradeModal(false)}
+                    className="flex-1 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-lg text-sm font-semibold text-white text-center">
+                    💎 立即购买
                   </a>
                   <button onClick={() => setUpgradeModal(false)}
-                    className="px-3 py-1 bg-white/10 hover:bg-white/20 rounded text-sm text-white/80">关闭</button>
+                    className="px-4 py-2.5 bg-white/10 hover:bg-white/20 rounded-lg text-sm text-white/80">取消</button>
                 </div>
-              </div>
-              <iframe src="https://zzmm-search.uk/upgrade" className="flex-1 w-full border-0 bg-white"
-                title="VIP 购买" sandbox="allow-forms allow-scripts allow-same-origin allow-popups" />
-              <div className="px-5 py-2.5 border-t border-white/10 text-xs text-white/50 shrink-0">
-                ⚠️ VIP 购买后用激活码去 <a href="/activate" className="text-amber-300 underline">/activate</a> 页面输入即可。viewer 档用户即使升 VIP 仍受 viewer 页面限制 (需邀请码完整解封)。
+                <div className="text-[10px] text-red-300/70 pt-2 border-t border-white/10">
+                  ⚠️ viewer 档用户即使升 VIP 仍受 viewer 页面限制，需邀请码完整解封。
+                </div>
               </div>
             </motion.div>
           </motion.div>

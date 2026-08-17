@@ -130,6 +130,57 @@ export default function ProfilePage() {
   const [checkinLoading, setCheckinLoading] = useState(false);
   const [pointsBalance, setPointsBalance] = useState(0);
 
+  // 2026-08-17 P0: useEffect 必须放在 if (!isReady) 早期 return 之前! 否则
+  //   第一次 render (isReady=false) 早期 return 不调 useEffect (hook 数 = N)
+  //   第二次 render (isReady=true) 继续调 useEffect (hook 数 = N+1)
+  //   → React 抛 "Rendered more hooks than during the previous render" (#310)
+  //   修法: useEffect 提到 if 早期 return 之前
+  //   ⚠️ 进一步坑: useEffect 内不能引用"在 if 早期 return 之后才 declare"的 const (TDZ)
+  //   loadCheckin (line ~251) 在 if 之后, 不能在这里用, 改用 setCheckinXxx 内联
+  useEffect(() => {
+    const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
+    if (!t) { router.push('/login?redirect=/profile'); return; }
+
+    const fetchData = async () => {
+      try {
+        const r1 = await fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + t, 'Cache-Control': 'no-cache' } });
+        if (!r1.ok) { setError('请先登录'); setLoading(false); return; }
+        const d1 = await r1.json();
+        setUser(d1.user);
+        setEditForm({ username: d1.user?.username || '' });
+        const [r2, r3, r4, r5] = await Promise.all([
+          fetch('/api/user/activations', { headers: { Authorization: 'Bearer ' + t } }),
+          fetch('/api/user/unlocks/list', { headers: { Authorization: 'Bearer ' + t } }),
+          fetch('/api/user/balance', { headers: { Authorization: 'Bearer ' + t } }),
+          fetch('/api/user/weekly-credit', { headers: { Authorization: 'Bearer ' + t } }),
+        ]);
+        if (r2.ok) { const d2 = await r2.json(); setRecords(d2.items || []); }
+        if (r3.ok) { const d3 = await r3.json(); setUnlocks(d3.items || []); }
+        if (r4.ok) { const d4 = await r4.json(); if (typeof d4.lumen_balance === 'number') setLumenBalance(d4.lumen_balance); }
+        if (r5.ok) { const d5 = await r5.json(); if (d5 && typeof d5.used === 'number') setWeeklyCredit({ used: d5.used, total: d5.total, weekStart: d5.week_start }); }
+        // 2026-08-15: 加载我的上传 + 积分流水
+        const [r6, r7] = await Promise.all([
+          fetch('/api/my-uploads', { headers: { Authorization: 'Bearer ' + t } }),
+          fetch('/api/point-logs/me', { headers: { Authorization: 'Bearer ' + t } }),
+        ]);
+        if (r6.ok) { const d6 = await r6.json(); setMyUploads(d6.items || []); }
+        if (r7.ok) { const d7 = await r7.json(); setPointLogs(d7.items || []); }
+        // 2026-08-04 P6.3: 加载签到状态 (内联, 不调 loadCheckin 避免 TDZ)
+        try {
+          const cr = await fetch('/api/checkin', { headers: { Authorization: 'Bearer ' + t, 'Cache-Control': 'no-cache' } });
+          if (cr.ok) {
+            const cd = await cr.json();
+            setCheckinToday(cd.already_checked_in);
+            setCheckinRecent(cd.recent || []);
+            if (typeof cd.points_balance === 'number') setPointsBalance(cd.points_balance);
+          }
+        } catch {}
+      } catch (e: any) { setError(e.message); }
+      finally { setLoading(false); }
+    };
+    fetchData();
+  }, [router]);
+
   if (!isReady) {
     return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white/50 text-sm">加载中...</div>;
   }
@@ -179,42 +230,6 @@ export default function ProfilePage() {
       showToast('error', e.message);
     }
   };
-
-  useEffect(() => {
-    const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
-    if (!t) { router.push('/login?redirect=/profile'); return; }
-
-    const fetchData = async () => {
-      try {
-        const r1 = await fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + t, 'Cache-Control': 'no-cache' } });
-        if (!r1.ok) { setError('请先登录'); setLoading(false); return; }
-        const d1 = await r1.json();
-        setUser(d1.user);
-        setEditForm({ username: d1.user?.username || '' });
-        const [r2, r3, r4, r5] = await Promise.all([
-          fetch('/api/user/activations', { headers: { Authorization: 'Bearer ' + t } }),
-          fetch('/api/user/unlocks/list', { headers: { Authorization: 'Bearer ' + t } }),
-          fetch('/api/user/balance', { headers: { Authorization: 'Bearer ' + t } }),
-          fetch('/api/user/weekly-credit', { headers: { Authorization: 'Bearer ' + t } }),
-        ]);
-        if (r2.ok) { const d2 = await r2.json(); setRecords(d2.items || []); }
-        if (r3.ok) { const d3 = await r3.json(); setUnlocks(d3.items || []); }
-        if (r4.ok) { const d4 = await r4.json(); if (typeof d4.lumen_balance === 'number') setLumenBalance(d4.lumen_balance); }
-        if (r5.ok) { const d5 = await r5.json(); if (d5 && typeof d5.used === 'number') setWeeklyCredit({ used: d5.used, total: d5.total, weekStart: d5.week_start }); }
-        // 2026-08-15: 加载我的上传 + 积分流水
-        const [r6, r7] = await Promise.all([
-          fetch('/api/my-uploads', { headers: { Authorization: 'Bearer ' + t } }),
-          fetch('/api/point-logs/me', { headers: { Authorization: 'Bearer ' + t } }),
-        ]);
-        if (r6.ok) { const d6 = await r6.json(); setMyUploads(d6.items || []); }
-        if (r7.ok) { const d7 = await r7.json(); setPointLogs(d7.items || []); }
-        // 2026-08-04 P6.3: 加载签到状态
-        loadCheckin();
-      } catch (e: any) { setError(e.message); }
-      finally { setLoading(false); }
-    };
-    fetchData();
-  }, [router]);
 
   // 业务计算
   // 2026-08-01: 修 /api/auth/me 已返 ISO UTC 字符串 (parseNeonTime 修 tz 标记), 这里直接 new Date() 即可
@@ -334,6 +349,25 @@ export default function ProfilePage() {
     } finally {
       setDeleting(false);
     }
+  };
+
+  // 2026-08-17: 退出登录 (跟注销账号分开, admin 也能用)
+  //   清 server cookie + localStorage + 跳 /login
+  const handleLogout = async () => {
+    if (!confirm('确认退出登录?')) return;
+    try {
+      const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
+      // server 端清 cookie (401 不影响, 失败也清 localStorage)
+      await fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + t } }).catch(() => {});
+    } catch {}
+    try {
+      localStorage.removeItem('zzmm_token');
+      localStorage.removeItem('token');
+      localStorage.removeItem('adminToken');
+      localStorage.removeItem('user');
+    } catch {}
+    showToast('success', '✅ 已退出登录');
+    setTimeout(() => { window.location.href = '/login'; }, 600);
   };
 
   const handleSaveProfile = async () => {
@@ -476,14 +510,19 @@ export default function ProfilePage() {
             className="px-3 py-1.5 text-xs rounded-lg bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 border border-violet-500/30 flex items-center gap-1">
             <Crown className="w-3 h-3" /> 我的资源
           </Link>
+          {/* 2026-08-17: 退出登录按钮 (admin 也能用, 跟"注销账号"分开) */}
+          <button onClick={handleLogout}
+            className="ml-auto px-3 py-1.5 text-xs rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 border border-blue-500/40 flex items-center gap-1">
+            <LogOut className="w-3 h-3" /> 退出登录
+          </button>
           {user.user_group !== 'admin' && (
             <button onClick={handleDeleteAccount} disabled={deleting}
-              className="ml-auto px-3 py-1.5 text-xs rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/40 flex items-center gap-1 disabled:opacity-50">
+              className="px-3 py-1.5 text-xs rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/40 flex items-center gap-1 disabled:opacity-50">
               <LogOut className="w-3 h-3" /> 注销账号
             </button>
           )}
           {user.user_group === 'admin' && (
-            <span className="ml-auto text-[10px] text-amber-400/60">管理员账号不可注销</span>
+            <span className="text-[10px] text-amber-400/60">管理员账号不可注销</span>
           )}
         </div>
 
