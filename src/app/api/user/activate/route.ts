@@ -139,35 +139,46 @@ export async function POST(req: NextRequest) {
       //     - NOW() + INTERVAL 是 timestamp with time zone (UTC)
       //     - AT TIME ZONE 'Asia/Shanghai' 转成 wall clock, 当 timestamp without time zone 存
       //     - 跟 wall clock 一致, JS 看到 9-16 17:11 CST (期望)
+      // 2026-08-17: admin 保护 — SET user_group 用 CASE, admin 用户不会被降级成 vip
+      //   之前无条件 SET user_group='vip' 把 admin 账号也降级了 (id=1 admin 被改成 vip)
+      //   修法: CASE WHEN user_group='admin' THEN 'admin' ELSE 'vip' END
+      //   expire_at 还是要 extend (admin 用 2100 永久日期, extend 也无所谓)
       const updatedUser = await sql`
         UPDATE xx_users
-        SET user_group = 'vip',
+        SET user_group = CASE WHEN user_group = 'admin' THEN 'admin' ELSE 'vip' END,
             expire_at = (CASE
               WHEN expire_at IS NULL OR expire_at < NOW() THEN NOW() + (${c.duration} * INTERVAL '1 day')
               ELSE expire_at + (${c.duration} * INTERVAL '1 day')
             END) AT TIME ZONE 'Asia/Shanghai',
             updated_at = NOW()
         WHERE id = ${userId}
-        RETURNING expire_at
+        RETURNING user_group, expire_at
       ` as any[];
       const newExpire = updatedUser[0]?.expire_at ?? null;
+      const actualUserGroup = updatedUser[0]?.user_group ?? 'vip';
 
       // 2026-08-17 viewer-role: viewer 申请用户 (registration_source='viewer_apply')
       //   即使有 VIP 码也只进 viewer 限制的页面 (拍板 B 方案: 升 user_group='vip' 但加 viewer_locked)
       //   实现: 码标记已用, user_group 升 vip, **registration_source 不变** (让 AuthGuard 检查时仍走 viewer 限制)
       //   写 lumen_logs 记录此次尝试
+      // 2026-08-17: admin 跳过 (上面 SQL 保留 admin), viewer_apply 升 vip, 其他也升 vip
       const isViewerApply = users[0].registration_source === 'viewer_apply';
-      const newUserGroup = isViewerApply ? 'vip' : 'vip';  // 两种都升 vip (viewer 通过 registration_source 标志被 AuthGuard 拦截)
+      const isCurrentAdmin = users[0].user_group === 'admin';
+      const newUserGroup = actualUserGroup;  // 用 SQL 实际返回值, admin 还是 admin, 其他都 vip
 
       try {
         await sql`UPDATE xx_activation_codes SET is_used = true, used_by = ${userId}, used_at = NOW() WHERE id = ${c.id}`;
         // 2026-08-17: 上面 SQL UPDATE 已经在 head 里做完 (含 user_group + expire_at + AT TIME ZONE)
-        // 这里不重复 UPDATE, 只写 lumen_logs 行为日志 (含 viewer_apply 警告)
+        // 这里不重复 UPDATE, 只写 lumen_logs 行为日志 (含 viewer_apply 警告 + admin 保护)
+        const logType = isCurrentAdmin ? 'admin_vip_kept' : (isViewerApply ? 'viewer_vip_blocked' : 'vip_upgrade');
+        const logDesc = isCurrentAdmin
+          ? `admin 账号 (user_group=admin) 激活 VIP 码, 码标记已用 + expire_at 延长 ${c.duration} 天, 但 user_group 保留 admin (admin 保护, 不降级)`
+          : (isViewerApply
+            ? `viewer 申请用户 (registration_source=viewer_apply) 尝试激活 VIP 码, 码标记已用, user_group 升 vip 但 AuthGuard 会拦截 (需邀请码完整解封), 计划: ${c.duration === 0 ? '永久' : c.duration + ' 天'}`
+            : `VIP 升级 ${c.duration} 天, expire_at: ${newExpire || '永久'}`);
         await sql`
           INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description, created_at)
-          VALUES (${userId}, 0, 0, ${isViewerApply ? 'viewer_vip_blocked' : 'vip_upgrade'}, ${c.code}, ${isViewerApply
-            ? `viewer 申请用户 (registration_source=viewer_apply) 尝试激活 VIP 码, 码标记已用, user_group 升 vip 但 AuthGuard 会拦截 (需邀请码完整解封), 计划: ${c.duration === 0 ? '永久' : c.duration + ' 天'}`
-            : `VIP 升级 ${c.duration} 天, expire_at: ${newExpire || '永久'}`}, NOW())
+          VALUES (${userId}, 0, 0, ${logType}, ${c.code}, ${logDesc}, NOW())
         `.catch(() => {});
         return NextResponse.json({
           success: true,
@@ -183,11 +194,13 @@ export async function POST(req: NextRequest) {
           new_user_group: newUserGroup,
           // 2026-08-17 viewer 申请用户返 viewer_locked=true 提示
           viewer_locked: isViewerApply,
-          message: isViewerApply
-            ? `⚠️ 您是 viewer 档用户, VIP 码已标记使用 + user_group 已升 vip, 但仍受 viewer 限制 (仅 library + 个人主页 + 流明购买).\n\n💡 完整解封需邀请码 (向 admin 申请 basic 邀请码), 邀请码会改 registration_source='admin' 永久解封.\n\n拿到邀请码后去 /register 用邀请码注册新号, 再用 admin 后台 "用户列表" 合并原 viewer 账号的资源访问权限.`
-            : (c.duration === 0
-              ? '🎉 永久 VIP 会员激活成功！享受全站资源'
-              : `🎉 ${c.duration} 天 VIP 会员激活成功！到期时间: ${newExpire ? new Date(newExpire).toLocaleString('zh-CN') : '永久'}`),
+          message: isCurrentAdmin
+            ? `👑 admin 账号激活 VIP 码: 码已标记使用 + expire_at 已延长 ${c.duration} 天, user_group 保留 admin (管理员权限不变)`
+            : (isViewerApply
+              ? `⚠️ 您是 viewer 档用户, VIP 码已标记使用 + user_group 已升 vip, 但仍受 viewer 限制 (仅 library + 个人主页 + 流明购买).\n\n💡 完整解封需邀请码 (向 admin 申请 basic 邀请码), 邀请码会改 registration_source='admin' 永久解封.\n\n拿到邀请码后去 /register 用邀请码注册新号, 再用 admin 后台 "用户列表" 合并原 viewer 账号的资源访问权限.`
+              : (c.duration === 0
+                ? '🎉 永久 VIP 会员激活成功！享受全站资源'
+                : `🎉 ${c.duration} 天 VIP 会员激活成功！到期时间: ${newExpire ? new Date(newExpire).toLocaleString('zh-CN') : '永久'}`)),
         }, { headers: CORS_HEADERS });
       } catch (e: any) {
         return NextResponse.json({ error: '激活失败: ' + e.message }, { status: 500, headers: CORS_HEADERS });
@@ -198,12 +211,16 @@ export async function POST(req: NextRequest) {
     if (c.code_type === 'basic') {
       try {
         await sql`UPDATE xx_activation_codes SET is_used = true, used_by = ${userId}, used_at = NOW() WHERE id = ${c.id}`;
-        await sql`UPDATE xx_users SET user_group = 'basic', updated_at = NOW() WHERE id = ${userId}`;
+        // 2026-08-17: admin 保护 - admin 激活 basic 码也保留 admin, 不降级
+        const basicR = await sql`UPDATE xx_users SET user_group = CASE WHEN user_group = 'admin' THEN 'admin' ELSE 'basic' END, updated_at = NOW() WHERE id = ${userId} RETURNING user_group` as any[];
+        const finalGroup = basicR[0]?.user_group ?? 'basic';
         return NextResponse.json({
           success: true, code_type: 'basic',
-          new_user_group: 'basic',
+          new_user_group: finalGroup,
           channel: c.channel, batch_id: c.batch_id,
-          message: '基础会员激活成功！现在可以看泽泽妈妈文档导入的所有资源。',
+          message: finalGroup === 'admin'
+            ? '👑 admin 账号激活 basic 码: 码已标记使用, user_group 保留 admin (管理员权限不变)'
+            : '基础会员激活成功！现在可以看泽泽妈妈文档导入的所有资源。',
         }, { headers: CORS_HEADERS });
       } catch (e: any) {
         return NextResponse.json({ error: '激活失败: ' + e.message }, { status: 500, headers: CORS_HEADERS });
