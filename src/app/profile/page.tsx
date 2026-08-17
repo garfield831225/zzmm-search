@@ -351,6 +351,25 @@ export default function ProfilePage() {
     }
   };
 
+  // 2026-08-17: 退出登录 (跟注销账号分开, admin 也能用)
+  //   清 server cookie + localStorage + 跳 /login
+  const handleLogout = async () => {
+    if (!confirm('确认退出登录?')) return;
+    try {
+      const t = localStorage.getItem('zzmm_token') || localStorage.getItem('token') || '';
+      // server 端清 cookie (401 不影响, 失败也清 localStorage)
+      await fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + t } }).catch(() => {});
+    } catch {}
+    try {
+      localStorage.removeItem('zzmm_token');
+      localStorage.removeItem('token');
+      localStorage.removeItem('adminToken');
+      localStorage.removeItem('user');
+    } catch {}
+    showToast('success', '✅ 已退出登录');
+    setTimeout(() => { window.location.href = '/login'; }, 600);
+  };
+
   const handleSaveProfile = async () => {
     try {
       // TODO: 调 /api/user/update-profile
@@ -491,14 +510,19 @@ export default function ProfilePage() {
             className="px-3 py-1.5 text-xs rounded-lg bg-violet-500/20 hover:bg-violet-500/30 text-violet-200 border border-violet-500/30 flex items-center gap-1">
             <Crown className="w-3 h-3" /> 我的资源
           </Link>
+          {/* 2026-08-17: 退出登录按钮 (admin 也能用, 跟"注销账号"分开) */}
+          <button onClick={handleLogout}
+            className="ml-auto px-3 py-1.5 text-xs rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 border border-blue-500/40 flex items-center gap-1">
+            <LogOut className="w-3 h-3" /> 退出登录
+          </button>
           {user.user_group !== 'admin' && (
             <button onClick={handleDeleteAccount} disabled={deleting}
-              className="ml-auto px-3 py-1.5 text-xs rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/40 flex items-center gap-1 disabled:opacity-50">
+              className="px-3 py-1.5 text-xs rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-500/40 flex items-center gap-1 disabled:opacity-50">
               <LogOut className="w-3 h-3" /> 注销账号
             </button>
           )}
           {user.user_group === 'admin' && (
-            <span className="ml-auto text-[10px] text-amber-400/60">管理员账号不可注销</span>
+            <span className="text-[10px] text-amber-400/60">管理员账号不可注销</span>
           )}
         </div>
 
