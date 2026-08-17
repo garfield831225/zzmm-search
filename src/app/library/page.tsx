@@ -77,6 +77,7 @@ export default function LibraryPage() {
   const router = useRouter();
   const [userGroup, setUserGroup] = useState<string>('user');
   const [userId, setUserId] = useState<string>('');
+  const [userName, setUserName] = useState<string>('');  // 2026-08-17: 顶部入口显示
   const [section, setSection] = useState<SectionKey>('zezhe');
   // 分类: zezhe 用 sheet, vip/code 用 source
   const [subCategory, setSubCategory] = useState<string>('');
@@ -92,6 +93,7 @@ export default function LibraryPage() {
   const [unlocking, setUnlocking] = useState<Set<number>>(new Set());
   const [lumenBalance, setLumenBalance] = useState(0);
   const [lumenModal, setLumenModal] = useState<{ cost: number; balance: number; resourceName: string; creditAvailable?: number; resourceId?: number } | null>(null);
+  const [upgradeModal, setUpgradeModal] = useState(false);  // 2026-08-17: VIP 购买弹框 (iframe /upgrade)
   let toastCnt = 0;
 
   // 读 user 组
@@ -100,6 +102,7 @@ export default function LibraryPage() {
       const u = JSON.parse(localStorage.getItem('user') || '{}');
       if (u?.group) setUserGroup(u.group);
       if (u?.id) setUserId(String(u.id));
+      if (u?.username) setUserName(u.username);
     } catch {}
   }, []);
 
@@ -142,7 +145,8 @@ export default function LibraryPage() {
 
   const isCodeResource = (item: Resource): boolean => {
     // pay_type 优先 (更准), 兼容 access_level
-    return item.payType === 'code' || item.accessLevel === 'code';
+    // 2026-08-16: payType='lumen' 也算 (admin 手动发布的流明资源, 跟 code 资源一样需要流明解锁)
+    return item.payType === 'code' || item.payType === 'lumen' || item.accessLevel === 'code';
   };
 
   const codeResourceLocked = (item: Resource): boolean => {
@@ -428,6 +432,17 @@ export default function LibraryPage() {
                   ↓ 倒序
                 </button>
               </div>
+              {/* 2026-08-17: 个人中心入口 (viewer 限制页只让进 library/profile, 直接给链接免得 AuthGuard 拦截) */}
+              {userName && (
+                <Link href="/profile" className="px-3 py-1.5 bg-violet-100 hover:bg-violet-200 rounded-lg text-xs transition text-violet-700 flex items-center gap-1">
+                  <span>👤</span><span className="hidden sm:inline">{userName}</span>
+                </Link>
+              )}
+              {/* 2026-08-17 P0: 顶部统一 VIP 购买入口 (用户要求不要每条资源后, 改放顶部) */}
+              <button onClick={() => setUpgradeModal(true)}
+                className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-lg text-xs text-white font-medium transition flex items-center gap-1 whitespace-nowrap">
+                <span>💎</span><span className="hidden sm:inline">购买 VIP</span>
+              </button>
               <Link href="/" className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs transition text-gray-600">← 影视区</Link>
             </div>
           </div>
@@ -611,6 +626,7 @@ export default function LibraryPage() {
                   {isUnlocked && <span className="px-1.5 py-0.5 bg-green-500/20 text-green-700 rounded text-[10px]">✓ 已解锁</span>}
                   {isAdmin && <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-700 rounded text-[10px]">👑 免流明</span>}
                 </div>
+                {/* 2026-08-17 P0: "购买 VIP" 按钮已移到顶部 header 统一入口, 这里不再每条重复 */}
                 {/* 操作 */}
                 <div className="flex gap-1 flex-wrap items-center">
                   {/* 2026-07-24: 多链接 (1对N 副链接) 优先显示, 副链接数>=2 加开全部按钮 */}
@@ -844,6 +860,40 @@ export default function LibraryPage() {
                 <button onClick={() => setLumenModal(null)} className="block w-full text-center px-4 py-2 text-sm text-white/40 hover:text-white/60">
                   取消
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 2026-08-17: VIP 购买弹框 (iframe 嵌入 https://zzmm-search.uk/upgrade) */}
+      <AnimatePresence>
+        {upgradeModal && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50"
+            onClick={() => setUpgradeModal(false)}>
+            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }}
+              className="bg-[#12121a] rounded-2xl w-full max-w-5xl h-[90vh] border border-amber-500/30 shadow-2xl flex flex-col overflow-hidden"
+              onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-5 py-3 border-b border-white/10 shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-amber-400 text-lg">💎</span>
+                  <h3 className="text-base font-semibold text-white">购买 VIP 会员</h3>
+                  <span className="text-xs text-white/40 ml-2">来源: zzmm-search.uk/upgrade</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a href="https://zzmm-search.uk/upgrade" target="_blank" rel="noopener noreferrer"
+                    className="px-3 py-1 bg-white/10 hover:bg-white/20 rounded text-xs text-white/80">
+                    🔗 新窗口打开
+                  </a>
+                  <button onClick={() => setUpgradeModal(false)}
+                    className="px-3 py-1 bg-white/10 hover:bg-white/20 rounded text-sm text-white/80">关闭</button>
+                </div>
+              </div>
+              <iframe src="https://zzmm-search.uk/upgrade" className="flex-1 w-full border-0 bg-white"
+                title="VIP 购买" sandbox="allow-forms allow-scripts allow-same-origin allow-popups" />
+              <div className="px-5 py-2.5 border-t border-white/10 text-xs text-white/50 shrink-0">
+                ⚠️ VIP 购买后用激活码去 <a href="/activate" className="text-amber-300 underline">/activate</a> 页面输入即可。viewer 档用户即使升 VIP 仍受 viewer 页面限制 (需邀请码完整解封)。
               </div>
             </motion.div>
           </motion.div>

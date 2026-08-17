@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
+import { useRequireAuth } from '@/lib/use-require-auth';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 
@@ -30,11 +31,17 @@ interface Theme {
 }
 
 export default function ThemesPage() {
+  // 2026-08-15: 鉴权 (替代不跑的 middleware) - 所有 hooks 提前, 早期 return 放最后
   const [themes, setThemes] = useState<Theme[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const pathname = usePathname();
   const hasLoadedRef = useRef(false);
+  const { isReady } = useRequireAuth('/themes');
+
+  if (!isReady) {
+    return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white/50 text-sm">加载中...</div>;
+  }
 
   useEffect(() => {
     let cancelled = false;

@@ -14,7 +14,7 @@ import { isFutureTime, parseNeonTime } from '@/lib/time';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
 
-export type AccessLevel = 'free' | 'basic' | 'vip';
+export type AccessLevel = 'free' | 'basic' | 'vip' | 'viewer';
 
 export interface AuthUser {
   id: number;
@@ -88,6 +88,7 @@ export async function requireAccess(
   }
   if (level === 'basic') {
     // basic 需要 basic / vip / admin (含历史遗留 'member')
+    // 2026-08-16: viewer 档不算 basic (viewer 只能看 library + 个人主页, 不能看主站资源)
     if (['basic', 'member', 'vip', 'admin'].includes(effectiveGroup)) {
       return authUser;
     }
@@ -97,6 +98,21 @@ export async function requireAccess(
         need: 'basic',
         current: effectiveGroup,
         tip: '需要有效的邀请码注册新账号（注册成功后即为 basic 基础会员）',
+      },
+      { status: 403 }
+    );
+  }
+  if (level === 'viewer') {
+    // 2026-08-16: viewer 档 - 已确认的 viewer / basic+ 都能看 (level=viewer 专为 library 资源)
+    if (['viewer', 'basic', 'member', 'vip', 'admin'].includes(effectiveGroup)) {
+      return authUser;
+    }
+    return NextResponse.json(
+      {
+        error: '需要确认的 viewer 账号',
+        need: 'viewer',
+        current: effectiveGroup,
+        tip: '请先申请文档资源站账号, 待 admin 确认后才能浏览',
       },
       { status: 403 }
     );

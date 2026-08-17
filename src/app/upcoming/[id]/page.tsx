@@ -25,8 +25,10 @@ interface PendingItem {
   size: string | null;
   sizeUnit: string | null;
   note: string | null;
-  status: string;
+  status: string;  // 2026-08-15: pending / approved / rejected (之前只 pending)
   submittedAt: string;
+  reviewedAt: string | null;  // 2026-08-15: 审核时间
+  rejectionReason: string | null;  // 2026-08-15: 拒绝原因
 }
 
 interface CurrentUser {
@@ -350,30 +352,53 @@ export default function UpcomingDetailPage() {
           )}
         </div>
 
-        {/* 我的 pending */}
+        {/* 我的所有上传 (含 pending / approved / rejected) — 2026-08-15 改 */}
         {currentUser && (
           <div className="mb-6">
             <div className="text-sm font-semibold mb-2 flex items-center gap-2">
-              ⏳ 我提交的待审核
+              📋 我提交的
               <span className="text-xs text-white/40">({pending.length})</span>
+              <span className="text-[10px] text-white/30 ml-2">⏳ 待审 / ✅ 通过 / ❌ 拒绝</span>
             </div>
             {pending.length === 0 ? (
               <div className="text-center text-white/30 py-6 text-xs bg-white/5 rounded-lg">还没提交, 上面填一下</div>
             ) : (
               <div className="space-y-2">
-                {pending.map(p => (
-                  <div key={p.pendingId} className="bg-amber-500/5 border border-amber-500/20 rounded px-3 py-2">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="px-2 py-0.5 bg-amber-500/30 text-amber-300 rounded text-xs">{p.type}</span>
-                      <span className="text-[10px] text-white/40">{p.links.length} 个链接</span>
-                      {p.size && <span className="text-[10px] text-white/40">{Number(p.size).toFixed(2)} {p.sizeUnit}</span>}
+                {pending.map(p => {
+                  const statusBadge =
+                    p.status === 'approved' ? <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 rounded text-[10px]">✅ 通过</span> :
+                    p.status === 'rejected' ? <span className="px-1.5 py-0.5 bg-red-500/20 text-red-300 rounded text-[10px]">❌ 拒绝</span> :
+                    <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded text-[10px]">⏳ 待审</span>;
+                  return (
+                    <div key={p.pendingId} className={`rounded px-3 py-2 border ${
+                      p.status === 'approved' ? 'bg-emerald-500/5 border-emerald-500/20' :
+                      p.status === 'rejected' ? 'bg-red-500/5 border-red-500/20' :
+                      'bg-amber-500/5 border-amber-500/20'
+                    }`}>
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        {statusBadge}
+                        <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-300 rounded text-xs">{p.type}</span>
+                        <span className="text-[10px] text-white/40">{p.links.length} 个链接</span>
+                        {p.size && <span className="text-[10px] text-white/40">{Number(p.size).toFixed(2)} {p.sizeUnit}</span>}
+                        <span className="text-[10px] text-white/30 ml-auto">{new Date(p.submittedAt).toISOString().slice(0, 10).replace(/-/g, '/')}</span>
+                      </div>
+                      <div className="text-[10px] text-white/40 font-mono truncate">{p.links.join(' | ')}</div>
+                      {p.note && <div className="text-[10px] text-white/50 mt-0.5">📝 {p.note}</div>}
+                      {p.status === 'rejected' && p.rejectionReason && (
+                        <div className="text-red-300/80 text-[10px] mt-1">原因: {p.rejectionReason}</div>
+                      )}
                     </div>
-                    <div className="text-[10px] text-white/40 font-mono truncate">{p.links.join(' | ')}</div>
-                    {p.note && <div className="text-[10px] text-white/50 mt-0.5">📝 {p.note}</div>}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
+          </div>
+        )}
+
+        {/* 2026-08-15: 跨资源看"我的上传 + 积分流水"汇总 (跨详情页通用, 提示用户去 /profile 看全量) */}
+        {currentUser && (
+          <div className="mb-6 px-3 py-2 bg-cyan-500/5 border border-cyan-500/20 rounded text-xs text-cyan-300/80">
+            💡 查看所有上传的审核进度 + 积分流水, 去 <Link href="/profile#uploads" className="text-cyan-300 hover:underline">个人中心 → 我的上传</Link>
           </div>
         )}
       </div>

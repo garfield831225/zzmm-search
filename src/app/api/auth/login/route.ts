@@ -84,6 +84,15 @@ export async function POST(req: NextRequest) {
     }
 
     const user = users[0];
+    // 2026-08-16 viewer-role: pending 用户 (viewer 待审) 返 pending 标识, 前端跳 /pending-approval
+    //   不设 cookie, 不发 token, 严格隔离主站
+    if (user.status === 'pending') {
+      return NextResponse.json({
+        pending: true,
+        user: { id: user.id, username: user.username, user_group: user.user_group, status: user.status, created_at: user.created_at || null },
+        message: '账号待审核，请等待管理员处理',
+      }, { status: 200, headers: CORS_HEADERS });
+    }
     if (user.status !== 'active') {
       return NextResponse.json({ error: '账号已被禁用' }, { status: 403, headers: CORS_HEADERS });
     }
@@ -102,7 +111,7 @@ export async function POST(req: NextRequest) {
     recordLoginHistory(user.id, req).catch((e) => console.error('[login-history]', e.message));
 
     const token = jwt.sign(
-      { id: user.id, username: user.username, group: user.user_group },
+      { id: user.id, username: user.username, group: user.user_group, registration_source: user.registration_source || 'main' },
       JWT_SECRET,
       { expiresIn: '30d' }
     );
@@ -127,6 +136,7 @@ export async function POST(req: NextRequest) {
         username: user.username,
         group: user.user_group,
         expire_at: user.expire_at,
+        registration_source: user.registration_source || 'main',  // 2026-08-17: viewer_locked 检查
       },
     }, { headers: CORS_HEADERS });
   } catch (e: any) {

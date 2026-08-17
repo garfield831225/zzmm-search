@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
+import { checkAndRecordThrottle } from '@/lib/throttle';  // 2026-08-16 viewer-role: 风控
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 10;
@@ -148,6 +149,23 @@ async function unlockWithLumen(sql: any, userId: string, resourceId: number, use
 export async function POST(req: NextRequest) {
   const auth = getUserId(req.headers.get('authorization'));
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+  // 2026-08-16 viewer-role: 风控检查
+  //   - admin 不限速 (怕自误踢)
+  //   - 其他用户 5min 30 unlock 阈值, 5 级惩罚
+  if (auth.userGroup !== 'admin') {
+    const throttle = await checkAndRecordThrottle(Number(auth.userId), 'unlock');
+    if (!throttle.allowed) {
+      return NextResponse.json({
+        error: throttle.message || '操作过于频繁, 请稍后再试',
+        banned: true,
+        ban_until: throttle.banUntil?.toISOString() || null,
+        remaining_ms: throttle.remainingMs,
+        strike_count: throttle.strikeCount,
+        reason: throttle.reason,
+      }, { status: 429 });
+    }
+  }
 
   const body = await req.json().catch(() => ({}));
   const { code, resource_id, resourceId, use_lumen, use_credit } = body;
