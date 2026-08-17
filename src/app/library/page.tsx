@@ -247,15 +247,13 @@ export default function LibraryPage() {
       window.open(item.link, '_blank');
       return;
     }
-    if (userGroup !== 'basic' && userGroup !== 'vip' && userGroup !== 'admin') {
-      // 2026-08-17 P0: 提示词要准 (用户反馈 viewer 解锁弹"请先登录" 误导)
-      //   user (未激活) → 请先激活 basic/vip
-      //   viewer → viewer 暂不能解锁, 联系 admin 升 basic
-      if (userGroup === 'viewer') {
-        addToast('error', '🚫 viewer 暂不能解锁单资源, 请联系管理员升级 basic / vip');
-      } else {
-        addToast('error', '请先激活 basic / vip 会员后再解锁');
-      }
+    // 2026-08-17 P0: viewer 也能解锁 (跟 basic/vip 一样流明扣减)
+    //   user (注册后未激活) 也能进流明解锁流程, 流明不够弹"需购买流明"提示
+    //   任何人登录后 status='active' 都能进, server 端 unlock API 鉴权
+    if (userGroup !== 'basic' && userGroup !== 'vip' && userGroup !== 'admin' && userGroup !== 'viewer') {
+      // 8-17 12:00: user (注册后未激活) 走流明解锁流程, 跟 basic 一样
+      // 此分支保留以便未来收紧 (例如 admin 控制 user 不能解锁)
+      addToast('error', '请先激活 basic / vip 会员后再解锁');
       return;
     }
     // 2026-07-28: 流明不足预检 (跟服务端 402 错对应, 直接弹购买提示)
