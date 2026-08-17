@@ -76,7 +76,10 @@ export async function POST(req: NextRequest) {
 
     const sql = neon(process.env.DATABASE_URL || '');
 
-    const rows = await sql`SELECT id, username, password_hash, user_group, expire_at, status FROM xx_users WHERE username = ${username}`;
+    // 2026-08-17: 加 registration_source 字段, 不然 viewer_apply 用户登入后 JWT 拿不到值, AuthGuard 限制失效
+    //   根因: 老 SELECT 没选 registration_source, user.registration_source 为 undefined → 'main' 覆盖
+    //   导致 viewer 升 vip 后不受限制 (AuthGuard 看不到 viewer_apply 标志)
+    const rows = await sql`SELECT id, username, password_hash, user_group, registration_source, expire_at, status FROM xx_users WHERE username = ${username}`;
     const users = rows as any[];
 
     if (!users.length) {

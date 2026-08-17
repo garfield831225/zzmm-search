@@ -34,7 +34,8 @@ export async function GET(req: NextRequest) {
 
     // sql 已 module-level 用 neon() + fetchOptions: { cache: 'no-store' } (修 stale)
     // 2026-08-01: ::text 强转, 避免 neon() SDK 返 raw Date 自身有 tz bug (前端 new Date() 少 8h)
-    const rows = await sql`SELECT id, username, user_group, expire_at::text as expire_at, status, created_at::text as created_at, last_login::text as last_login FROM xx_users WHERE id = ${payload.id}`;
+    // 2026-08-17: 加 registration_source 字段 (viewer 限制靠这个判断, 之前没返导致 AuthGuard 拿不到)
+    const rows = await sql`SELECT id, username, user_group, registration_source, expire_at::text as expire_at, status, created_at::text as created_at, last_login::text as last_login FROM xx_users WHERE id = ${payload.id}`;
     const users = rows as any[];
 
     if (!users.length) {
