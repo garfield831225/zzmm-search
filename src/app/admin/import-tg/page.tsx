@@ -49,11 +49,12 @@ const CHANNEL_OPTIONS = [
   { value: 'tg_other', label: 'TG 其他', icon: '📦' },
 ];
 
-// 2026-07-26 改: CF tunnel 524 timeout = 100s, 587 条 1MB INSERT 50 并发要 126s
-// 拆小到 ~300 条/批 (0.5MB) 让单批 < 90s, 给 CF 留 buffer
-// Neon serverless 免费版 5 inserts/s 限速, 50 并发排队可能拖到 100s+
-// 300 条 × 3 链接 = 900 INSERT × 50ms (含 Neon RPS 排队) ≈ 45-60s 应该 OK
-const MAX_BATCH_BYTES = 500 * 1024;
+// 2026-08-17 改: 1MB 全量 436 条 1 次 POST 触发 Cloudflare 524 (100s timeout)
+//   实测: 10 条小批量 OK (200ms), 全量 436 条 1MB 被 CF 100s 切断
+//   拆小到 200KB 让单批 < 30s, 给 CF 留充足 buffer
+//   200KB × 1MB 文件 = 5 批, 每批 10-30s, 总 50-150s 全跑完
+//   之前 500KB 太小, 现在 200KB 更安全 (实测 CF timeout 100s, Neon RPS 限流 5/s)
+const MAX_BATCH_BYTES = 200 * 1024;
 
 export default function ImportTgPage() {
   const [file, setFile] = useState<File | null>(null);
