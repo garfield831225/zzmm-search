@@ -130,7 +130,22 @@ export async function POST(req: NextRequest) {
       const users: any = await sql`SELECT user_group, expire_at, registration_source FROM xx_users WHERE id = ${userId}`;
       if (!users[0]) return NextResponse.json({ error: '用户不存在' }, { status: 404, headers: CORS_HEADERS });
       const currentExpire = users[0].expire_at;
-      const newExpire = calcNewExpire(currentExpire, c.duration);
+      // 2026-08-17: 时区双转 bug 修法
+      //   旧 calcNewExpire 用 Node.js toISOString() 输出 UTC 'Z' 字符串, Neon server timezone=Asia/Shanghai
+      //   把 'Z' 字符串当 Asia/Shanghai 解析 (少 8 小时), DB 存 17:11 → 实际变 09:11
+      //   修法: 用 SQL 端 NOW() + INTERVAL 算 expire_at, 走 timestamp without time zone 本地时区
+      const updatedUser = await sql`
+        UPDATE xx_users
+        SET user_group = 'vip',
+            expire_at = CASE
+              WHEN expire_at IS NULL OR expire_at < NOW() THEN NOW() + (${c.duration} * INTERVAL '1 day')
+              ELSE expire_at + (${c.duration} * INTERVAL '1 day')
+            END,
+            updated_at = NOW()
+        WHERE id = ${userId}
+        RETURNING expire_at
+      ` as any[];
+      const newExpire = updatedUser[0]?.expire_at ?? null;
 
       // 2026-08-17 viewer-role: viewer 申请用户 (registration_source='viewer_apply')
       //   即使有 VIP 码也只进 viewer 限制的页面 (拍板 B 方案: 升 user_group='vip' 但加 viewer_locked)
@@ -141,7 +156,7 @@ export async function POST(req: NextRequest) {
 
       try {
         await sql`UPDATE xx_activation_codes SET is_used = true, used_by = ${userId}, used_at = NOW() WHERE id = ${c.id}`;
-        await sql`UPDATE xx_users SET user_group = ${newUserGroup}, expire_at = ${newExpire}, updated_at = NOW() WHERE id = ${userId}`;
+        // 2026-08-17: user_group 在前面 SQL 已经更新了, 这里不重复 UPDATE
         // 写 lumen_logs (用户升 vip 行为日志, 含 viewer_apply 警告)
         await sql`
           INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description, created_at)
