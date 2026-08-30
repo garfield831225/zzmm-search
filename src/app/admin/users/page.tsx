@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Users, RefreshCw, ChevronLeft, ChevronRight, ShieldOff, ShieldCheck, Calendar, KeyRound } from 'lucide-react';
+import { Users, RefreshCw, ChevronLeft, ChevronRight, ShieldOff, ShieldCheck, Calendar, KeyRound, Zap, UserCheck } from 'lucide-react';
 
 interface UserRow {
   id: number;
@@ -121,6 +121,35 @@ export default function UsersPage() {
     } catch (e: any) { showToast('error', e.message); }
   };
 
+  // 2026-08-30: admin 一键升级 viewer 客户 (替换前端邀请码流程)
+  //   - vip  : viewer -> vip, expire_at 保留 (用户已买 VIP 时间)
+  //   - basic: viewer -> basic, expire_at = NULL (永久, 等同邀请码注册的 basic)
+  const activateUser = async (u: UserRow, mode: 'vip' | 'basic') => {
+    if (u.user_group !== 'viewer') {
+      showToast('error', `只能升级 viewer 客户, 当前 group = ${u.user_group}`);
+      return;
+    }
+    const label = mode === 'vip' ? '升 VIP (保留剩余时间)' : '升 Basic (永久)';
+    if (!confirm(`⚡ ${u.username} (id=${u.id}) -> ${label}?\n\n此操作会替换前端邀请码流程, viewer 客户授权后能看主站。`)) return;
+    try {
+      const r = await fetch(`/api/admin/users/${u.id}/activate`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ mode }),
+      });
+      const d = await r.json();
+      if (!r.ok || d.error) {
+        showToast('error', d.error || `HTTP ${r.status}`);
+        return;
+      }
+      showToast('success', `✅ ${u.username} 升级: ${d.old_group} -> ${d.new_group}`);
+      fetchList();
+    } catch (e: any) {
+      showToast('error', e.message);
+    }
+  };
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   if (!authed) {
@@ -215,6 +244,24 @@ export default function UsersPage() {
                     >
                       <KeyRound className="w-3 h-3 inline mr-1" />重置密码
                     </button>
+                    {u.user_group === 'viewer' && (
+                      <>
+                        <button
+                          onClick={() => activateUser(u, 'vip')}
+                          className="ml-1 px-2 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded text-xs"
+                          title="viewer -> vip, 保留剩余时间"
+                        >
+                          <Zap className="w-3 h-3 inline mr-1" />升 vip
+                        </button>
+                        <button
+                          onClick={() => activateUser(u, 'basic')}
+                          className="ml-1 px-2 py-1 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 rounded text-xs"
+                          title="viewer -> basic 永久"
+                        >
+                          <UserCheck className="w-3 h-3 inline mr-1" />升 basic
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
