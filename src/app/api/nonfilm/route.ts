@@ -6,6 +6,7 @@
 //   - 简化返回: 跟 search 一样, 但去掉 groups/categories/sources (公共 API 简化)
 import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
+import { recordClick } from '@/lib/track-click';  // 2026-10-20 异常用户登录: 全 API 点击计数
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -29,7 +30,7 @@ function errJson(code: string, message: string, hint?: string, status = 400) {
   );
 }
 
-function getAuth(req: NextRequest): { ok: true; group: string } | { ok: false; status: number; code: string; message: string } {
+function getAuth(req: NextRequest): { ok: true; group: string; userId: number } | { ok: false; status: number; code: string; message: string } {
   const auth = req.headers.get('authorization');
   if (!auth?.startsWith('Bearer ')) {
     return { ok: false, status: 401, code: 'no_token', message: '缺少 Authorization Bearer token' };
@@ -40,7 +41,7 @@ function getAuth(req: NextRequest): { ok: true; group: string } | { ok: false; s
     if (g !== 'vip' && g !== 'admin') {
       return { ok: false, status: 403, code: 'forbidden', message: '需要 admin / vip token' };
     }
-    return { ok: true, group: g };
+    return { ok: true, group: g, userId: Number(payload.id) || 0 };
   } catch {
     return { ok: false, status: 401, code: 'invalid_token', message: 'Token 无效或过期' };
   }
@@ -58,6 +59,8 @@ export async function GET(req: NextRequest) {
       { status: auth.status, headers: CORS_HEADERS }
     );
   }
+  // 2026-10-20: 全 API 点击计数 (fire-and-forget)
+  void recordClick(req, Number(auth.userId));
 
   const { searchParams } = new URL(req.url);
   const cat = searchParams.get('cat') || '全部';

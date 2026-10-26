@@ -33,7 +33,22 @@ const PUBLIC_PATHS = [
   '/terms',
   '/titles-verify',
   '/preview-login',
+  // 2026-10-22: /titles 是独立目录页 — 不需要登录, 只需要访问码 (用户拍板)
+  //   - middleware 已经做访问码门 (titles_2015 cookie), 这里加白名单避免 client-side 再踢去 /login
+  //   - 没访问码的匿名用户: middleware 会 302 到 /titles-verify, 到不了这里
+  '/titles',
 ];
+
+// 2026-10-22: /titles 访问码 cookie (跟 /titles-verify 页 + middleware 一致)
+const TITLES_ACCESS_COOKIE = 'titles_2015';
+
+function hasTitlesAccessCode(): boolean {
+  try {
+    return document.cookie.split(';').some(c => c.trim().startsWith(`${TITLES_ACCESS_COOKIE}=1`));
+  } catch {
+    return false;
+  }
+}
 
 // 2026-08-17: viewer 档位允许访问的页面 (其他都跳 /library)
 const VIEWER_ALLOWED_PATHS = [
@@ -44,6 +59,7 @@ const VIEWER_ALLOWED_PATHS = [
   '/user-credits',    // 积分
   '/activate',        // 兑换码激活 (lumen 兑换码)
   '/pending-approval', // 待审查看页
+  '/titles',          // 2026-10-22: 独立目录页, 有访问码就能看, 不该把 viewer 踢走
 ];
 
 function isPublicPath(pathname: string | null): boolean {

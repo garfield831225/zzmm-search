@@ -12,6 +12,7 @@ import { tmdbPoster, tmdbBackdrop, tmdbProfile, TMDB_FALLBACK } from '@/lib/tmdb
 import NavMenu from '@/components/NavMenu';
 import SearchBox from '@/components/SearchBox';
 import MobileNav from '@/components/MobileNav';
+import BasicClaimBanner from '@/components/BasicClaimBanner';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 const TMDB_IMAGE_FALLBACK = TMDB_FALLBACK;
@@ -20,6 +21,8 @@ const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频
 const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '夸克网盘', '磁力链接', 'ed2k链接'];
 const REGIONS = ['全部', '大陆', '欧美', '日韩', '港澳台'];
 const YEARS = ['全部', '2026', '2025', '2024', '2023', '2022', '2021', '2020', '2010-2019', '2000-2009'];
+// 2026-10-15: 影视专区第 5 行筛选 — 批配状态 (已批配 = TMDB 已匹配, 未匹配 = TMDB 没匹配上)
+const MATCH_STATUSES = ['全部', '已批配', '未匹配'];
 
 // 2026-08-02: 后端 admin/links DELETE 给主表 source 加 ' [deleted]' 后缀标记软删的链接
 //   (避免清 link 字段撞 xx_resources_link_name_unique)
@@ -115,6 +118,8 @@ export default function HomePage() {
   const [source, setSource] = useState('全部');
   const [region, setRegion] = useState('全部');
   const [year, setYear] = useState('全部');
+  // 2026-10-15: 影视专区 — 已批配 / 未匹配 筛选
+  const [matchStatus, setMatchStatus] = useState('全部');
   const [sort, setSort] = useState('release_date');
   const [pageSize, setPageSize] = useState(30);
   // 2026-07-20: dedupBy 控制是否按 tmdb_id 去重 ('tmdb_id' 默认去重 | 'id' 不去重看全部)
@@ -328,15 +333,15 @@ export default function HomePage() {
   }, []);
 
   // 用 ref 记录最新 state，在 effect 调用 fetchItems 之前同步最新值
-  const latestRef = useRef({ query, category, source, region, year, sort, pageSize, dedupBy });
-  latestRef.current = { query, category, source, region, year, sort, pageSize, dedupBy };
+  const latestRef = useRef({ query, category, source, region, year, matchStatus, sort, pageSize, dedupBy });
+  latestRef.current = { query, category, source, region, year, matchStatus, sort, pageSize, dedupBy };
 
   // 空 deps —— 永远同一函数引用，永远用 latestRef 读最新 state
   const fetchItems = useCallback(async (p?: number) => {
     const targetPage = p !== undefined ? p : 1;
     setPage(targetPage);
     setLoading(true);
-    const { query: q, category: cat, source: src, region: reg, year: yr, sort: s, pageSize: ps, dedupBy: db } = latestRef.current;
+    const { query: q, category: cat, source: src, region: reg, year: yr, matchStatus: ms, sort: s, pageSize: ps, dedupBy: db } = latestRef.current;
     try {
       const params = new URLSearchParams({ page: targetPage.toString(), pageSize: ps.toString() });
       if (q) params.set('q', q);
@@ -344,6 +349,8 @@ export default function HomePage() {
       if (src !== '全部') params.set('source', src);
       if (reg !== '全部') params.set('region', reg);
       if (yr !== '全部') params.set('year', yr);
+      // 2026-10-15: 影视专区 — 已批配 / 未匹配 筛选
+      if (ms !== '全部') params.set('matchStatus', ms);
       params.set('sort', s);
       // 2026-07-20: dedupBy 决定是否按 tmdb_id 去重
       params.set('dedupBy', db);
@@ -369,9 +376,9 @@ export default function HomePage() {
 
   // 先同步 ref 再调用，永远读最新 state
   useEffect(() => {
-    latestRef.current = { query, category, source, region, year, sort, pageSize, dedupBy };
+    latestRef.current = { query, category, source, region, year, matchStatus, sort, pageSize, dedupBy };
     fetchItems(1);
-  }, [category, source, region, year, sort, pageSize, dedupBy]); // eslint-line -- stable deps
+  }, [category, source, region, year, matchStatus, sort, pageSize, dedupBy]); // eslint-line -- stable deps
 
 
   useEffect(() => { fetchItems(1); }, [category, source, region, year, sort, pageSize, dedupBy]);
@@ -637,6 +644,13 @@ export default function HomePage() {
               </div>
             </div>
           )}
+          {/* 2026-10-15: basic 月度福利横幅 (领 1 天 vip) */}
+          {mounted && user && user.group === 'basic' && (
+            <div className="mt-3">
+              <BasicClaimBanner />
+            </div>
+          )}
+
           {/* 已登录但非 VIP - 引导开通 */}
           {mounted && user && !['vip', 'admin'].includes(user.group) && (
             <div className="mt-3 bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/30 rounded-xl p-3 flex items-center gap-3 flex-wrap">
@@ -694,12 +708,13 @@ export default function HomePage() {
 
         {/* 4. VIP 多网盘 - 2026-08-08 改: 之前叫 "VIP专区" 跟 lovemovie 子域名 (VIP 在线影视) 撞名, 实际是 VIP 才有的多网盘资源 (百度/阿里/夸克/磁力/ed2k) */}
         {/* 2026-08-09: linkMode 让卡片 onClick 直接开网盘链接, noPoster 让 Section 走 source 卡片 (无海报) */}
+        {/* 2026-10-15: "查看更多" 跳 /vip-zone 独立浏览页, 不再跳 /library */}
         <HomeSection
-          title="VIP多网盘"
+          title="VIP专区"
           titleEn="VIP MULTI-DRIVE"
           emoji="💎"
           accent="amber"
-          href="/library?section=vip"
+          href="/vip-zone"
           items={secVip}
           loading={secLoading}
           linkMode
@@ -746,13 +761,13 @@ export default function HomePage() {
         )}
       </div>
 
-      {/* 2026-08-07 P12: 已匹配资源模块 (从 header 挪下来的 4 行筛选 + SORT + 卡片列表) */}
+      {/* 2026-08-07 P12: 影视专区模块 (从 header 挪下来的 4 行筛选 + SORT + 卡片列表) */}
       <main className="max-w-7xl mx-auto px-4 py-6 relative">
         {/* 模块标题 */}
         <div className="flex items-center justify-between mb-4 px-2">
           <h2 className="text-base sm:text-lg font-bold text-cyan-300">
-            🗂️ 已匹配资源
-            <span className="ml-2 text-[10px] sm:text-xs text-white/40 font-normal tracking-wider uppercase">MATCHED RESOURCES</span>
+            🎬 影视专区
+            <span className="ml-2 text-[10px] sm:text-xs text-white/40 font-normal tracking-wider uppercase">MOVIE LIBRARY</span>
           </h2>
         </div>
 
@@ -796,6 +811,16 @@ export default function HomePage() {
                   : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{y}</button>
             ))}
           </div>
+          {/* 2026-10-15: 批配状态 (已批配 = TMDB 已匹配, 未匹配 = 没匹配上) */}
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+            <span className="text-[10px] text-white/30 self-center mr-0.5 shrink-0 tracking-wider">批配</span>
+            {MATCH_STATUSES.map((ms) => (
+              <button key={ms} onClick={() => setMatchStatus(ms)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${matchStatus === ms
+                  ? 'bg-gradient-to-r from-emerald-500/25 to-teal-500/25 text-white border border-emerald-400/40'
+                  : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{ms}</button>
+            ))}
+          </div>
         </div>
 
         {/* Sort & Size Bar - 2026-07-25 改: 玻璃态 + 紫粉激活 */}
@@ -811,6 +836,11 @@ export default function HomePage() {
                 className={`px-3 py-1 rounded-lg text-xs transition ${sort === 'added_time'
                   ? 'bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 text-white shadow-[0_0_8px_rgba(168,85,247,0.2)]'
                   : 'text-white/50 hover:text-white/85'}`}>📅 上架</button>
+              {/* 2026-10-15: todo 截图要求 SORT 3 按钮 (上映/上架/最惠), API 后端已支持 sort='rating' (vote_average_num DESC) */}
+              <button onClick={() => setSort('rating')}
+                className={`px-3 py-1 rounded-lg text-xs transition ${sort === 'rating'
+                  ? 'bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 text-white shadow-[0_0_8px_rgba(168,85,247,0.2)]'
+                  : 'text-white/50 hover:text-white/85'}`}>⭐ 最惠</button>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -1353,7 +1383,10 @@ export default function HomePage() {
                         ? selectedItem.tmdbLinks
                         : (selectedItem.links || []).map((l: any) => ({ ...l, resourceName: selectedItem.name, size: selectedItem.size, createdAt: '' }));
                       // 2026-08-16: payType=lumen/code 资源未解锁 → 隐藏链接区
-                      if (selectedItem.payType && selectedItem.payType !== 'free' && !selectedItem.unlocked) {
+                      // 2026-10-15: admin 永远 unlocked (不显示锁, 直接看 link)
+                      //   - 普通用户: payType=lumen/code && !unlocked → 锁
+                      //   - admin: 永远看到 link (不需要解锁, 也不需要付费)
+                      if (selectedItem.payType && selectedItem.payType !== 'free' && !selectedItem.unlocked && !isAdmin) {
                         return (
                           <div className="px-4 py-8 rounded-xl bg-gradient-to-br from-violet-500/10 to-fuchsia-500/5 border border-violet-500/20 text-center">
                             <div className="text-4xl mb-2">🔒</div>

@@ -22,18 +22,30 @@ interface BasicItem {
   resourceCount: number;
   accessLevel: string;
   category: string;
-  isShortDrama?: boolean;  // 2026-08-14: 短剧打标
+  isShortDrama?: boolean;
 }
 
-type Tab = 'all' | 'movie' | 'tv';
+// 2026-10-16 P12: 5 行筛选 + SORT 3 按钮 + Per Page (跟首页影视专区一致)
+const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频道', '综艺', '演唱会', '纪录片', '原盘', 'REMUX', '系列电影'];
+const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '夸克网盘', '磁力链接', 'ed2k链接'];
+const REGIONS = ['全部', '大陆', '欧美', '日韩', '港澳台'];
+const YEARS = ['全部', '2026', '2025', '2024', '2023', '2022', '2021', '2020', '2010-2019', '2000-2009'];
+const MATCH_STATUSES = ['全部', '已批配', '未匹配'];
 
 export default function BasicPage() {
-  // 2026-08-15: 鉴权 (替代不跑的 middleware) - 所有 hooks 提前, 早期 return 放最后
-  const [tab, setTab] = useState<Tab>('all');
+  const [category, setCategory] = useState('全部');
+  const [source, setSource] = useState('全部');
+  const [region, setRegion] = useState('全部');
+  const [year, setYear] = useState('全部');
+  const [matchStatus, setMatchStatus] = useState('全部');
+  const [sort, setSort] = useState<'release_date' | 'added_time' | 'rating'>('release_date');
+  const [pageSize, setPageSize] = useState(30);
+  const [page, setPage] = useState(1);
   const [items, setItems] = useState<BasicItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
   const pathname = usePathname();
   const hasLoadedRef = useRef(false);
   const { isReady } = useRequireAuth('/basic');
@@ -51,12 +63,19 @@ export default function BasicPage() {
       for (let i = 0; i < 3; i++) {
         if (cancelled) return;
         try {
-          // 2026-08-12 修: 不再带 Cache-Control: no-store + Pragma: no-cache 这俩 header
-          //   带这俩 header 会让 NAS nginx 卡死 (curl 5s+ 不返回, page 25s "加载中..." 不消失)
-          //   只用 cache: 'no-store' 就够了, 浏览器自动不缓存
-          const r = await fetch(`/api/basic?type=${tab}&pageSize=60&_t=${Date.now()}`, {
-            cache: 'no-store',
+          const params = new URLSearchParams({
+            category,
+            source,
+            region,
+            year,
+            matchStatus,
+            sort,
+            page: String(page),
+            pageSize: String(pageSize),
+            _t: String(Date.now()),
           });
+          if (query.trim()) params.set('q', query.trim());
+          const r = await fetch(`/api/basic?${params}`, { cache: 'no-store' });
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           const d = await r.json();
           if (cancelled) return;
@@ -81,7 +100,10 @@ export default function BasicPage() {
 
     fetchData();
     return () => { cancelled = true; };
-  }, [tab, pathname]);
+  }, [category, source, region, year, matchStatus, sort, pageSize, page, query, pathname]);
+
+  // 任意筛选变化 → 重置 page=1
+  const resetPage = () => setPage(1);
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] text-white">
@@ -90,28 +112,95 @@ export default function BasicPage() {
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/" className="text-white/60 hover:text-white text-sm">← 返回首页</Link>
-            <h1 className="text-lg font-bold">👑 泽泽妈 115 文档专区 (按上映时间近→远)</h1>
+            <h1 className="text-lg font-bold">👑 泽泽妈 115 文档专区</h1>
           </div>
-          <div className="text-xs text-white/40">共 {total} 部 · import_channel=zezhe</div>
+          <div className="text-xs text-white/40">共 {total.toLocaleString()} 部 · import_channel=zezhe</div>
         </div>
 
-        {/* Tabs */}
-        <div className="max-w-7xl mx-auto px-4 pb-3 flex gap-2">
-          {([
-            { k: 'all', n: `全部 (${total})` },
-            { k: 'movie', n: `电影` },
-            { k: 'tv', n: `剧集/动漫/综艺` },
-          ] as { k: Tab, n: string }[]).map(t => (
-            <button key={t.k}
-              onClick={() => setTab(t.k)}
-              className={`px-3 py-1.5 text-xs rounded-lg transition ${
-                tab === t.k
-                  ? 'bg-pink-600 text-white'
-                  : 'bg-white/5 text-white/60 hover:bg-white/10'
-              }`}>
-              {t.n}
-            </button>
-          ))}
+        {/* 5 行筛选 — 跟首页影视专区一致 */}
+        <div className="max-w-7xl mx-auto px-4 pb-3">
+          <div className="flex flex-col gap-1.5 p-2 rounded-2xl bg-white/[0.02] border border-white/[0.04] backdrop-blur-sm">
+            {/* 分类 */}
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+              {CATEGORIES.map((cat) => (
+                <button key={cat} onClick={() => { setCategory(cat); resetPage(); }}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition shrink-0 ${category === cat
+                    ? 'bg-gradient-to-r from-violet-500/25 to-fuchsia-500/25 text-white border border-violet-400/40 shadow-[0_0_12px_rgba(168,85,247,0.15)]'
+                    : 'bg-white/[0.03] text-white/55 hover:text-white/85 hover:bg-white/[0.06] border border-transparent'}`}>{cat}</button>
+              ))}
+            </div>
+            {/* 来源 */}
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+              {SOURCES.map((src) => (
+                <button key={src} onClick={() => { setSource(src); resetPage(); }}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${source === src
+                    ? 'bg-gradient-to-r from-pink-500/25 to-rose-500/25 text-white border border-pink-400/40'
+                    : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{src}</button>
+              ))}
+            </div>
+            {/* 地区 */}
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+              <span className="text-[10px] text-white/30 self-center mr-0.5 shrink-0 tracking-wider">地区</span>
+              {REGIONS.map((r) => (
+                <button key={r} onClick={() => { setRegion(r); resetPage(); }}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${region === r
+                    ? 'bg-gradient-to-r from-orange-500/25 to-amber-500/25 text-white border border-orange-400/40'
+                    : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{r}</button>
+              ))}
+            </div>
+            {/* 年份 */}
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+              <span className="text-[10px] text-white/30 self-center mr-0.5 shrink-0 tracking-wider">年份</span>
+              {YEARS.map((y) => (
+                <button key={y} onClick={() => { setYear(y); resetPage(); }}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${year === y
+                    ? 'bg-gradient-to-r from-cyan-500/25 to-teal-500/25 text-white border border-cyan-400/40'
+                    : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{y}</button>
+              ))}
+            </div>
+            {/* 批配状态 */}
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+              <span className="text-[10px] text-white/30 self-center mr-0.5 shrink-0 tracking-wider">批配</span>
+              {MATCH_STATUSES.map((ms) => (
+                <button key={ms} onClick={() => { setMatchStatus(ms); resetPage(); }}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${matchStatus === ms
+                    ? 'bg-gradient-to-r from-emerald-500/25 to-teal-500/25 text-white border border-emerald-400/40'
+                    : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{ms}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Sort + Per Page */}
+        <div className="max-w-7xl mx-auto px-4 pb-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-white/40 tracking-wider uppercase">Sort</span>
+            <div className="flex gap-1 p-1 rounded-xl bg-white/[0.02] border border-white/[0.05]">
+              <button onClick={() => { setSort('release_date'); resetPage(); }}
+                className={`px-3 py-1 rounded-lg text-xs transition ${sort === 'release_date'
+                  ? 'bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 text-white shadow-[0_0_8px_rgba(168,85,247,0.2)]'
+                  : 'text-white/50 hover:text-white/85'}`}>🎬 上映</button>
+              <button onClick={() => { setSort('added_time'); resetPage(); }}
+                className={`px-3 py-1 rounded-lg text-xs transition ${sort === 'added_time'
+                  ? 'bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 text-white shadow-[0_0_8px_rgba(168,85,247,0.2)]'
+                  : 'text-white/50 hover:text-white/85'}`}>📅 上架</button>
+              <button onClick={() => { setSort('rating'); resetPage(); }}
+                className={`px-3 py-1 rounded-lg text-xs transition ${sort === 'rating'
+                  ? 'bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 text-white shadow-[0_0_8px_rgba(168,85,247,0.2)]'
+                  : 'text-white/50 hover:text-white/85'}`}>⭐ 最惠</button>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-white/40 hidden sm:inline tracking-wider uppercase">Per Page</span>
+            <div className="flex gap-1 p-1 rounded-xl bg-white/[0.02] border border-white/[0.05]">
+              {[30, 90, 150].map((s) => (
+                <button key={s} onClick={() => { setPageSize(s); resetPage(); }}
+                  className={`px-3 py-1 rounded-lg text-xs transition ${pageSize === s
+                    ? 'bg-gradient-to-r from-pink-500/30 to-rose-500/30 text-white shadow-[0_0_8px_rgba(236,72,153,0.2)]'
+                    : 'text-white/50 hover:text-white/85'}`}>{s}</button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -122,15 +211,34 @@ export default function BasicPage() {
         ) : error && items.length === 0 ? (
           <div className="text-center text-red-400 py-16">
             <div>❌ 加载失败: {error}</div>
-            <button onClick={() => setTab(tab)} className="mt-3 px-4 py-1.5 bg-pink-600 rounded text-sm">重试</button>
+            <button onClick={() => { setCategory(category); setPage(page); }} className="mt-3 px-4 py-1.5 bg-pink-600 rounded text-sm">重试</button>
           </div>
         ) : items.length === 0 ? (
-          <div className="text-center text-white/40 py-16">暂无数据</div>
+          <div className="text-center text-white/40 py-16">暂无数据 · 当前筛选下没有结果</div>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-2">
             {items.map(item => (
               <BasicCard key={`${item.tmdbType}-${item.tmdbId}`} item={item} />
             ))}
+          </div>
+        )}
+
+        {/* 分页 */}
+        {total > pageSize && (
+          <div className="flex justify-center items-center gap-2 mt-6">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="px-4 py-2 bg-white/5 rounded text-sm disabled:opacity-30 hover:bg-white/10 transition"
+            >上一页</button>
+            <span className="px-4 py-2 text-sm text-white/60">
+              第 {page} 页 · 共 {Math.ceil(total / pageSize)} 页
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(Math.ceil(total / pageSize), p + 1))}
+              disabled={page >= Math.ceil(total / pageSize)}
+              className="px-4 py-2 bg-white/5 rounded text-sm disabled:opacity-30 hover:bg-white/10 transition"
+            >下一页</button>
           </div>
         )}
 
@@ -153,11 +261,9 @@ export default function BasicPage() {
 function BasicCard({ item }: { item: BasicItem }) {
   const router = useRouter();
   const onClick = () => {
-    // 跳详情页 (movie 跟 tv 都走 /tmdb/[type]/[id])
     if (item.tmdbType === 'movie' || item.tmdbType === 'tv') {
       router.push(`/tmdb/${item.tmdbType}/${item.tmdbId}`);
     } else {
-      // 兜底跳资源 id
       router.push(`/library?id=${item.resourceId}`);
     }
   };
@@ -167,7 +273,6 @@ function BasicCard({ item }: { item: BasicItem }) {
       onClick={onClick}
       className="group cursor-pointer relative overflow-hidden rounded-md bg-white/5 hover:bg-white/10 transition"
     >
-      {/* Poster */}
       <div className="aspect-[2/3] bg-gradient-to-br from-pink-900/30 to-violet-900/30 relative">
         {item.posterUrl ? (
           <img
@@ -181,7 +286,6 @@ function BasicCard({ item }: { item: BasicItem }) {
           <div className="w-full h-full flex items-center justify-center text-white/20 text-2xl">🎬</div>
         )}
 
-        {/* 角标: 类型 + 多网盘 */}
         <div className="absolute top-1 left-1 flex flex-col gap-0.5">
           {item.tmdbType === 'tv' ? (
             <span className="px-1 py-0.5 bg-cyan-600/90 text-[9px] rounded">剧集</span>
@@ -196,13 +300,11 @@ function BasicCard({ item }: { item: BasicItem }) {
           {item.accessLevel === 'basic' && (
             <span className="px-1 py-0.5 bg-amber-500/90 text-black text-[9px] rounded">👑 泽泽妈</span>
           )}
-          {/* 2026-08-14: 短剧打标 - 粉色 chip, 跟 Section.tsx 风格对齐 */}
           {item.isShortDrama && (
             <span className="px-1 py-0.5 bg-pink-500/85 text-white text-[9px] rounded font-medium">🎬 短剧</span>
           )}
         </div>
 
-        {/* 评分 */}
         {item.voteAverage && item.voteAverage > 0 && (
           <div className="absolute top-1 right-1 px-1 py-0.5 bg-black/70 text-amber-400 text-[9px] rounded">
             ⭐ {item.voteAverage.toFixed(1)}
@@ -210,7 +312,6 @@ function BasicCard({ item }: { item: BasicItem }) {
         )}
       </div>
 
-      {/* Info */}
       <div className="p-1.5">
         <div className="text-[11px] font-semibold truncate" title={item.title}>{item.title}</div>
         <div className="text-[9px] text-white/40 mt-0.5 flex items-center gap-1">

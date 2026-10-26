@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
+import { recordClick } from '@/lib/track-click';  // 2026-10-20 异常用户登录: 全 API 点击计数
 
 // 2026-08-13: 公共 API (moviezone + 子站) - 加 CORS 头
 const CORS_HEADERS = {
@@ -117,6 +118,8 @@ export async function GET(request: NextRequest) {
     const sheet = searchParams.get('sheet') || '';
     const zone = searchParams.get('zone') || 'film';
     const isLibraryZone = zone === 'library';
+    // 2026-10-15: 影视专区第 5 行筛选 — 已批配 (匹配) / 未匹配 (TMDB 匹配状态)
+    const matchStatus = searchParams.get('matchStatus') || '全部';
 
     // ─── WHERE clauses (用 sql(string, values) 形式, neon 接受 raw 字符串 + 参) ───
     // 2026-07-20: 重构 - 修 Vercel 上 ${var} 字符串拼接静默返 0 的 Neon 兼容层 bug.
@@ -202,6 +205,8 @@ export async function GET(request: NextRequest) {
         userGroup = (payload.group || 'user').toLowerCase();
         const userRow = await sql`SELECT user_group FROM xx_users WHERE id = ${userId} LIMIT 1`;
         if (userRow[0]?.user_group) userGroup = String(userRow[0].user_group).toLowerCase();
+        // 2026-10-20: 搜索全 API 点击计数 (fire-and-forget)
+        void recordClick(request, Number(payload.id));
       }
     } catch { /* 未登录或无效 token → userGroup='user' */ }
 
@@ -227,6 +232,16 @@ export async function GET(request: NextRequest) {
 
     if (sheet) {
       addCond('r.doc_sheet = $1', sheet);
+    }
+
+    // 2026-10-15: 影视专区 — 已批配/未匹配 筛选
+    //   - '已批配' = tmdb_id 已匹配 (10+ 位数字, 在 xx_tmdb_cache)
+    //   - '未匹配' = tmdb_id 空/缺/无效
+    //   - 跟 has_tmdb 表达式保持一致 (子查询 line 281)
+    if (matchStatus === '已批配') {
+      addCond("r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000");
+    } else if (matchStatus === '未匹配') {
+      addCond("NOT (r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000)");
     }
 
     const whereSQL = conds.length > 0 ? 'WHERE ' + conds.join(' AND ') : '';

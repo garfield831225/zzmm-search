@@ -134,7 +134,8 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// DELETE 删除 (清空未使用的) / 删除单个
+// DELETE 删除 (清空未使用的) / 删除单个 / 清空已使用的
+// 2026-10-22 fix: UPDATE/DELETE 必须加 RETURNING id, 否则 neon-shim 返回空 rows → r.length 永远 0
 export async function DELETE(req: NextRequest) {
   const a = authAdmin(req);
   if (a.error) return NextResponse.json({ error: a.error }, { status: a.status });
@@ -145,16 +146,24 @@ export async function DELETE(req: NextRequest) {
     const id = parseInt(searchParams.get('id') || '0', 10);
     const action = searchParams.get('action') || 'one';
     if (action === 'all_unused') {
-      const r = await sql`DELETE FROM xx_invite_codes WHERE is_used = false`;
+      const r = await sql`DELETE FROM xx_invite_codes WHERE is_used = false RETURNING id`;
+      return NextResponse.json({ success: true, deleted: r.length });
+    }
+    if (action === 'all_used') {
+      // 2026-10-22: 前端"清理已用"按钮之前误传 all_unused, 导致点了会删未使用的 (行为反了)
+      const r = await sql`DELETE FROM xx_invite_codes WHERE is_used = true RETURNING id`;
       return NextResponse.json({ success: true, deleted: r.length });
     }
     if (action === 'all_expired') {
-      const r = await sql`DELETE FROM xx_invite_codes WHERE is_used = false AND expires_at IS NOT NULL AND expires_at < NOW()`;
+      const r = await sql`DELETE FROM xx_invite_codes WHERE is_used = false AND expires_at IS NOT NULL AND expires_at < NOW() RETURNING id`;
       return NextResponse.json({ success: true, deleted: r.length });
     }
     if (!id) return NextResponse.json({ error: '需要 id 或 action=all_unused' }, { status: 400 });
-    await sql`DELETE FROM xx_invite_codes WHERE id = ${id} AND is_used = false`;
-    return NextResponse.json({ success: true });
+    const r = await sql`DELETE FROM xx_invite_codes WHERE id = ${id} AND is_used = false RETURNING id`;
+    if (r.length === 0) {
+      return NextResponse.json({ error: '邀请码不存在或已使用' }, { status: 404 });
+    }
+    return NextResponse.json({ success: true, deleted: r.length });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
@@ -180,10 +189,12 @@ export async function PATCH(req: NextRequest) {
     if (Array.isArray(body.ids) && body.ids.length > 0) {
       const ids = body.ids.map((x: any) => parseInt(String(x), 10)).filter((n: number) => n > 0);
       if (ids.length === 0) return NextResponse.json({ error: 'ids 数组为空' }, { status: 400 });
+      // 2026-10-22 fix: 必须 RETURNING id, 否则 r.length 永远 0 (UPDATE 不返 rows)
       const r = await sql`
         UPDATE xx_invite_codes
         SET expires_at = ${newExpiresAt}
         WHERE id = ANY(${ids}::int[]) AND is_used = false
+        RETURNING id
       `;
       return NextResponse.json({ success: true, updated: r.length, expires_at: newExpiresAt });
     }
@@ -191,15 +202,17 @@ export async function PATCH(req: NextRequest) {
     // 单个 (id)
     const id = parseInt(String(body.id || 0), 10);
     if (!id) return NextResponse.json({ error: '需要 id 或 ids' }, { status: 400 });
+    // 2026-10-22 fix: 同上, 加 RETURNING id 才能判断是否真的更新到行
     const r = await sql`
       UPDATE xx_invite_codes
       SET expires_at = ${newExpiresAt}
       WHERE id = ${id} AND is_used = false
+      RETURNING id
     `;
     if (r.length === 0) {
       return NextResponse.json({ error: '邀请码不存在或已使用' }, { status: 404 });
     }
-    return NextResponse.json({ success: true, updated: 1, expires_at: newExpiresAt });
+    return NextResponse.json({ success: true, updated: r.length, expires_at: newExpiresAt });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

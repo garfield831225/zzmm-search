@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
 import { parseNeonTime } from '@/lib/time';
+import { recordClick } from '@/lib/track-click';  // 2026-10-20 异常用户登录设计: 全 API 点击计数
 
 export const dynamic = 'force-dynamic';
 
@@ -31,6 +32,8 @@ export async function GET(req: NextRequest) {
     }
 
     const payload = jwt.verify(token, JWT_SECRET) as any;
+    // 2026-10-20: fire-and-forget click 计数 (心跳 API 也算, 防脚本挂机刷登录态)
+    void recordClick(req, Number(payload.id));
 
     // sql 已 module-level 用 neon() + fetchOptions: { cache: 'no-store' } (修 stale)
     // 2026-08-01: ::text 强转, 避免 neon() SDK 返 raw Date 自身有 tz bug (前端 new Date() 少 8h)

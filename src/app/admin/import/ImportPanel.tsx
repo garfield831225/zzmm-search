@@ -31,6 +31,7 @@ export default function ImportPanel() {
     if (link.includes('aliyundrive.com')) return 'aliyun';
     if (link.includes('123pan.com')) return '123';
     if (link.includes('cloud.189.cn')) return 'tianyi';
+    if (link.includes('guangyapan.com')) return 'guangya';
     if (link.includes('magnet:')) return 'magnet';
     if (link.includes('ed2k://')) return 'ed2k';
     if (link.includes('thunder:') || link.includes('xunlei')) return 'thunder';

@@ -1,11 +1,12 @@
 // 2026-08-05: 积分兑流明 API
-//   - POST /api/points/redeem { amount: 10 }
-//   - 比例: 10 积分 = 1 流明
+//   - POST /api/points/redeem { amount: 20 }
+//   - 比例: 20 积分 = 1 流明
 //   - 流程:
 //     1) 鉴权
 //     2) 查用户积分余额
-//     3) 计算流明: amount 积分 → amount/10 流明 (向下取整)
+//     3) 计算流明: amount 积分 → amount/20 流明
 //     4) 扣积分 + 加流明 + 写 2 条流水
+//   - 2026-10-15: 比例从 10:1 改为 20:1, 取消单次 10000 积分上限, 不设频率限制
 //   - admin 也能兑换
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -38,7 +39,7 @@ async function getUser(request: NextRequest): Promise<{ id: number; group: strin
   return null;
 }
 
-const POINTS_PER_LUMEN = 10;
+const POINTS_PER_LUMEN = 20;  // 2026-10-15: 10 → 20
 
 export async function POST(request: NextRequest) {
   const user = await getUser(request);
@@ -60,9 +61,7 @@ export async function POST(request: NextRequest) {
   if (amount % POINTS_PER_LUMEN !== 0) {
     return NextResponse.json({ error: `必须是 ${POINTS_PER_LUMEN} 的整数倍` }, { status: 400 });
   }
-  if (amount > 10000) {
-    return NextResponse.json({ error: '单次最多兑换 10000 积分 (1000 流明)' }, { status: 400 });
-  }
+  // 2026-10-15: 取消单次 10000 积分上限, 无上限不限频率
   const lumenGet = Math.floor(amount / POINTS_PER_LUMEN);
 
   try {

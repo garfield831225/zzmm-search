@@ -20,6 +20,7 @@ const MODES: { key: ImportMode; label: string; icon: string; desc: string }[] = 
 
 // 泽泽妈妈 sheet → category 映射
 // 导航首页 = 跳过，4K原盘+原盘资源 = 合并为原盘
+// 独立付费 = 单独付费区（pay_type=code，access_level=code）
 const ZZMM_SHEET_MAP: Record<string, string | null> = {
   '导航首页': null, // 跳过，非资源分类
   '电影': '电影', '外语电影': '电影', '华语电影': '电影', '动画电影': '电影',
@@ -36,6 +37,7 @@ const ZZMM_SHEET_MAP: Record<string, string | null> = {
   '少儿频道': '少儿频道',
   '每日更新': '连载',
   '合集': '合集',
+  '独立付费': '独立付费', // 2026-10-18 重点：自动落到 /library 单独付费区 (pay_type=code, access_level=code)
 };
 
 export default function ImportPage() {
@@ -181,7 +183,13 @@ ${'magnet:?'}xt=urn:btih:ABCDEF1234567890
         // 2026-07-27: 把 sheet 名原样带入 doc_sheet (不再合并, 21-sheet 库每个 sheet 都是独立分类)
         // catalog 显示时按 doc_sheet 分组 (用户能看到"国产剧"/"欧美剧"/"外语电影"等具体按钮)
         // ZZMM_SHEET_MAP 只用于推 category, 不动 doc_sheet
-        items.push({ name, link, link_code, source: '', category, size, doc_sheet: sheetName });
+        // 2026-10-18 重点: '独立付费' sheet → pay_type='code' + access_level='code', 自动落到 /library 单独付费区
+        const isCodeSheet = sheetName === '独立付费';
+        items.push({
+          name, link, link_code, source: '', category, size, doc_sheet: sheetName,
+          pay_type: isCodeSheet ? 'code' : undefined,
+          access_level: isCodeSheet ? 'code' : undefined,
+        });
       });
     });
     return items;

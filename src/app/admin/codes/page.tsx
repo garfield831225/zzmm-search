@@ -35,12 +35,13 @@ interface BatchStat {
   used: number;
 }
 
+// 2026-10-15: 价格重构 (修正版, vip_forever 直接变永久 SVIP, 不要再加一档)
 const VIP_TEMPLATES = [
   { plan: 'vip_trial',   label: '试用 1 天', emoji: '⏰', price: 0,   color: 'from-stone-500 to-slate-600' },
-  { plan: 'vip_30d',     label: '30 天',   emoji: '🎫', price: 12,  color: 'from-sky-500 to-blue-600' },
-  { plan: 'vip_90d',     label: '季卡',    emoji: '🎟️', price: 58,  color: 'from-violet-500 to-purple-600' },
-  { plan: 'vip_365d',    label: '年卡',    emoji: '🎁', price: 98,  color: 'from-pink-500 to-rose-600' },
-  { plan: 'vip_forever', label: '永久',    emoji: '👑', price: 198, color: 'from-amber-500 to-orange-600' },
+  { plan: 'vip_30d',     label: '30 天',   emoji: '🎫', price: 15,  color: 'from-sky-500 to-blue-600' },
+  { plan: 'vip_90d',     label: '季卡',    emoji: '🎟️', price: 40,  color: 'from-violet-500 to-purple-600' },
+  { plan: 'vip_365d',    label: '年卡',    emoji: '🎁', price: 150, color: 'from-pink-500 to-rose-600' },
+  { plan: 'vip_forever', label: '永久 SVIP', emoji: '👑', price: 388, color: 'from-amber-500 via-orange-500 to-rose-500' },
   { plan: 'unlock',      label: '单资源',  emoji: '🔓', price: 0,   color: 'from-emerald-500 to-teal-600' },
   { plan: 'lumen',       label: '流明',    emoji: '💎', price: 0,   color: 'from-fuchsia-500 to-pink-600' },
 ];
@@ -111,9 +112,9 @@ export default function CodesPage() {
       if (fStatus) params.set('status', fStatus);
       if (fSent) params.set('sent', fSent);
       // fCodeType 区分: vip_30d/90d/365d/forever/trial 走 plan_id, 其他 (vip/lumen/unlock) 走 code_type
-      // 2026-08-08: vip_90d 替代 vip_180d (半年 -> 季卡 90天, plan_id 保留 VIP-180D 兼容老码)
+      // 2026-10-15: vip_forever plan_id 仍是 'VIP-FOREVER', 但 user_group='svip' (永久变 SVIP)
       const planMap: Record<string, string> = {
-        vip_trial: 'VIP-TRIAL-1D', vip_30d: 'VIP-30D', vip_90d: 'VIP-180D', vip_365d: 'VIP-365D', vip_forever: 'VIP-FOREVER',
+        vip_trial: 'VIP-TRIAL-1D', vip_30d: 'VIP-30D', vip_90d: 'VIP-90D', vip_365d: 'VIP-365D', vip_forever: 'VIP-FOREVER',
       };
       if (fCodeType) {
         if (planMap[fCodeType]) params.set('plan_id', planMap[fCodeType]);
@@ -569,7 +570,7 @@ export default function CodesPage() {
               <option value="vip_30d">🎫 VIP 30 天</option>
               <option value="vip_90d">🎟️ VIP 季卡 (90天)</option>
               <option value="vip_365d">🎁 VIP 年卡</option>
-              <option value="vip_forever">👑 VIP 永久</option>
+              <option value="vip_forever">👑 永久 SVIP</option>
               <option value="unlock">🔓 单资源</option>
               <option value="lumen">💎 流明</option>
             </select>

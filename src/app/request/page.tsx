@@ -35,7 +35,7 @@ export default function RequestPage() {
   // 积分兑流明
   const [points, setPoints] = useState(0);
   const [lumen, setLumen] = useState(0);
-  const [redeemAmount, setRedeemAmount] = useState(10);
+  const [redeemAmount, setRedeemAmount] = useState(20);
   const [redeemMsg, setRedeemMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [redeeming, setRedeeming] = useState(false);
 
@@ -265,21 +265,21 @@ export default function RequestPage() {
             </div>
 
             <div className="text-sm text-white/60 text-center mb-4">
-              兑换比例: <span className="text-cyan-300 font-bold">10 积分 = 1 流明</span>
+              兑换比例: <span className="text-cyan-300 font-bold">20 积分 = 1 流明</span>
             </div>
 
             <div className="mb-4">
-              <label className="text-xs text-white/60">兑换积分 (10 的倍数)</label>
+              <label className="text-xs text-white/60">兑换积分 (20 的倍数)</label>
               <input
                 type="number"
-                min="10"
-                step="10"
+                min="20"
+                step="20"
                 value={redeemAmount}
                 onChange={e => setRedeemAmount(parseInt(e.target.value) || 0)}
                 className="w-full mt-1 px-3 py-2 bg-black/40 border border-white/10 rounded text-sm text-white"
               />
               <div className="text-[10px] text-white/40 mt-1 text-right">
-                预计获得 <span className="text-cyan-300 font-bold">{Math.floor(redeemAmount / 10)}</span> 流明
+                预计获得 <span className="text-cyan-300 font-bold">{Math.floor(redeemAmount / 20)}</span> 流明
               </div>
             </div>
 
@@ -291,10 +291,10 @@ export default function RequestPage() {
 
             <button
               onClick={doRedeem}
-              disabled={redeeming || redeemAmount < 10 || redeemAmount % 10 !== 0 || points < redeemAmount}
+              disabled={redeeming || redeemAmount < 20 || redeemAmount % 20 !== 0 || points < redeemAmount}
               className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 rounded font-semibold text-sm"
             >
-              {redeeming ? '兑换中...' : `兑换 ${redeemAmount} 积分 → ${Math.floor(redeemAmount / 10)} 流明`}
+              {redeeming ? '兑换中...' : `兑换 ${redeemAmount} 积分 → ${Math.floor(redeemAmount / 20)} 流明`}
             </button>
           </div>
         )}

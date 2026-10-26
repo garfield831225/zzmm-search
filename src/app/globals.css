@@ -7,6 +7,15 @@ body {
   padding: 0;
 }
 
+/* 2026-10-22: 移动端横向溢出兜底
+   根因: 某些 flex 行 (验证码 input + img) 固定宽度超出 375px 视口 → 整页能左右滑
+   修法: 容器允许收缩 (min-width:0) + 页面级 overflow-x 兜底
+   注意: 元素级 overflow-x:auto 的横向滚动容器 (分类 chips) 不受影响 */
+html, body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }

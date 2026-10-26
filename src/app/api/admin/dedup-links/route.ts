@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
           SELECT url, COUNT(*) as cnt
           FROM xx_resource_links
           WHERE status = 'active' AND url IS NOT NULL AND url != ''
-            AND source IN ('115', 'baidu', 'quark', 'aliyun', 'xunlei', '123', 'uc', 'tianyi', 'yidong', 'magnet', 'ed2k')
+            AND source IN ('115', 'baidu', 'quark', 'aliyun', 'xunlei', '123', 'uc', 'tianyi', 'yidong', 'magnet', 'ed2k', 'guangya')
           GROUP BY url
           HAVING COUNT(*) > 1
         )
@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
                array_agg(DISTINCT resource_id) as sample_resources
         FROM xx_resource_links
         WHERE status = 'active' AND url IS NOT NULL AND url != ''
-          AND source IN ('115', 'baidu', 'quark', 'aliyun', 'xunlei', '123', 'uc', 'tianyi', 'yidong', 'magnet', 'ed2k')
+          AND source IN ('115', 'baidu', 'quark', 'aliyun', 'xunlei', '123', 'uc', 'tianyi', 'yidong', 'magnet', 'ed2k', 'guangya')
         GROUP BY url, source
         HAVING COUNT(*) > 1
         ORDER BY cnt DESC
@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
 
     try {
       const sourceFilter = onlyReal
-        ? "AND source IN ('115', 'baidu', 'quark', 'aliyun', 'xunlei', '123', 'uc', 'tianyi', 'yidong', 'magnet', 'ed2k')"
+        ? "AND source IN ('115', 'baidu', 'quark', 'aliyun', 'xunlei', '123', 'uc', 'tianyi', 'yidong', 'magnet', 'ed2k', 'guangya')"
         : "";
 
       // 1. 找一批重复 url

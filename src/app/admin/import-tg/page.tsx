@@ -8,6 +8,7 @@ interface BatchResult {
   total_messages: number;
   l1_candidates: number;
   l1_inserted: number;
+  l1_updated: number;
   l1_skipped: number;
   l1_failed: number;
   l2_candidates: number;
@@ -49,12 +50,13 @@ const CHANNEL_OPTIONS = [
   { value: 'tg_other', label: 'TG 其他', icon: '📦' },
 ];
 
-// 2026-08-17 改: 1MB 全量 436 条 1 次 POST 触发 Cloudflare 524 (100s timeout)
-//   实测: 10 条小批量 OK (200ms), 全量 436 条 1MB 被 CF 100s 切断
-//   拆小到 200KB 让单批 < 30s, 给 CF 留充足 buffer
-//   200KB × 1MB 文件 = 5 批, 每批 10-30s, 总 50-150s 全跑完
-//   之前 500KB 太小, 现在 200KB 更安全 (实测 CF timeout 100s, Neon RPS 限流 5/s)
-const MAX_BATCH_BYTES = 200 * 1024;
+// 2026-10-19 改: 切批按 messages 数 500 条/批 (用户要求)
+//   47.7MB 文件 (30476 messages) → 61 批
+//   server CONCURRENCY=8 + Neon HTTP proxy max=10, 单批 500 candidates ≈ 30-90s
+//   AbortController 180s 给 buffer
+//   注: 之前 512KB bytes 切批导致批内 messages 数 1300+ (1223 candidates) 单批 200s+ 超时
+const MAX_BATCH_MESSAGES = 500;
+const MAX_BATCH_BYTES = 2 * 1024 * 1024;  // 兜底 2MB 防止单消息过大 (3MB 文件单条)
 
 export default function ImportTgPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -137,7 +139,7 @@ export default function ImportTgPage() {
       addLog(`✅ 共 ${messages.length} 条消息, 切批中...`);
       await new Promise(r => setTimeout(r, 50));
 
-      // 按字节切 — 每批 JSON 字符串 < MAX_BATCH_BYTES
+      // 按 messages 数 500/批 (用户要求) + bytes 兜底 2MB
       const baseOverhead = JSON.stringify({ messages: [], channelHint }).length + 5;  // 头部 + 尾部
       const batches: { name: string; jsonStr: string; count: number; bytes: number }[] = [];
       let current: any[] = [];
@@ -147,7 +149,10 @@ export default function ImportTgPage() {
         const msgJson = JSON.stringify(messages[i]);
         const msgBytes = msgJson.length + 1;  // +1 逗号
 
-        if (currentBytes + msgBytes > MAX_BATCH_BYTES && current.length > 0) {
+        // 触发切批条件: messages 数 ≥ 500 OR bytes ≥ 2MB
+        const hitMsgLimit = current.length >= MAX_BATCH_MESSAGES;
+        const hitByteLimit = currentBytes + msgBytes > MAX_BATCH_BYTES;
+        if ((hitMsgLimit || hitByteLimit) && current.length > 0) {
           const jsonStr = JSON.stringify({ messages: current, channelHint });
           batches.push({
             name: `批 ${batches.length + 1} (${batches.reduce((a, b) => a + b.count, 0) + 1}-${batches.reduce((a, b) => a + b.count, 0) + current.length})`,
@@ -336,12 +341,10 @@ export default function ImportTgPage() {
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
           const start = Date.now();
-          // 2026-07-26 改: 90s abort 早于 CF tunnel 524 timeout (100s)
-          // route.ts maxDuration=300, 但 CF 等 100s 就断开 → 524 HTML 错误
-          // 90s abort 让 client 主动断, 返 AbortError, 提示用户重试更小批
-          // 2026-08-12 改: 150s abort (Neon RPS 限流 + 288 条 2 并发实际 70-90s, 150s 给 buffer)
+          // 2026-10-19 改: 150s → 180s (500 candidates × 3 SQL / 10 RPS ≈ 150s 临界, 180s buffer)
+          // 之前 150s: 1300 candidates 单批 200s+ 超时; 现在 500 candidates + CONCURRENCY=8 在 60-120s 内完成
           const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 150_000);
+          const timer = setTimeout(() => ctrl.abort(), 180_000);
           let r: Response;
           try {
             r = await fetch('/api/admin/import/tg-json', {
@@ -368,7 +371,10 @@ export default function ImportTgPage() {
           const s = data.summary || {};
           const l1 = s.l1 || {};
           const l2 = s.l2 || {};
-          addLog(`✅ [${i + 1}] L1入库 ${l1.inserted}/${l1.candidates}, L2入库 ${l2.inserted}/${l2.candidates} (队列+${l2.queue_added || 0}) ${duration}ms${attempt > 1 ? ` (第 ${attempt} 次成功)` : ''}`);
+          // 2026-10-26: 拆成 新增/更新/跳过 三个计数 (原来 DO UPDATE 也算 inserted, 看不出真实去重情况)
+          const l1Upd = l1.updated || 0;
+          const l1Skip = l1.skipped || 0;
+          addLog(`✅ [${i + 1}] L1 新增 ${l1.inserted} / 更新 ${l1Upd} / 跳过 ${l1Skip} (共 ${l1.candidates}), L2入库 ${l2.inserted}/${l2.candidates} (队列+${l2.queue_added || 0}) ${duration}ms${attempt > 1 ? ` (第 ${attempt} 次成功)` : ''}`);
           if (data.by_category) {
             const top5 = Object.entries(data.by_category).slice(0, 5).map(([k, v]) => `${k}:${v}`).join(', ');
             addLog(`   📊 分类: ${top5}`);
@@ -382,7 +388,8 @@ export default function ImportTgPage() {
             total_messages: s.total_messages || 0,
             l1_candidates: l1.candidates || 0,
             l1_inserted: l1.inserted || 0,
-            l1_skipped: l1.skipped || 0,
+            l1_updated: l1Upd,
+            l1_skipped: l1Skip,
             l1_failed: l1.failed || 0,
             l2_candidates: l2.candidates || 0,
             l2_inserted: l2.inserted || 0,
@@ -419,7 +426,7 @@ export default function ImportTgPage() {
         allResults.push({
           batch: i + 1,
           total_messages: batch.count,
-          l1_candidates: 0, l1_inserted: 0, l1_skipped: 0, l1_failed: 0,
+          l1_candidates: 0, l1_inserted: 0, l1_updated: 0, l1_skipped: 0, l1_failed: 0,
           l2_candidates: 0, l2_inserted: 0, l2_queue_added: 0, l2_skipped: 0, l2_failed: 0,
           by_category: {}, by_source: {}, duration_ms: 0, file_size_mb: 0,
           errors: [e.message?.slice(0, 200) || 'failed after 3 retries'],
@@ -433,9 +440,10 @@ export default function ImportTgPage() {
     setUploading(false);
     addLog(`\n🎉 全部完成! 共 ${allResults.length} 批次`);
     const totalL1 = allResults.reduce((a, r) => a + r.l1_inserted, 0);
+    const totalL1U = allResults.reduce((a, r) => a + (r.l1_updated || 0), 0);
     const totalL2 = allResults.reduce((a, r) => a + r.l2_inserted, 0);
     const totalQ = allResults.reduce((a, r) => a + r.l2_queue_added, 0);
-    addLog(`📊 L1 入库: ${totalL1}, L2 入库: ${totalL2}, L3 队列新增: ${totalQ}`);
+    addLog(`📊 L1 新增 ${totalL1} / 更新 ${totalL1U} (同链接已去重), L2 入库: ${totalL2}, L3 队列新增: ${totalQ}`);
 
     // 刷新 L3 状态
     setTimeout(() => fetchL3Status(), 2000);
@@ -585,7 +593,7 @@ export default function ImportTgPage() {
               <div className="font-medium">{file.name}</div>
               <div className="text-sm text-white/40 mt-1">{(file.size / 1024 / 1024).toFixed(2)} MB</div>
               {splitPayloads.length > 0 && (
-                <div className="mt-3 text-violet-300 text-sm">✂️ 已切成 {splitPayloads.length} 批 (每批 ≤ 1MB, 避开 60s 超时)</div>
+                <div className="mt-3 text-violet-300 text-sm">✂️ 已切成 {splitPayloads.length} 批 (每批 ≤ 500 条 / 2MB, 单批 60-120s)</div>
               )}
               <div className="mt-3 flex gap-2 justify-center">
                 <button
@@ -613,7 +621,7 @@ export default function ImportTgPage() {
               </div>
               <div className="text-sm text-white/40 mt-2">
                 {importMode === 'json'
-                  ? '支持任意大小, 自动按 3.5MB/批 切片'
+                  ? '支持任意大小, 自动按 500 条/批 切片 (单批 60-120s)'
                   : '支持 .xlsx .xls .csv, 自动识别名称/链接/提取码列'}
               </div>
             </div>

@@ -3,12 +3,18 @@ import type { NextRequest } from 'next/server';
 import { jwtVerify } from 'jose';  // 2026-07-24: 改用 jose 库, Edge Runtime 友好
 import { isFutureTime } from '@/lib/time';  // 2026-08-12: VIP/basic 过期实时踢
 
-const JWT_SECRET_RAW = process.env.JWT_SECRET || 'cLWhs2015';
+// 2026-10-14: Edge Runtime 不读 .env.production, 必须 hardcode 真秘 (跟 .env.production + login route sign 一致)
+const JWT_SECRET_RAW = process.env.JWT_SECRET || '5ef64fef249935a70a9fd9ae4bf34a3790aacb260618af3e3b49381ea14a4606';
 // jose 需要 Uint8Array 形式的 secret
 const JWT_SECRET = new TextEncoder().encode(JWT_SECRET_RAW);
 
 // /vip/* 鉴权白名单: 哪些 user_group 可以进
-const VIP_ALLOWED_GROUPS = new Set(['basic', 'vip', 'admin']);
+// 2026-10-14: 加 svip 跟 vip 一样可进 /vip/* (永久 SVIP)
+const VIP_ALLOWED_GROUPS = new Set(['basic', 'vip', 'svip', 'admin']);
+
+// 2026-10-22: /titles 访问码 cookie 名 (跟 /titles-verify 页设置的保持一致)
+//   - 值固定 '1', 有效期 7 天
+const TITLES_ACCESS_COOKIE = 'titles_2015';
 
 // 不需要登录的路径（放行）
 // 2026-08-14 收紧: 用户拍板"未登录只能在首页"
@@ -16,21 +22,25 @@ const VIP_ALLOWED_GROUPS = new Set(['basic', 'vip', 'admin']);
 //   - API 级: 放行首页数据 + 登录 + 跨域 moviezone
 //   - 拿掉 /basic /upcoming /nonfilm /library /vip /tmdb /charts /profile /request 等用户级页面
 const PUBLIC_PATHS = [
-  // 首页 (匿名能看)
-  '/',
+  // 首页 (匿名能看) - 必须严格等于 pathname==='/' 否则 startsWith('/') 永远 true
+  // 2026-10-14 fix: 单独处理, 放 PUBLIC_PATHS 会被 t.startsWith('/') 短路所有 path
   // 公开引导页
   '/login',
   '/register',
   '/activate',
   '/upgrade',
   '/terms',
+  // 2026-10-20: /locked 是被锁定用户落地页 (locked_until > NOW() 时 middleware 302 过来)
+  //   - 放 PUBLIC_PATHS 让 locked 用户能看到倒计时 + 解锁提示
+  '/locked',
   // iframe 公开镜像
   '/lovemovie',
   // 2026-08-16 viewer-role: viewer 待审查看页 (公开, 不需要 token)
   '/pending-approval',
   // 详情页 (无 token 走 'user' 权限)
   '/tmdb',
-  // 验证页 (验证码 2015)
+  // 公开 titles 目录页 (2026-09-22 用户拍板: 无登录无验证, 本来就该公开)
+  '/titles',
   '/titles-verify',
   // 登录 + 验证 API
   '/api/auth/login',
@@ -82,6 +92,8 @@ const PUBLIC_PATHS = [
   // admin (鉴权在 route.ts 内)
   '/api/admin/pending',
   '/api/admin/pending-users',
+  // 2026-10-22: /titles 目录页设置 (安全码 + 微信配置, 鉴权在 route.ts 内 authAdmin)
+  '/api/admin/titles-settings',
   '/api/admin/themes',
   '/api/admin/links',
   '/api/admin/resources',
@@ -184,6 +196,9 @@ const PUBLIC_PATHS = [
   '/favicon',
   '/icon',
   '/manifest',
+  // 2026-10-22: /titles 页的微信二维码 (public/wechat-qr.png)
+  //   - 匿名用户要能看到二维码才能扫码加好友, 不能被踢到 /login
+  '/wechat-qr.png',
   // 2026-08-14 拿掉的页面 (保留作为注释):
   // '/basic', '/upcoming', '/themes', '/nonfilm', '/library', '/vip', '/vip-videos',
   // '/tmdb', '/tmdb-films', '/request', '/profile', '/games', '/bounty', '/charts', '/titles', '/terms'
@@ -211,19 +226,38 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // 2026-08-04: /titles 进入前验证码门 (静态密码 2015)
-  // - ⚠️ 必须放在 PUBLIC_PATHS 检查之前, 否则 /titles 被白名单提前放行, 验证码失效
-  // - middleware 检查 cookie `titles_2015=1`, 没值就 redirect 到 /titles-verify
-  // - /titles-verify page 验证后 setCookie (7 天) + 跳回 /titles
-  // - /api/titles 等 API 不走验证码 (程序调用不需要)
-  if (pathname === '/titles' || pathname.startsWith('/titles?')) {
-    const hasCookie = request.cookies.get('titles_2015')?.value === '1';
-    if (!hasCookie) {
+  // 2026-09-22: /lovemovie 走 middleware 真 307 + Location (page.tsx redirect() 在 RSC streaming 时不发 Location,
+  //   浏览器看到 __next_error__ HTML 中间态白屏). 子域名 lovemovie.zzmm-search.uk 自己处理 VIP 鉴权 (8688 server.py).
+  if (pathname === '/lovemovie' || pathname.startsWith('/lovemovie?')) {
+    return NextResponse.redirect(new URL('https://lovemovie.zzmm-search.uk/'), 307);
+  }
+
+  // 2026-10-22: /titles 是独立目录页 — 不需要登录, 只需要访问码
+  //   - 用户原话: "https://zzmm-search.uk/titles 这个页面应该是单独的, 不需要登陆的, 只需要一个访问码的"
+  //   - 之前 2026-09-22 删了验证码门, 结果 AuthGuard.tsx 白名单又漏了 /titles → 未登录被踢到 /login
+  //   - 现在恢复访问码门 (cookie titles_2015, 7 天有效, /titles-verify 页设置)
+  //   - 精确匹配 pathname === '/titles' (不能用 startsWith, 否则 /titles-verify 也被拦)
+  //   - 已登录用户直接放行 (登录本身就是更高门槛, 不用再输码)
+  if (pathname === '/titles') {
+    const hasAccessCode = request.cookies.get(TITLES_ACCESS_COOKIE)?.value === '1';
+    const hasToken = !!(request.cookies.get('zzmm_token')?.value || request.cookies.get('token')?.value);
+    if (!hasAccessCode && !hasToken) {
       const verifyUrl = new URL('/titles-verify', request.url);
       verifyUrl.searchParams.set('redirect', pathname);
       return NextResponse.redirect(verifyUrl);
     }
+    return NextResponse.next();
   }
+
+  // 2026-09-22: /titles 不需要账密和登陆, 本来就是公开目录页
+  //   - 用户原话: "另外 titles不需要账密和登陆呀和登陆呀，本身就是目录页给人看的"
+  //   - 删掉 2026-08-04 加的 /titles 验证码门 (titles_2015 cookie 检查)
+  //   - /titles-verify 页保留但不再被引用, 可后续清理
+
+  // 2026-10-15: 首页 '/' 不再单独放行, 未登录用户访问 / 也跳到 /login
+  //   - 用户原话: "未登录状态现在还能进首页, 还是要限制只能进入登录页"
+  //   - 删掉原来的 `if (pathname === '/') return next();` 让 token check 兜底
+  //   - /login /register /activate /pending-approval /api/auth/* 等 public paths 仍然在 PUBLIC_PATHS 里放行
 
   // 白名单：静态资源 + 公开页面
   for (const path of PUBLIC_PATHS) {
@@ -241,10 +275,11 @@ export async function middleware(request: NextRequest) {
   //   - /library 已从 PUBLIC_PATHS 移除 (没登录会跳 login)
   //   - viewer pending 用户 status != 'active' → 后面会跳 login
   //   - viewer active / basic+ → 放行进 /library
-  //   - 实现: 满足任意已登录 user_group 都放行
-  if (pathname.startsWith('/library')) {
-    return NextResponse.next();
-  }
+  //   - 实现: 满足任意已登录 user_group (≠ 'user') 都放行, user_lock check 后面兜底
+  // 2026-10-14 fix: 不在这里早放行 /library, 让 user_lock 检查生效 (user_group='user' 跳 /upgrade)
+  // if (pathname.startsWith('/library')) {
+  //   return NextResponse.next();
+  // }
 
   // 2026-08-16 viewer-role: /pending-approval viewer 待审查看页 (公开, 不需要 token)
   //   - 用户从 register/login 跳过来, 还没 token, 也能看
@@ -272,9 +307,10 @@ export async function middleware(request: NextRequest) {
   // middleware 不再拦截, 避免 RSC fetch 被重定向导致白屏
   // 安全性: API 层 /api/vip 自己检查 JWT (更安全, 不依赖 cookie)
   // 2026-08-03: 改成 startsWith('/vip') 容错 /vip** 这种用户误输入 URL (之前 startsWith('/vip/') 漏掉)
-  if (pathname.startsWith('/vip')) {
-    return NextResponse.next();
-  }
+  // 2026-10-14 fix: 不在这里早放行 /vip, 让 user_lock 检查生效 (user_group='user' 跳 /upgrade)
+  // if (pathname.startsWith('/vip')) {
+  //   return NextResponse.next();
+  // }
 
   // 检查登录 cookie
   const token = request.cookies.get('zzmm_token')?.value ||
@@ -296,13 +332,29 @@ export async function middleware(request: NextRequest) {
   //   - admin 永久, 跳过
   //   - cron expire-vip-check 是兜底, 凌晨 4 点跑改 user_group (有 7.5h 滞后, middleware 补这个)
   try {
-    const secret = new TextEncoder().encode(process.env.JWT_SECRET || '');
+    const secret = new TextEncoder().encode(JWT_SECRET_RAW);  // 2026-10-15: 用 hardcoded 真秘 (Edge Runtime 不读 .env.production), 跟 line 7 一致
     const { payload } = await jwtVerify(token, secret);
+    const { neon } = await import('@neondatabase/serverless');
+    const sql = neon(process.env.DATABASE_URL || '');
+    const r = await sql`SELECT last_login, status, user_group, expire_at, locked_until, lock_reason FROM xx_users WHERE id = ${payload.id} LIMIT 1` as any[];
+    const u = r[0];
+
+    // 2026-10-20 异常用户登录设计: locked_until 强制踢到 /locked
+    // 2026-10-21 修正: 移到 admin 分支之外 — 用户拍板 "admin 豁免自动 ban, 但 locked 仍生效"
+    //   - 自动 ban (cron) 排除 admin ✅ (cron 里 user_group <> 'admin')
+    //   - 跨地域锁排除 admin ✅ (login route 里 isAdmin 跳过)
+    //   - 所以 admin 只会被"管理员手动锁定"锁住 → 这是故意行为, 应生效
+    //   - 解锁时间已过 → 中间件自动放过 (locked_until < NOW())
+    if (u?.locked_until && new Date(u.locked_until).getTime() > Date.now()) {
+      const remainingSec = Math.max(0, Math.ceil((new Date(u.locked_until).getTime() - Date.now()) / 1000));
+      const lockedUrl = new URL('/locked', request.url);
+      lockedUrl.searchParams.set('reason', u.lock_reason || 'manual_ban');
+      lockedUrl.searchParams.set('seconds', String(remainingSec));
+      lockedUrl.searchParams.set('path', pathname);  // 解锁后回原页面
+      return NextResponse.redirect(lockedUrl);
+    }
+
     if ((payload as any)?.group !== 'admin') {
-      const { neon } = await import('@neondatabase/serverless');
-      const sql = neon(process.env.DATABASE_URL || '');
-      const r = await sql`SELECT last_login, status, user_group, expire_at FROM xx_users WHERE id = ${payload.id} LIMIT 1` as any[];
-      const u = r[0];
       if (!u || u.status !== 'active') {
         // 账号禁用/不存在 → 跳登录
         const r2 = new URL('/login', request.url);
@@ -316,7 +368,8 @@ export async function middleware(request: NextRequest) {
       // 2026-08-12: VIP 过期实时降级到 basic (不改 expire_at, 保留历史; 不清 cookie, 放行继续浏览)
       //   - 只查 vip, basic 永久不该有过期判断 (cron 改后 expire_at 残值不算过期)
       //   - isFutureTime(null) = true, 永久 vip 跳过
-      if (u.user_group === 'vip' && !isFutureTime(u.expire_at)) {
+      // 2026-10-14: 永久 SVIP (user_group='svip') 永久不过期, 跳过降级
+      if ((u.user_group === 'vip' || u.user_group === 'svip') && !isFutureTime(u.expire_at)) {
         try {
           await sql`UPDATE xx_users SET user_group = 'basic' WHERE id = ${u.id}`;
           // 写一条 lumen_logs 记录降级 (跟 cron 行为一致, 方便审计)
@@ -342,6 +395,28 @@ export async function middleware(request: NextRequest) {
         res.cookies.delete('zzmm_token');
         res.cookies.delete('token');
         return res;
+      }
+      // 2026-10-14: user_group='user' 锁紧 (注册默认, 未激活)
+      //   - 只能看 /upgrade (need=activate 提示) + /activate + /pending-approval + /api/auth/* + /api/captcha + /api/user/activate + /logout
+      //   - 其他路径 → 跳 /upgrade?need=activate
+      if (u.user_group === 'user') {
+        const isUserAllowed = (
+          pathname === '/upgrade' ||
+          pathname.startsWith('/upgrade/') ||
+          pathname === '/activate' ||
+          pathname.startsWith('/activate/') ||
+          pathname === '/pending-approval' ||
+          pathname.startsWith('/pending-approval/') ||
+          pathname.startsWith('/api/auth/') ||
+          pathname === '/api/captcha' ||
+          pathname === '/api/user/activate' ||
+          pathname === '/logout'
+        );
+        if (!isUserAllowed) {
+          const up = new URL('/upgrade', request.url);
+          up.searchParams.set('need', 'activate');
+          return NextResponse.redirect(up);
+        }
       }
     }
   } catch (e) {

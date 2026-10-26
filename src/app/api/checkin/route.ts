@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
 import { getFreshUser } from '@/lib/auth';
+import { recordClick } from '@/lib/track-click';  // 2026-10-20 异常用户登录: 全 API 点击计数
 
 neonConfig.fetchConnectionCache = false;
 
@@ -29,6 +30,8 @@ function isVip(group: string): boolean {
 export async function POST(request: NextRequest) {
   const user = await getFreshUser(request);
   if (!user) return NextResponse.json({ error: '需要登录' }, { status: 401 });
+  // 2026-10-20: 全 API 点击计数 (fire-and-forget)
+  void recordClick(request, Number(user.id));
 
   try {
     const sql = neon(process.env.DATABASE_URL || '', { fetchOptions: { cache: 'no-store' } });
@@ -86,6 +89,8 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   const user = await getFreshUser(request);
   if (!user) return NextResponse.json({ error: '需要登录' }, { status: 401 });
+  // 2026-10-20: 全 API 点击计数 (fire-and-forget)
+  void recordClick(request, Number(user.id));
 
   try {
     const sql = neon(process.env.DATABASE_URL || '', { fetchOptions: { cache: 'no-store' } });

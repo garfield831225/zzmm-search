@@ -18,9 +18,7 @@
 
 import { NextRequest } from 'next/server';
 import { jwtVerify } from 'jose';
-import { neon, neonConfig } from '@neondatabase/serverless';
-
-neonConfig.fetchConnectionCache = false;
+import { sql } from '@/lib/db';
 
 const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'cLWhs2015');
 
@@ -60,7 +58,6 @@ export async function getFreshUser(req: NextRequest): Promise<FreshUser | null> 
   const verified = await verifyToken(token);
   if (!verified) return null;
 
-  const sql = neon(process.env.DATABASE_URL || '', { fetchOptions: { cache: 'no-store' } });
   const rows = await sql`
     SELECT id, username, user_group, expire_at::text as expire_at, status
     FROM xx_users
@@ -75,9 +72,12 @@ export async function getFreshUser(req: NextRequest): Promise<FreshUser | null> 
   //   - user_group='vip' AND status='active' AND expire_at < now() → 降级 basic
   //   - 写 xx_lumen_logs type='expire' 流水
   //   - 这是双保险: NAS cron 每天跑 + 每个端点 lazy check
-  if (u.user_group === 'vip' && u.status === 'active' && u.expire_at) {
+  // 2026-10-14: 加 svip 永久不降级 (user_group='svip' 是永久 SVIP 永久有效)
+  //   - svip 用户 expire_at 通常 NULL 或 NULL 状态下不被降级 (isFutureTime(null) = true 跳过)
+  //   - 但 expire_at 有残留值 (历史 vip 时设的) 也要保护
+  if ((u.user_group === 'vip' || u.user_group === 'svip') && u.status === 'active' && u.expire_at) {
     const expireMs = new Date(u.expire_at).getTime();
-    if (expireMs < Date.now()) {
+    if (expireMs < Date.now() && u.user_group !== 'svip') {
       try {
         await sql`UPDATE xx_users SET user_group = 'basic' WHERE id = ${u.id} AND user_group = 'vip'`;
         await sql`

@@ -233,14 +233,15 @@ export default function InvitesPage() {
   const cleanupUsed = async () => {
     if (!confirm(`确认清理所有已使用的邀请码？此操作不可恢复。`)) return;
     try {
-      const r = await fetch('/api/admin/invites?action=all_unused', {
+      // 2026-10-22 fix: 之前误传 action=all_unused (删的是未使用的), 跟按钮语义完全相反
+      const r = await fetch('/api/admin/invites?action=all_used', {
         method: 'DELETE',
         credentials: 'include',
         headers: { Authorization: 'Bearer ' + token },
       });
       const d = await r.json();
       if (d.error) showToast('error', d.error);
-      else { showToast('success', `✅ 已清理 ${d.deleted} 条`); fetchList(); }
+      else { showToast('success', `✅ 已清理 ${d.deleted} 条已使用记录`); fetchList(); }
     } catch (e: any) { showToast('error', e.message); }
   };
 

@@ -42,10 +42,26 @@ const SECTION_COLOR: Record<SectionKey, string> = {
   code: 'from-cyan-500/20 to-blue-500/20 border-cyan-500/40',
 };
 
+// 2026-10-22 UI 重做: 暗色主题 (跟首页 / 影视区统一)
+//   - 原来是亮色 bg-gray-50 + 白卡片, 跟站内暗色完全不搭, 看着很丑
 const SECTION_BADGE: Record<SectionKey, string> = {
   zezhe: 'bg-gradient-to-r from-pink-500 to-purple-500 text-white',
   vip: 'bg-gradient-to-r from-amber-500 to-orange-500 text-white',
   code: 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white',
+};
+
+// 2026-10-22: 3 大区 Tab 的暗色激活态
+const SECTION_TAB_ACTIVE: Record<SectionKey, string> = {
+  zezhe: 'bg-gradient-to-r from-pink-500/25 to-purple-500/25 border-pink-400/50 text-white shadow-lg shadow-pink-500/10',
+  vip: 'bg-gradient-to-r from-amber-500/25 to-orange-500/25 border-amber-400/50 text-white shadow-lg shadow-amber-500/10',
+  code: 'bg-gradient-to-r from-cyan-500/25 to-blue-500/25 border-cyan-400/50 text-white shadow-lg shadow-cyan-500/10',
+};
+
+// 2026-10-22: 分类按钮激活态 (暗色)
+const SECTION_CHIP_ACTIVE: Record<SectionKey, string> = {
+  zezhe: 'bg-gradient-to-r from-pink-500 to-purple-500 text-white shadow-md shadow-pink-500/20 border-transparent',
+  vip: 'bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-md shadow-amber-500/20 border-transparent',
+  code: 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-md shadow-cyan-500/20 border-transparent',
 };
 
 const CATEGORY_ICONS: Record<string, string> = {
@@ -78,7 +94,14 @@ export default function LibraryPage() {
   const [userGroup, setUserGroup] = useState<string>('user');
   const [userId, setUserId] = useState<string>('');
   const [userName, setUserName] = useState<string>('');  // 2026-08-17: 顶部入口显示
-  const [section, setSection] = useState<SectionKey>('zezhe');
+  // 2026-10-15: 从 URL ?section= 读取初始 section (首页"查看更多"跳过来保持一致)
+  const [section, setSection] = useState<SectionKey>(() => {
+    if (typeof window !== 'undefined') {
+      const s = new URLSearchParams(window.location.search).get('section');
+      if (s === 'vip' || s === 'code' || s === 'zezhe') return s;
+    }
+    return 'zezhe';
+  });
   // 分类: zezhe 用 sheet, vip/code 用 source
   const [subCategory, setSubCategory] = useState<string>('');
   const [categories, setCategories] = useState<CategoryBtn[]>([]);
@@ -92,6 +115,7 @@ export default function LibraryPage() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [unlocking, setUnlocking] = useState<Set<number>>(new Set());
   const [lumenBalance, setLumenBalance] = useState(0);
+  const [pointsBalance, setPointsBalance] = useState(0);  // 2026-10-15: basic 5 积分解锁 vip 资源
   const [lumenModal, setLumenModal] = useState<{ cost: number; balance: number; resourceName: string; creditAvailable?: number; resourceId?: number } | null>(null);
   const [upgradeModal, setUpgradeModal] = useState(false);  // 2026-08-17: VIP 购买弹框 (iframe /upgrade)
   let toastCnt = 0;
@@ -133,10 +157,16 @@ export default function LibraryPage() {
   const isZezheChannel = (ch?: string) => ch === 'zezhe' || ch === 'zezemom_excel';
   const isVipLocked = (item: Resource): boolean => {
     if (userGroup === 'admin') return false;
+    if (userGroup === 'svip') return false;  // 2026-10-15: svip 永久全开
     if (userGroup === 'vip') return false;  // VIP 全开
     if (isZezheChannel(item.importChannel)) return false;  // zezhe 永远不锁
     if (isCodeResource(item)) return false;  // code 走付费流明, 不算锁
     return true;  // 其他 basic 看都是 vip 锁
+  };
+
+  // 2026-10-15: basic 用户看 vip 资源 (pay_type='vip') 时, 显示 5 积分解锁按钮 (不是 5 流明)
+  const isVipResourceBasicCredits = (item: Resource): boolean => {
+    return userGroup === 'basic' && item.payType === 'vip';
   };
 
   const isAdminDirectOpen = (item: Resource): boolean => {
@@ -240,7 +270,7 @@ export default function LibraryPage() {
     fetchItems(1, true);
   };
 
-  // 解锁 code 资源
+  // 解锁 code/vip 资源
   const handleUnlock = async (item: Resource) => {
     if (isAdminDirectOpen(item)) {
       // admin 直接打开
@@ -250,14 +280,42 @@ export default function LibraryPage() {
     // 2026-08-17 P0: viewer 也能解锁 (跟 basic/vip 一样流明扣减)
     //   user (注册后未激活) 也能进流明解锁流程, 流明不够弹"需购买流明"提示
     //   任何人登录后 status='active' 都能进, server 端 unlock API 鉴权
-    if (userGroup !== 'basic' && userGroup !== 'vip' && userGroup !== 'admin' && userGroup !== 'viewer') {
-      // 8-17 12:00: user (注册后未激活) 走流明解锁流程, 跟 basic 一样
-      // 此分支保留以便未来收紧 (例如 admin 控制 user 不能解锁)
+    if (userGroup !== 'basic' && userGroup !== 'vip' && userGroup !== 'svip' && userGroup !== 'admin' && userGroup !== 'viewer') {
       addToast('error', '请先激活 basic / vip 会员后再解锁');
       return;
     }
+
+    // 2026-10-15: basic 用 5 积分解锁 vip 资源 (pay_type='vip') - 弹确认 modal
+    if (isVipResourceBasicCredits(item)) {
+      if (!confirm(`确认消耗 5 积分解锁这个 vip 链接？\n\n资源: ${item.name}\n当前积分: ${pointsBalance}`)) return;
+      setUnlocking(prev => new Set(prev).add(item.id));
+      try {
+        const r = await fetch('/api/resources/unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + getToken() },
+          body: JSON.stringify({ resourceId: item.id, resourceName: item.name }),
+        });
+        const d = await r.json();
+        if (d.success) {
+          addToast('unlock', d.message || '✅ 5 积分解锁 vip 链接');
+          setItems(prev => prev.map(i => i.id === item.id ? { ...i, unlocked: true } : i));
+          if (typeof d.credits_balance_after === 'number') setPointsBalance(d.credits_balance_after);
+          setTimeout(() => window.open(item.link, '_blank'), 500);
+        } else if (d.need === 'credits') {
+          addToast('error', `积分不足, 需要 ${d.cost} 积分, 当前 ${d.balance} 积分`);
+        } else {
+          addToast('error', d.error || '解锁失败');
+        }
+      } catch (e: any) {
+        addToast('error', '网络错误: ' + e.message);
+      } finally {
+        setUnlocking(prev => { const n = new Set(prev); n.delete(item.id); return n; });
+      }
+      return;
+    }
+
     // 2026-07-28: 流明不足预检 (跟服务端 402 错对应, 直接弹购买提示)
-    if (userGroup !== 'admin' && lumenBalance < (item.lumenCost || 1)) {
+    if (userGroup !== 'admin' && userGroup !== 'svip' && lumenBalance < (item.lumenCost || 1)) {
       // 2026-07-29: 拉 weekly credit 看能不能用周额度
       let creditAvailable = 0;
       try {
@@ -410,145 +468,168 @@ export default function LibraryPage() {
   const subCategoryType = section === 'zezhe' ? 'sheet' : '网盘';
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="sticky top-0 z-40 bg-white border-b border-gray-200 shadow-sm">
+    <div className="min-h-screen bg-[#0a0a0f] text-white">
+      <header className="sticky top-0 z-40 bg-[#0a0a0f]/80 backdrop-blur-xl border-b border-white/[0.06]">
         <div className="max-w-[1600px] mx-auto px-4 py-3">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-3">
-              <Link href="/" className="w-9 h-9 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center text-lg">📋</Link>
-              <div>
-                <h1 className="text-lg font-bold text-gray-900">资源库</h1>
-                <p className="text-xs text-gray-400">三区浏览 · 共 {total.toLocaleString()} 条</p>
+          <div className="flex items-center justify-between mb-3 gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <Link href="/" className="w-9 h-9 shrink-0 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center text-lg shadow-lg shadow-violet-500/20 hover:scale-105 transition">
+                📋
+              </Link>
+              <div className="min-w-0">
+                <h1 className="text-lg font-bold bg-gradient-to-r from-violet-400 via-fuchsia-400 to-pink-400 bg-clip-text text-transparent tracking-wide">
+                  资源库
+                </h1>
+                <p className="text-[11px] text-white/40">三区浏览 · 共 {total.toLocaleString()} 条</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              {/* 排序切换 */}
-              <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* 排序切换 — 2026-10-22 暗色 segmented control */}
+              {/* 2026-10-22 mobile: 排序按钮收窄, 避免 375px 下把 header 撑爆 */}
+              <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-white/[0.06] border border-white/[0.08]">
                 <button onClick={() => setSort('asc')}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-                    sort === 'asc' ? 'bg-violet-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  className={`px-2 sm:px-2.5 py-1.5 rounded-md text-[11px] sm:text-xs font-medium transition ${
+                    sort === 'asc'
+                      ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-sm'
+                      : 'text-white/50 hover:text-white/80 hover:bg-white/[0.06]'
                   }`}>
-                  ↑ 正序
+                  <span className="sm:hidden">↑</span><span className="hidden sm:inline">↑ 正序</span>
                 </button>
                 <button onClick={() => setSort('desc')}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition ${
-                    sort === 'desc' ? 'bg-violet-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  className={`px-2 sm:px-2.5 py-1.5 rounded-md text-[11px] sm:text-xs font-medium transition ${
+                    sort === 'desc'
+                      ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-sm'
+                      : 'text-white/50 hover:text-white/80 hover:bg-white/[0.06]'
                   }`}>
-                  ↓ 倒序
+                  <span className="sm:hidden">↓</span><span className="hidden sm:inline">↓ 倒序</span>
                 </button>
               </div>
               {/* 2026-08-17: 个人中心入口 (viewer 限制页只让进 library/profile, 直接给链接免得 AuthGuard 拦截) */}
               {userName && (
-                <Link href="/profile" className="px-3 py-1.5 bg-violet-100 hover:bg-violet-200 rounded-lg text-xs transition text-violet-700 flex items-center gap-1">
-                  <span>👤</span><span className="hidden sm:inline">{userName}</span>
+                <Link href="/profile" className="px-2.5 py-1.5 bg-white/[0.06] hover:bg-white/[0.12] rounded-lg text-xs transition text-white/80 flex items-center gap-1 border border-white/[0.08]">
+                  <span>👤</span><span className="hidden sm:inline max-w-[80px] truncate">{userName}</span>
                 </Link>
               )}
               {/* 2026-08-17 P0: 顶部统一 VIP 购买入口 (用户要求不要每条资源后, 改放顶部) */}
               <button onClick={() => setUpgradeModal(true)}
-                className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-lg text-xs text-white font-medium transition flex items-center gap-1 whitespace-nowrap">
+                className="px-2.5 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 rounded-lg text-xs text-white font-medium transition flex items-center gap-1 whitespace-nowrap shadow-lg shadow-amber-500/20">
                 <span>💎</span><span className="hidden sm:inline">购买 VIP</span>
               </button>
-              <Link href="/" className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-xs transition text-gray-600">← 影视区</Link>
+              <Link href="/" className="px-2.5 py-1.5 bg-white/[0.06] hover:bg-white/[0.12] rounded-lg text-xs transition text-white/70 border border-white/[0.08] whitespace-nowrap">
+                <span className="hidden sm:inline">← 影视区</span><span className="sm:hidden">←</span>
+              </Link>
             </div>
           </div>
 
-          {/* 3 大区 Tab */}
-          <div className="flex gap-2 mb-3 overflow-x-auto pb-1">
+          {/* 3 大区 Tab — 2026-10-22 暗色卡片式 */}
+          {/* 2026-10-22 mobile: 横向滑动 (3 张卡竖排会占掉半屏), PC 端 3 列网格 */}
+          <div className="flex gap-2 mb-3 overflow-x-auto pb-1.5 scrollbar-hide md:grid md:grid-cols-3 md:overflow-visible md:pb-0">
             {SECTIONS.map(s => {
               const active = s.key === section;
               return (
                 <button
                   key={s.key}
                   onClick={() => switchSection(s.key)}
-                  className={`flex-1 min-w-[140px] px-3 py-2.5 rounded-xl text-left transition border ${
+                  className={`min-w-[210px] md:min-w-0 px-3.5 py-2.5 md:py-3 rounded-2xl text-left transition-all duration-200 border backdrop-blur-sm ${
                     active
-                      ? `bg-gradient-to-r ${SECTION_COLOR[s.key]} text-gray-900 shadow-sm`
-                      : 'bg-white text-gray-500 hover:bg-gray-50 border-gray-200'
+                      ? SECTION_TAB_ACTIVE[s.key]
+                      : 'bg-white/[0.03] text-white/50 hover:bg-white/[0.07] hover:text-white/80 border-white/[0.07]'
                   }`}
                 >
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="text-lg">{s.icon}</span>
-                    <span className="font-medium text-sm">{s.label}</span>
+                  <div className="flex items-center gap-2 mb-0.5 md:mb-1">
+                    <span className={`text-lg transition ${active ? 'scale-110' : 'opacity-70'}`}>{s.icon}</span>
+                    <span className="font-semibold text-sm">{s.label}</span>
                   </div>
-                  <div className="text-[10px] text-gray-500 leading-tight">{s.desc}</div>
+                  <div className="text-[11px] text-white/45 leading-tight line-clamp-1">{s.desc}</div>
                 </button>
               );
             })}
           </div>
 
           {/* 业务规则说明 (2026-07-25 用户硬规则版) - 折叠 */}
-          <details className="mb-3 text-xs">
-            <summary className="cursor-pointer text-gray-500 hover:text-gray-700 select-none">
-              💡 查看 3 大区业务规则 + 注册流程
+          <details className="mb-3 text-xs group">
+            <summary className="cursor-pointer text-white/45 hover:text-white/80 select-none transition inline-flex items-center gap-1.5">
+              <span className="inline-block transition-transform group-open:rotate-90">▶</span>
+              <span>💡 查看 3 大区业务规则 + 注册流程</span>
             </summary>
-            <div className="mt-2 p-3 bg-violet-50/50 border border-violet-200/50 rounded-lg space-y-2 text-gray-700">
-              <div className="font-medium text-gray-900">📋 资源访问规则（硬性版）</div>
-              <ul className="space-y-1 ml-2">
-                <li>• <b className="text-pink-600">👑 泽泽妈妈115文档</b>：basic 会员可直接打开（无需 VIP）</li>
-                <li>• <b className="text-amber-600">🔒 VIP 区</b>：VIP 会员直接打开，basic 会员显示 VIP 锁（需升级 VIP）</li>
-                <li>• <b className="text-cyan-600">💎 单独付费区</b>：basic + VIP 都需消耗流明解锁（admin 免流明）</li>
+            <div className="mt-2 p-4 bg-white/[0.03] border border-white/[0.08] rounded-2xl space-y-3 text-white/70">
+              <div className="font-semibold text-white/90">📋 资源访问规则（硬性版）</div>
+              <ul className="space-y-1.5 ml-1">
+                <li className="flex gap-2"><span className="text-pink-400 shrink-0">👑</span><span><b className="text-pink-400">泽泽妈妈115文档</b>：basic 会员可直接打开（无需 VIP）</span></li>
+                <li className="flex gap-2"><span className="text-amber-400 shrink-0">🔒</span><span><b className="text-amber-400">VIP 区</b>：VIP 会员直接打开，basic 会员显示 VIP 锁（需升级 VIP）</span></li>
+                <li className="flex gap-2"><span className="text-cyan-400 shrink-0">💎</span><span><b className="text-cyan-400">单独付费区</b>：basic + VIP 都需消耗流明解锁（admin 免流明）</span></li>
               </ul>
-              <div className="font-medium text-gray-900 pt-1">🔑 注册流程</div>
-              <ul className="space-y-1 ml-2">
-                <li>• <b>1. 拿邀请码</b>：找站长微信要（站内不开放公开注册）</li>
-                <li>• <b>2. 注册</b>：用邀请码 + 邮箱 + 密码注册</li>
-                <li>• <b>3. 自动 basic</b>：注册成功自动成为 basic 会员，可看泽泽妈妈文档</li>
-                <li>• <b>4. 升级 VIP</b>：basic 会员才能买 VIP 码（30/90/365/永久）</li>
-                <li>• <b>5. 全开</b>：VIP 会员可看全站资源（含 VIP 区全部）</li>
+              <div className="font-semibold text-white/90 pt-1">🔑 注册流程</div>
+              <ul className="space-y-1.5 ml-1">
+                <li className="flex gap-2"><span className="text-white/30 shrink-0">1.</span><span><b className="text-white/90">拿邀请码</b>：找站长微信要（站内不开放公开注册）</span></li>
+                <li className="flex gap-2"><span className="text-white/30 shrink-0">2.</span><span><b className="text-white/90">注册</b>：用邀请码 + 邮箱 + 密码注册</span></li>
+                <li className="flex gap-2"><span className="text-white/30 shrink-0">3.</span><span><b className="text-white/90">自动 basic</b>：注册成功自动成为 basic 会员，可看泽泽妈妈文档</span></li>
+                <li className="flex gap-2"><span className="text-white/30 shrink-0">4.</span><span><b className="text-white/90">升级 VIP</b>：basic 会员才能买 VIP 码（30/90/365/永久）</span></li>
+                <li className="flex gap-2"><span className="text-white/30 shrink-0">5.</span><span><b className="text-white/90">全开</b>：VIP 会员可看全站资源（含 VIP 区全部）</span></li>
               </ul>
             </div>
           </details>
 
-          {/* 当前区信息条 */}
-          <div className={`mb-3 px-3 py-2 rounded-lg text-xs bg-gradient-to-r ${SECTION_COLOR[section]} border flex items-center gap-2 flex-wrap`}>
-            <span className="font-medium">{currentSection.icon} {currentSection.label}</span>
-            <span className="text-gray-600">·</span>
-            <span className="text-gray-700">{currentSection.desc}</span>
+          {/* 当前区信息条 — 2026-10-22 暗色 */}
+          <div className={`mb-3 px-3.5 py-2.5 rounded-xl text-xs bg-gradient-to-r ${SECTION_COLOR[section]} border flex items-center gap-2 flex-wrap backdrop-blur-sm`}>
+            <span className="font-semibold">{currentSection.icon} {currentSection.label}</span>
+            <span className="text-white/30">·</span>
+            <span className="text-white/60">{currentSection.desc}</span>
             {subCategory && (
               <>
-                <span className="text-gray-600">·</span>
-                <span className="text-gray-700">
-                  分类: <span className="font-semibold text-violet-700">{subCategoryLabel}</span>
-                  <span className="text-gray-500 text-[10px] ml-1">({subCategoryType})</span>
+                <span className="text-white/30">·</span>
+                <span className="text-white/60">
+                  分类: <span className="font-semibold text-violet-300">{subCategoryLabel}</span>
+                  <span className="text-white/35 text-[10px] ml-1">({subCategoryType})</span>
                 </span>
               </>
             )}
-            <span className="text-gray-600">·</span>
-            <span className="text-gray-600">按添加时间{sort === 'asc' ? '正序 (文档原始顺序)' : '倒序'}</span>
+            <span className="text-white/30">·</span>
+            <span className="text-white/50">按添加时间{sort === 'asc' ? '正序 (文档原始顺序)' : '倒序'}</span>
           </div>
 
-          {/* 搜索框 */}
+          {/* 搜索框 — 2026-10-22 暗色 */}
           <form onSubmit={handleSearch} className="flex gap-2 mb-3">
-            <input
-              type="text"
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder={`搜索 ${currentSection.label}...`}
-              className="flex-1 bg-white border border-gray-200 rounded-lg px-4 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500/20"
-            />
-            <button type="submit" className="px-5 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg text-sm font-medium text-white transition">
+            <div className="flex-1 relative">
+              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30 text-sm pointer-events-none">🔍</span>
+              <input
+                type="text"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder={`搜索 ${currentSection.label}...`}
+                className="w-full bg-white/[0.04] border border-white/[0.09] rounded-xl pl-9 pr-4 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-500/60 focus:bg-white/[0.06] focus:ring-2 focus:ring-violet-500/15 transition"
+              />
+            </div>
+            <button type="submit" className="px-5 py-2.5 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 rounded-xl text-sm font-medium text-white transition shadow-lg shadow-violet-600/20">
               搜索
             </button>
           </form>
 
           {/* 分类按钮: zezhe → sheet, vip/code → source */}
+          {/* 2026-10-14: active 状态跟随当前 section 配色 (粉紫/琥珀/青蓝), 跟整体视觉一致 */}
           <div className="mb-2">
-            <div className="text-[10px] text-gray-400 mb-1.5">
-              {section === 'zezhe' ? '按 sheet 分类' : '按网盘类型分类'} · 共 {categories.length} 个
+            <div className="text-[11px] text-white/40 mb-2 flex items-center gap-2">
+              <span>{section === 'zezhe' ? '按 sheet 分类' : '按网盘类型分类'}</span>
+              <span className="text-white/20">·</span>
+              <span>共 {categories.length} 个</span>
             </div>
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
+            <div className="flex gap-1.5 overflow-x-auto pb-1.5 scrollbar-hide">
               <button onClick={() => setSubCategory('')}
-                className={`px-2.5 py-1 rounded text-xs whitespace-nowrap transition ${
-                  !subCategory ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500 hover:text-gray-700'
+                className={`px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition-all ${
+                  !subCategory
+                    ? SECTION_CHIP_ACTIVE[section]
+                    : 'bg-white/[0.05] text-white/50 hover:text-white/85 hover:bg-white/[0.1] border border-white/[0.07]'
                 }`}>
                 全部
               </button>
               {categories.map(c => (
                 <button key={c.key} onClick={() => setSubCategory(c.key)}
-                  className={`px-2.5 py-1 rounded text-xs whitespace-nowrap transition ${
-                    subCategory === c.key ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500 hover:text-gray-700'
+                  className={`px-3 py-1.5 rounded-lg text-xs whitespace-nowrap transition-all ${
+                    subCategory === c.key
+                      ? SECTION_CHIP_ACTIVE[section]
+                      : 'bg-white/[0.05] text-white/50 hover:text-white/85 hover:bg-white/[0.1] border border-white/[0.07]'
                   }`}>
-                  {c.name} <span className="opacity-60">{c.count.toLocaleString()}</span>
+                  {c.name} <span className="opacity-60 ml-0.5">{c.count.toLocaleString()}</span>
                 </button>
               ))}
             </div>
@@ -557,9 +638,10 @@ export default function LibraryPage() {
       </header>
 
       <main className="max-w-[1600px] mx-auto px-4 py-4">
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+        <div className="rounded-2xl border border-white/[0.07] overflow-hidden bg-white/[0.02] backdrop-blur-sm">
           {/* Table header — 2026-08-08 mobile 适配: mobile 完全隐藏 (item 垂直堆叠展示, 不需要 header), PC (md+) 9 列横排保持原样 */}
-          <div className={`hidden md:grid gap-2 px-3 py-2.5 bg-gray-50 border-b border-gray-200 text-sm font-medium text-gray-500 uppercase tracking-wide ${userGroup === 'admin' ? 'md:grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px_140px]' : 'md:grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px]'}`}>
+          {/* 2026-10-22: 暗色表头 + 更好的列宽分配 (名称列更宽, 时间列收窄) */}
+          <div className={`hidden md:grid gap-3 px-4 py-3 bg-white/[0.04] border-b border-white/[0.08] text-[11px] font-semibold text-white/45 uppercase tracking-wider ${userGroup === 'admin' ? 'md:grid-cols-[76px_86px_minmax(0,1fr)_104px_72px_76px_132px_84px_minmax(150px,auto)_minmax(150px,auto)]' : 'md:grid-cols-[76px_86px_minmax(0,1fr)_104px_72px_76px_132px_84px_minmax(150px,auto)]'}`}>
             <div>分类</div>
             <div>标签</div>
             <div>名称</div>
@@ -569,10 +651,10 @@ export default function LibraryPage() {
             <div>添加时间</div>
             <div>状态</div>
             <div>操作</div>
-            {userGroup === 'admin' && <div className="text-red-600">🛠️ Admin</div>}
+            {userGroup === 'admin' && <div className="text-rose-400">🛠️ Admin</div>}
           </div>
 
-          {items.map((item) => {
+          {items.map((item, idx) => {
             const isVipLock = isVipLocked(item);
             const isAdmin = isAdminDirectOpen(item);
             const isCodeLock = codeResourceLocked(item);
@@ -584,56 +666,82 @@ export default function LibraryPage() {
             const showIcon = CATEGORY_ICONS[showCategory] || '📁';
             // 2026-07-26: 顶层 admin = user_group='admin', 注意不要跟 isAdmin (isAdminDirectOpen) 撞名
             const isTopAdmin = userGroup === 'admin';
+            // 2026-10-22: 斑马纹 (奇偶行交替微亮)
+            const zebra = idx % 2 === 1 ? 'bg-white/[0.012]' : '';
 
             return (
               <div key={item.id}
-                className={`grid gap-2 px-3 py-2.5 border-b border-gray-100 hover:bg-violet-50/30 transition text-base items-center ${isTopAdmin ? 'grid-cols-1 md:grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px_140px]' : 'grid-cols-1 md:grid-cols-[80px_90px_1fr_100px_80px_70px_150px_80px_140px]'} ${isVipLock ? 'bg-amber-50/30' : ''} ${isCodeLock ? 'bg-cyan-50/30' : ''}`}>
+                className={`grid grid-cols-[auto_auto_minmax(0,1fr)] md:flex md:flex-wrap md:items-center md:gap-3 gap-x-2 gap-y-1.5 px-3 md:px-4 md:py-3 py-2.5 border-b border-white/[0.05] transition-colors ${
+                  isTopAdmin
+                    ? 'md:grid-cols-[76px_86px_minmax(0,1fr)_104px_72px_76px_132px_84px_minmax(150px,auto)_minmax(150px,auto)]'
+                    : 'md:grid-cols-[76px_86px_minmax(0,1fr)_104px_72px_76px_132px_84px_minmax(150px,auto)]'
+                } ${zebra} hover:bg-white/[0.04] ${
+                  isVipLock ? 'bg-amber-500/[0.07] hover:bg-amber-500/[0.10]' : ''
+                } ${isCodeLock ? 'bg-cyan-500/[0.07] hover:bg-cyan-500/[0.10]' : ''}`}>
                 {/* 分类 — sheet 优先, category 兜底 */}
-                <div>
-                  <div className="text-2xl leading-none">{showIcon}</div>
-                  <div className="text-[11px] text-gray-500 truncate mt-1" title={showCategory}>{showCategory}</div>
+                {/* 2026-10-22 mobile: 图标 + 分类名 竖排在第 1 列, 名称在第 3 列 (grid auto/auto/1fr) */}
+                <div className="flex flex-col items-center gap-0.5 order-1 md:order-none md:gap-1 shrink-0 w-[54px] md:w-auto">
+                  <div className="text-xl leading-none md:text-xl">{showIcon}</div>
+                  <div className="text-[10px] text-white/45 truncate w-full text-center md:text-[11px]" title={showCategory}>{showCategory}</div>
                 </div>
                 {/* 标签 (大区角标) */}
-                <div>
-                  <div className={`px-2 py-0.5 rounded text-[11px] font-semibold text-center ${SECTION_BADGE[section]}`}>
+                <div className="order-2 md:order-none shrink-0 w-[62px] md:w-auto">
+                  <div className={`px-1.5 py-0.5 md:px-2 md:py-1 rounded-md md:rounded-lg text-[9px] md:text-[10px] font-semibold text-center tracking-wide ${SECTION_BADGE[section]}`}>
                     {section === 'zezhe' ? '👑 ZEZHE' : section === 'vip' ? '🔒 VIP' : '💎 CODE'}
                   </div>
                   {item.payType === 'code' && section === 'vip' && (
-                    <div className="text-[10px] text-amber-600 mt-0.5 text-center">💎付费</div>
+                    <div className="text-[9px] text-amber-400 mt-0.5 text-center">💎付费</div>
                   )}
                 </div>
                 {/* 名称 */}
-                <div className="min-w-0">
-                  <div className="text-gray-900 font-medium text-base leading-relaxed line-clamp-2" title={item.name}>{item.name}</div>
+                {/* 2026-10-22 mobile: 名称跟分类/角标同一行 (flex:1), 不再独占一行, 省一半高度 */}
+                <div className="min-w-0 flex-1 order-3 md:order-none md:w-auto">
+                  <div className="text-white/90 font-medium text-sm md:text-[15px] leading-snug line-clamp-2 hover:text-white transition-colors" title={item.name}>{item.name}</div>
                   {item.tmdbIdRaw && item.tmdbIdRaw !== 'NOMATCH' && item.tmdbIdRaw !== 'GARBLED' && item.tmdbIdRaw.length >= 4 && (
-                    <div className="text-xs text-green-600 font-mono mt-1">🎬 TMDB: {item.tmdbIdRaw}</div>
+                    <div className="text-[10px] md:text-[11px] text-emerald-400/80 font-mono mt-0.5 md:mt-1">🎬 TMDB: {item.tmdbIdRaw}</div>
                   )}
+                  {/* 2026-10-22 mobile: 来源/大小/时间/提取码 合并成一行 meta (PC 端各占独立列, 这里隐藏) */}
+                  <div className="md:hidden flex flex-wrap items-center gap-x-2 gap-y-1 mt-1 text-[10px] text-white/45">
+                    <span className="truncate max-w-[110px]">{item.sourceDisplay || (item.source ? String(item.source).replace(/ \[deleted\]$/, '') : null) || '—'}</span>
+                    {item.size && <><span className="text-white/20">·</span><span className="font-mono">{item.size}</span></>}
+                    <span className="text-white/20">·</span>
+                    <span className="font-mono">{fmtDate(item.createdAt)}</span>
+                    {item.linkCode && (
+                      <>
+                        <span className="text-white/20">·</span>
+                        <button onClick={() => handleCopy(item.linkCode!, '提取码')}
+                          className="px-1.5 py-0.5 bg-amber-500/15 text-amber-300 rounded font-mono border border-amber-500/25">
+                          {item.linkCode}
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
-                {/* 来源 */}
-                <div className="text-sm text-gray-600 truncate">{item.sourceDisplay || (item.source ? String(item.source).replace(/ \[deleted\]$/, '') : null) || '—'}</div>
-                {/* 大小 */}
-                <div className="text-sm text-gray-500 truncate">{item.size || '—'}</div>
-                {/* 提取码 */}
-                <div className="text-sm">
+                {/* 来源 — 2026-10-22: mobile 合并到 meta 行, PC 独立列 */}
+                <div className="hidden md:block text-sm text-white/55 truncate">{item.sourceDisplay || (item.source ? String(item.source).replace(/ \[deleted\]$/, '') : null) || '—'}</div>
+                {/* 大小 — 2026-10-22: mobile 合并到 meta 行, PC 独立列 */}
+                <div className="hidden md:block text-sm text-white/45 truncate font-mono">{item.size || '—'}</div>
+                {/* 提取码 — 2026-10-22: mobile 合并到 meta 行, PC 独立列 */}
+                <div className="hidden md:block text-sm">
                   {item.linkCode ? (
-                    <button onClick={() => handleCopy(item.linkCode!, '提取码')} className="px-2 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded text-xs font-mono" title="点击复制提取码">
+                    <button onClick={() => handleCopy(item.linkCode!, '提取码')} className="px-2 py-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 rounded-md text-[11px] font-mono border border-amber-500/25 transition" title="点击复制提取码">
                       {item.linkCode}
                     </button>
-                  ) : <span className="text-gray-300">—</span>}
+                  ) : <span className="text-white/20">—</span>}
                 </div>
-                {/* 添加时间 (真实日期) */}
-                <div className="text-sm text-gray-600 font-mono" title={`资源 ID: ${item.id}`}>
+                {/* 添加时间 (真实日期) — 2026-10-22: mobile 合并到 meta 行, PC 独立列 */}
+                <div className="hidden md:block text-[11px] text-white/40 font-mono whitespace-nowrap" title={`资源 ID: ${item.id}`}>
                   {fmtDate(item.createdAt)}
                 </div>
-                {/* 状态 */}
-                <div className="text-sm">
-                  {isVipLock && <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-700 rounded text-[10px]">🔒 锁</span>}
-                  {isUnlocked && <span className="px-1.5 py-0.5 bg-green-500/20 text-green-700 rounded text-[10px]">✓ 已解锁</span>}
-                  {isAdmin && <span className="px-1.5 py-0.5 bg-emerald-500/20 text-emerald-700 rounded text-[10px]">👑 免流明</span>}
+                {/* 状态 — 2026-10-22 mobile: 第 2 行第 1 列 */}
+                <div className="text-sm order-4 md:order-none col-start-1 row-start-2 md:col-auto md:row-auto">
+                  {isVipLock && <span className="px-2 py-1 bg-amber-500/20 text-amber-300 rounded-md text-[10px] whitespace-nowrap">🔒 锁</span>}
+                  {isUnlocked && <span className="px-2 py-1 bg-emerald-500/20 text-emerald-300 rounded-md text-[10px] whitespace-nowrap">✓ 已解锁</span>}
+                  {isAdmin && <span className="px-2 py-1 bg-emerald-500/20 text-emerald-300 rounded-md text-[10px] whitespace-nowrap">👑 免流明</span>}
                 </div>
                 {/* 2026-08-17 P0: "购买 VIP" 按钮已移到顶部 header 统一入口, 这里不再每条重复 */}
-                {/* 操作 */}
-                <div className="flex gap-1 flex-wrap items-center">
+                {/* 操作 — 2026-10-22 mobile: 第 2 行第 2-3 列 (跟状态同一行) */}
+                <div className="flex gap-1.5 flex-wrap items-center order-5 md:order-none col-start-2 col-span-2 row-start-2 md:col-auto md:col-span-auto md:row-auto">
                   {/* 2026-07-24: 多链接 (1对N 副链接) 优先显示, 副链接数>=2 加开全部按钮 */}
                   {item.links && item.links.length > 1 && !isVipLock && !isCodeLock ? (
                     <>
@@ -645,10 +753,10 @@ export default function LibraryPage() {
                               if (isMagnet) handleCopy(l.url, '磁力链接');
                               else window.open(l.url, '_blank', 'noopener');
                             }}
-                            className={`px-2 py-1 rounded text-xs text-white font-medium transition ${
+                            className={`px-2 py-1 rounded-lg text-[11px] text-white font-medium transition ${
                               idx === 0
-                                ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:opacity-90'
-                                : 'bg-violet-600/70 hover:bg-violet-500'
+                                ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:opacity-90 shadow-lg shadow-violet-600/20'
+                                : 'bg-white/[0.08] hover:bg-white/[0.16] border border-white/[0.08]'
                             }`}
                             title={l.source + (l.password ? ` · 提取码: ${l.password}` : '')}
                           >
@@ -672,7 +780,7 @@ export default function LibraryPage() {
                                 }, i * 500);
                               });
                           }}
-                          className="px-2 py-1 rounded text-xs text-white font-medium bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:opacity-90 transition"
+                          className="px-2 py-1 rounded-lg text-[11px] text-white font-medium bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:opacity-90 transition shadow-lg shadow-fuchsia-600/20"
                           title="一键打开所有网盘链接"
                         >
                           🚀 {item.links.length}
@@ -681,17 +789,22 @@ export default function LibraryPage() {
                     </>
                   ) : isMagnetOrEd2k(item.link) && !isVipLock && !isCodeLock ? (
                     <button onClick={() => handleCopy(item.link, '链接')}
-                      className="px-2.5 py-1 bg-violet-600 hover:bg-violet-500 rounded text-xs text-white font-medium transition">
+                      className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-[11px] text-white font-medium transition shadow-lg shadow-violet-600/20">
                       📋 复制
+                    </button>
+                  ) : isVipResourceBasicCredits(item) ? (
+                    <button onClick={() => handleUnlock(item)} disabled={unlocking.has(item.id)}
+                      className="px-2.5 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:opacity-90 rounded-lg text-[11px] text-white font-medium transition disabled:opacity-50 shadow-lg shadow-amber-500/20 whitespace-nowrap">
+                      {unlocking.has(item.id) ? '解锁中...' : isUnlocked ? '🔓 已解锁' : '🪙 5 积分解锁'}
                     </button>
                   ) : isVipLock ? (
                     <button onClick={() => addToast('vip', '需要 VIP 才能打开')} disabled
-                      className="px-2.5 py-1 bg-amber-500/30 text-amber-700 rounded text-xs font-medium cursor-not-allowed">
+                      className="px-2.5 py-1.5 bg-amber-500/15 text-amber-300 rounded-lg text-[11px] font-medium cursor-not-allowed border border-amber-500/25 whitespace-nowrap">
                       🔒 VIP 锁
                     </button>
                   ) : isCodeLock ? (
                     <button onClick={() => handleUnlock(item)} disabled={unlocking.has(item.id)}
-                      className="px-2.5 py-1 bg-gradient-to-r from-cyan-500 to-blue-500 hover:opacity-90 rounded text-xs text-white font-medium transition disabled:opacity-50">
+                      className="px-2.5 py-1.5 bg-gradient-to-r from-cyan-500 to-blue-500 hover:opacity-90 rounded-lg text-[11px] text-white font-medium transition disabled:opacity-50 shadow-lg shadow-cyan-500/20 whitespace-nowrap">
                       {unlocking.has(item.id) ? '解锁中...' :
                         isAdmin ? '👑 免流明' :
                         isUnlocked ? '🔓 已解锁' :
@@ -699,26 +812,26 @@ export default function LibraryPage() {
                     </button>
                   ) : (
                     <button onClick={() => handleOpen(item)}
-                      className="px-2.5 py-1 bg-violet-600 hover:bg-violet-500 rounded text-xs text-white font-medium transition">
+                      className="px-2.5 py-1.5 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 rounded-lg text-[11px] text-white font-medium transition shadow-lg shadow-violet-600/20 whitespace-nowrap">
                       {isMagnetOrEd2k(item.link) ? '📋 复制' : '🔗 打开'}
                     </button>
                   )}
                 </div>
                 {/* 2026-07-26: admin 操作列 — 软删/硬删资源 + 删单个链接 (per-link) */}
                 {isTopAdmin && (
-                  <div className="flex flex-col gap-1 text-xs">
+                  <div className="flex flex-col gap-1 text-xs order-6 md:order-none col-span-3 row-start-3 md:col-auto md:col-span-auto md:row-auto w-full md:w-auto">
                     {/* 资源级: 软删 + 硬删 */}
                     <div className="flex gap-1">
                       <button
                         onClick={() => handleAdminDelete(item, false)}
                         title="软删: status='deleted', search/catalog 看不见, 可恢复"
-                        className="flex-1 px-1.5 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded text-[10px] font-medium transition">
+                        className="flex-1 px-1.5 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/25 rounded-md text-[10px] font-medium transition">
                         🗑️ 软删
                       </button>
                       <button
                         onClick={() => handleAdminDelete(item, true)}
                         title="硬删: 物理删除 + CASCADE 清理副表, 不可恢复"
-                        className="flex-1 px-1.5 py-0.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-300 rounded text-[10px] font-bold transition">
+                        className="flex-1 px-1.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/25 rounded-md text-[10px] font-bold transition">
                         🔥 硬删
                       </button>
                     </div>
@@ -730,7 +843,7 @@ export default function LibraryPage() {
                             key={src}
                             onClick={() => handleAdminDeleteLink(item, src)}
                             title={`删 ${src} 链接 (其他链接不受影响)`}
-                            className="px-1 py-0.5 bg-white hover:bg-red-50 text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded text-[9px] transition">
+                            className="px-1 py-0.5 bg-white/[0.05] hover:bg-rose-500/20 text-white/45 hover:text-rose-300 border border-white/[0.08] hover:border-rose-500/30 rounded text-[9px] transition">
                             ✕{src}
                           </button>
                         ))}
@@ -740,7 +853,7 @@ export default function LibraryPage() {
                         <button
                           onClick={() => handleAdminDeleteLink(item, item.source!)}
                           title={`删 ${String(item.source).replace(/ \[deleted\]$/, '')} 链接 (主表老字段, 标 source='${item.source}')`}
-                          className="px-1 py-0.5 bg-white hover:bg-red-50 text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 rounded text-[9px] transition">
+                          className="px-1 py-0.5 bg-white/[0.05] hover:bg-rose-500/20 text-white/45 hover:text-rose-300 border border-white/[0.08] hover:border-rose-500/30 rounded text-[9px] transition">
                           ✕{String(item.source).replace(/ \[deleted\]$/, '')}
                         </button>
                       </div>
@@ -752,39 +865,49 @@ export default function LibraryPage() {
           })}
 
           {items.length === 0 && !loading && (
-            <div className="py-16 text-center text-gray-400 text-base">
-              {section === 'code' ? '💎 暂无单独付费资源' : section === 'vip' ? '🔒 暂无 VIP 资源 (待归类也算在 VIP 里)' : '👑 暂无泽泽妈妈文档资源'}
+            <div className="py-20 text-center">
+              <div className="text-5xl mb-4 opacity-30">
+                {section === 'code' ? '💎' : section === 'vip' ? '🔒' : '👑'}
+              </div>
+              <div className="text-white/40 text-base">
+                {section === 'code' ? '暂无单独付费资源' : section === 'vip' ? '暂无 VIP 资源 (待归类也算在 VIP 里)' : '暂无泽泽妈妈文档资源'}
+              </div>
+              <div className="text-white/20 text-xs mt-2">试试切换分类或换个关键词</div>
             </div>
           )}
 
           {loading && (
-            <div className="py-8 text-center text-gray-400 text-sm">加载中...</div>
+            <div className="py-16 text-center">
+              <div className="inline-block w-8 h-8 border-2 border-white/10 border-t-violet-500 rounded-full animate-spin" />
+              <div className="text-white/35 text-sm mt-3">加载中...</div>
+            </div>
           )}
         </div>
 
         {items.length < total && (
           <div className="flex justify-center mt-6">
             <button onClick={() => fetchItems(page + 1, false)} disabled={loading}
-              className="px-8 py-3 bg-white hover:bg-gray-100 border border-gray-200 rounded-xl text-sm text-gray-700 disabled:opacity-50 transition shadow-sm">
+              className="px-8 py-3 bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.1] rounded-xl text-sm text-white/80 disabled:opacity-50 transition backdrop-blur-sm">
               {loading ? '加载中...' : `加载更多 (剩余 ${(total - items.length).toLocaleString()} 条)`}
             </button>
           </div>
         )}
 
-        <div className="text-center mt-3 text-xs text-gray-400">
+        <div className="text-center mt-3 text-xs text-white/30">
           共 {total.toLocaleString()} 条，当前显示 {items.length.toLocaleString()} 条
         </div>
       </main>
 
-      <div className="fixed bottom-6 left-6 z-50 flex flex-col gap-2">
+      {/* 2026-10-22: toast 移动端挪到居中底部 (原来固定左下角, 手机上会挡住操作按钮) */}
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 items-center px-4 md:left-6 md:translate-x-0 md:items-start">
         <AnimatePresence>
           {toasts.map(t => (
-            <motion.div key={t.id} initial={{ opacity: 0, x: -50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -50 }}
-              className={`px-4 py-2.5 rounded-xl text-sm font-medium shadow-lg ${
-                t.type === 'copy' ? 'bg-green-600 text-white' :
-                t.type === 'unlock' ? 'bg-emerald-600 text-white' :
-                t.type === 'vip' ? 'bg-amber-500 text-white' :
-                'bg-red-500 text-white'
+            <motion.div key={t.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
+              className={`px-4 py-2.5 rounded-xl text-sm font-medium shadow-2xl border ${
+                t.type === 'copy' ? 'bg-emerald-600/95 text-white border-emerald-400/30' :
+                t.type === 'unlock' ? 'bg-teal-600/95 text-white border-teal-400/30' :
+                t.type === 'vip' ? 'bg-amber-500/95 text-white border-amber-400/30' :
+                'bg-rose-600/95 text-white border-rose-400/30'
               }`}>
               {t.type === 'copy' ? '📋' : t.type === 'unlock' ? '✅' : t.type === 'vip' ? '🔒' : '✕'} {t.message}
             </motion.div>

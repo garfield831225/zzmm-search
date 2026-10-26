@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
+import { recordClick } from '@/lib/track-click';  // 2026-10-20 异常用户登录: 全 API 点击计数
 import { checkAndRecordThrottle } from '@/lib/throttle';  // 2026-08-16 viewer-role: 风控
 
 export const dynamic = 'force-dynamic';
@@ -32,21 +33,44 @@ function getUserId(authHeader: string | null): { userId?: string; email?: string
 //   - basic/user 没周额度, 只能用流明
 //   - 周额度只能手动 use_credit=true 才用, 不自动扣
 async function unlockWithLumen(sql: any, userId: string, resourceId: number, useCredit: boolean = false) {
-  // 1. 查资源 + lumen_cost
-  const resources = await sql`SELECT id, name, lumen_cost, access_level FROM xx_resources WHERE id = ${resourceId} AND status = 'active' LIMIT 1` as any[];
+  // 1. 查资源 + lumen_cost + pay_type
+  const resources = await sql`SELECT id, name, lumen_cost, access_level, pay_type FROM xx_resources WHERE id = ${resourceId} AND status = 'active' LIMIT 1` as any[];
   if (!resources[0]) return { error: '资源不存在', status: 404 };
   const r = resources[0];
   const lumenCost = r.lumen_cost || 1;
+  // 2026-10-15: basic 用 5 credits 解锁 vip 资源 (pay_type='vip')
+  //   - 当 use_credits=true + pay_type='vip' + userGroup='basic' → 走 credits 路径
+  //   - 当 pay_type='vip' + userGroup 已经是 vip/svip/admin → 不需要解锁 (直开)
+  //   - pay_type='code' 资源只能用流明
+  const CREDITS_PER_VIP_UNLOCK = 5;
 
-  // 2. 查用户状态 (JOIN xx_user_lumen 拿 balance)
-  const users = await sql`SELECT u.id, u.user_group, u.expire_at, COALESCE(l.balance, 0) as lumen_balance
+  // 2. 查用户状态 (JOIN xx_user_lumen + xx_user_points 拿 balance)
+  const users = await sql`SELECT u.id, u.user_group, u.expire_at,
+                                 COALESCE(l.balance, 0) as lumen_balance,
+                                 COALESCE(p.points, 0) as points_balance
                             FROM xx_users u
                             LEFT JOIN xx_user_lumen l ON l.user_id = u.id
+                            LEFT JOIN xx_user_points p ON p.user_id = u.id
                             WHERE u.id = ${userId} LIMIT 1` as any[];
   if (!users[0]) return { error: '用户不存在', status: 401 };
   const u = users[0];
   const isAdmin = u.user_group === 'admin';
-  const isVip = ['vip', 'admin'].includes(u.user_group);
+  const isSvip = u.user_group === 'svip';
+  const isVip = ['vip', 'svip', 'admin'].includes(u.user_group);
+  const isBasic = u.user_group === 'basic';
+
+  // 2026-10-15: svip 永久免 (code/lumen/vip 全免)
+  if (isSvip) {
+    await sql`INSERT INTO xx_user_unlocks (user_id, resource_id, lumen_cost, unlocked_at) VALUES (${userId}, ${resourceId}, 0, NOW())`;
+    return {
+      success: true,
+      message: '👑 svip 永久会员免流明打开',
+      resource: { id: r.id, name: r.name },
+      unlock_source: 'svip',
+      is_admin_bypass: false,
+      is_svip_bypass: true,
+    };
+  }
 
   // 3. 检查已解锁
   const existing = await sql`SELECT id FROM xx_user_unlocks WHERE user_id = ${userId} AND resource_id = ${resourceId} LIMIT 1` as any[];
@@ -91,27 +115,44 @@ async function unlockWithLumen(sql: any, userId: string, resourceId: number, use
 
   // 6. 决定用 credit 还是 lumen
   let useCreditNow = false;
+  let useCreditsPayType = false;  // 2026-10-15: basic 用 credits 解锁 vip 资源
   if (isAdmin) {
     useCreditNow = false;  // admin 走特殊分支
   } else if (useCredit && isVip && creditAvailable > 0) {
     // 用户显式要求用 credit, 且 VIP 还有额度
     useCreditNow = true;
+  } else if (r.pay_type === 'vip' && isBasic) {
+    // 2026-10-15: basic 解锁 vip 资源 (pay_type='vip') 必须用 credits (5 credits/条)
+    //   vip/svip 本身直开, 不走 unlock
+    //   admin 走 admin 分支
+    useCreditsPayType = true;
   }
   // 其他情况: 默认走流明
 
-  // 7. 检查流明余额 (admin 跳过; useCreditNow=true 跳过)
-  if (!isAdmin && !useCreditNow && (u.lumen_balance || 0) < lumenCost) {
-    return {
-      error: `流明不足, 需要 ${lumenCost} 个, 当前 ${u.lumen_balance || 0}`,
-      need: 'lumen', cost: lumenCost, balance: u.lumen_balance || 0, status: 402,
-      credit_available: creditAvailable,  // 告诉前端本周还能用几次免费额度
-    };
+  // 7. 检查余额 (admin 跳过; useCreditNow=true 跳过; useCreditsPayType 走 credits 检查)
+  if (!isAdmin && !useCreditNow) {
+    if (useCreditsPayType) {
+      // basic 5 credits 解锁 vip 资源
+      if ((u.points_balance || 0) < CREDITS_PER_VIP_UNLOCK) {
+        return {
+          error: `积分不足, 需要 ${CREDITS_PER_VIP_UNLOCK} 积分解锁此 vip 资源, 当前 ${u.points_balance || 0} 积分`,
+          need: 'credits', cost: CREDITS_PER_VIP_UNLOCK, balance: u.points_balance || 0, status: 402,
+        };
+      }
+    } else if ((u.lumen_balance || 0) < lumenCost) {
+      return {
+        error: `流明不足, 需要 ${lumenCost} 个, 当前 ${u.lumen_balance || 0}`,
+        need: 'lumen', cost: lumenCost, balance: u.lumen_balance || 0, status: 402,
+        credit_available: creditAvailable,
+      };
+    }
   }
 
-  // 8. 扣额度/流明 + 写 unlock 记录
+  // 8. 扣额度/流明/credits + 写 unlock 记录
   try {
     let balanceAfter = u.lumen_balance || 0;
-    let unlockSource: 'admin' | 'credit' | 'lumen' = 'lumen';
+    let creditsAfter = u.points_balance || 0;
+    let unlockSource: 'admin' | 'svip' | 'credit' | 'lumen' | 'credits_unlock' = 'lumen';
     if (isAdmin) {
       await sql`INSERT INTO xx_user_unlocks (user_id, resource_id, lumen_cost, unlocked_at) VALUES (${userId}, ${resourceId}, 0, NOW())`;
       unlockSource = 'admin';
@@ -120,6 +161,16 @@ async function unlockWithLumen(sql: any, userId: string, resourceId: number, use
       await sql`INSERT INTO xx_user_unlocks (user_id, resource_id, lumen_cost, unlocked_at) VALUES (${userId}, ${resourceId}, 0, NOW())`;
       await sql`UPDATE xx_user_weekly_credit SET used = used + 1, last_used_at = NOW() WHERE user_id = ${userId}`;
       unlockSource = 'credit';
+    } else if (useCreditsPayType) {
+      // 2026-10-15: basic 5 credits 解锁 vip 资源
+      const updated = await sql`UPDATE xx_user_points SET points = points - ${CREDITS_PER_VIP_UNLOCK}, updated_at = NOW() WHERE user_id = ${userId} RETURNING points` as any[];
+      await sql`INSERT INTO xx_user_unlocks (user_id, resource_id, lumen_cost, unlocked_at) VALUES (${userId}, ${resourceId}, 0, NOW())`;
+      creditsAfter = updated[0]?.points ?? 0;
+      await sql`
+        INSERT INTO xx_point_logs (user_id, type, amount, ref_id, note, created_at)
+        VALUES (${userId}, ${-CREDITS_PER_VIP_UNLOCK}, ${resourceId}, ${`unlock vip 资源 #${resourceId} (-${CREDITS_PER_VIP_UNLOCK} 积分)`}, NOW())
+      `.catch(() => {});
+      unlockSource = 'credits_unlock';
     } else {
       // 用流明
       const updated = await sql`UPDATE xx_user_lumen SET balance = balance - ${lumenCost}, updated_at = NOW() WHERE user_id = ${userId} RETURNING balance` as any[];
@@ -133,11 +184,14 @@ async function unlockWithLumen(sql: any, userId: string, resourceId: number, use
       message:
         unlockSource === 'admin' ? '👑 admin 免流明打开' :
         unlockSource === 'credit' ? `✅ 周免费额度解锁! 本周还剩 ${creditAvailable - 1} 次` :
+        unlockSource === 'credits_unlock' ? `✅ 5 积分解锁 vip 资源! 剩 ${creditsAfter} 积分` :
         `✅ 解锁成功! 扣 ${lumenCost} 流明`,
       resource: { id: r.id, name: r.name },
       unlock_source: unlockSource,
-      lumen_cost: (isAdmin || useCreditNow) ? 0 : lumenCost,
+      lumen_cost: (isAdmin || useCreditNow || useCreditsPayType) ? 0 : lumenCost,
+      credits_cost: useCreditsPayType ? CREDITS_PER_VIP_UNLOCK : 0,
       lumen_balance_after: balanceAfter,
+      credits_balance_after: creditsAfter,
       credit_available: isVip ? Math.max(0, creditAvailable - (useCreditNow ? 1 : 0)) : 0,
       is_admin_bypass: isAdmin,
     };
@@ -149,6 +203,8 @@ async function unlockWithLumen(sql: any, userId: string, resourceId: number, use
 export async function POST(req: NextRequest) {
   const auth = getUserId(req.headers.get('authorization'));
   if (auth.error) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  // 2026-10-20: 全 API 点击计数 (fire-and-forget, 不阻塞 unlock 主流程)
+  void recordClick(req, Number(auth.userId));
 
   // 2026-08-16 viewer-role: 风控检查
   //   - admin 不限速 (怕自误踢)

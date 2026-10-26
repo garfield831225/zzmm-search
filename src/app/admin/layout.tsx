@@ -72,6 +72,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <Link href="/admin/vip-sync" className="text-amber-300 hover:text-amber-200 font-medium">🎬 VIP同步</Link>
           <Link href="/admin/match" className="text-white/60 hover:text-white">🎬 TMDB管理</Link>
           <Link href="/admin/pay-config" className="text-white/60 hover:text-white">💰 付费配置</Link>
+          <Link href="/admin/titles-settings" className="text-emerald-300 hover:text-emerald-200 font-medium">📑 目录页设置</Link>
           <Link href="/admin/publish" className="text-white/60 hover:text-white">📢 对外发布</Link>
           <div className="ml-auto flex items-center gap-2">
             {!isAdmin && (

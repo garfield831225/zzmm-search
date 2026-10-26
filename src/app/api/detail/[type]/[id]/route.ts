@@ -30,7 +30,7 @@ const CORS_HEADERS = {
 const VALID_TYPES = new Set(['movie', 'tv']);
 const VALID_GROUPS = new Set(['user', 'basic', 'member', 'vip', 'admin']);
 
-const SOURCE_ORDER = ['115', 'baidu', 'quark', 'aliyun', 'xunlei', '123pan', 'tianyi', 'uc', 'cmcc', 'pikpak', 'magnet', 'ed2k'];
+const SOURCE_ORDER = ['115', 'baidu', 'quark', 'aliyun', 'xunlei', '123pan', 'tianyi', 'uc', 'cmcc', 'pikpak', 'guangya', 'magnet', 'ed2k'];
 
 function errJson(code: string, message: string, hint?: string, status = 400) {
   return NextResponse.json(

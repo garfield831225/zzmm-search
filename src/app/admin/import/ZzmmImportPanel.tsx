@@ -23,6 +23,7 @@ export default function ZzmmImportPanel() {
     if (link.includes('aliyundrive.com')) return 'aliyun';
     if (link.includes('123pan.com')) return '123';
     if (link.includes('cloud.189.cn')) return 'tianyi';
+    if (link.includes('guangyapan.com')) return 'guangya';
     if (link.includes('magnet:')) return 'magnet';
     if (link.includes('ed2k://')) return 'ed2k';
     if (link.includes('thunder:') || link.includes('xunlei')) return 'thunder';
@@ -150,7 +151,14 @@ export default function ZzmmImportPanel() {
       const rawCategory = categoryCol >= 0 ? String(row[categoryCol] || '').trim() : '';
       const effectiveCategory = rawCategory ? mapCategory(rawCategory) : category;
       if (name && link) {
-        items.push({ name, link, link_code: code, size, category: effectiveCategory, source: detectSource(link) });
+        // 2026-10-18 重点: '独立付费' sheet → pay_type='code' + access_level='code', 自动落到 /library 单独付费区
+        const isCodeSheet = sheetName === '独立付费';
+        items.push({
+          name, link, link_code: code, size, category: effectiveCategory, source: detectSource(link),
+          doc_sheet: sheetName,
+          pay_type: isCodeSheet ? 'code' : undefined,
+          access_level: isCodeSheet ? 'code' : undefined,
+        });
       }
     }
 

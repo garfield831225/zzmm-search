@@ -1,14 +1,16 @@
 // 2026-08-03: P3 basic 专区 API
 //   - 泽泽妈 115 文档 (import_channel='zezhe') 已匹配 tmdbid 的资源
 //   - JOIN xx_tmdb_cache 拿 release_date + poster + overview
-//   - 按 release_date DESC 排序 (近→远)
-//   - DISTINCT ON (tmdb_id) 去重 (1 个 tmdb 多个网盘只显示 1 张卡)
-//   - 角标: 电影/剧集 + 资源数 (1/N 网盘) + access_level
-//   - type 过滤: 'all' / 'movie' / 'tv'
+//   - 排序: 默认 release_date DESC (近期优先); sort=rating 用 vote_average DESC
+//   - GROUP BY tmdb_id 去重 (1 个 tmdb 多个网盘只显示 1 张卡, resource_count 计数)
+//   - 2026-10-16 P12: 加 5 行筛选 (category/source/region/year/matchStatus) + SORT + Per Page
+//   - 鉴权: 跟 /api/search 一致 - basic 看全部, vip/admin 全开
 
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
+import jwt from 'jsonwebtoken';
 
+import { recordClick } from '@/lib/track-click';  // 2026-10-20 异常用户登录: 全 API 点击计数
 neonConfig.fetchConnectionCache = false;
 
 export const runtime = 'nodejs';
@@ -17,12 +19,25 @@ export const maxDuration = 30;
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
 
-// 2026-08-13: 公共 API (moviezone + 子站) - 加 CORS 头
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Access-Control-Max-Age': '86400',
+};
+
+// source 显示名 → key 映射 (跟 /api/search 对齐)
+const SOURCE_KEY_MAP: Record<string, string> = {
+  '115网盘': '115', '百度网盘': 'baidu', '阿里云盘': 'aliyun',
+  '夸克网盘': 'quark', '123网盘': '123', '天翼云盘': 'tianyi',
+  '磁力链接': 'magnet', 'ed2k链接': 'ed2k', '迅雷链接': 'thunder',
+};
+// 地区 → 国家代码 (跟 /api/search REGION_CODES 一致)
+const REGION_CODES: Record<string, string[]> = {
+  '大陆': ['CN'],
+  '欧美': ['US', 'GB', 'FR', 'DE', 'IT', 'ES', 'CA', 'AU', 'NZ'],
+  '日韩': ['JP', 'KR'],
+  '港澳台': ['HK', 'TW', 'MO'],
 };
 
 export async function OPTIONS() {
@@ -35,19 +50,114 @@ export async function GET(req: NextRequest) {
   });
 
   const sp = req.nextUrl.searchParams;
+  // 兼容老参数 type (all/movie/tv) — 当作 category 简化版
   const type = (sp.get('type') || 'all').toLowerCase();
+  const category = sp.get('category') || (type === 'movie' ? '电影' : type === 'tv' ? '剧集' : '全部');
+  const source = sp.get('source') || '';
+  const region = sp.get('region') || '';
+  const year = sp.get('year') || '';
+  const matchStatus = sp.get('matchStatus') || '';
+  const sort = sp.get('sort') || 'release_date';
   const page = parseInt(sp.get('page') || '1');
-  const pageSize = Math.min(parseInt(sp.get('pageSize') || '60'), 100);
+  const pageSize = Math.min(parseInt(sp.get('pageSize') || '30'), 150);
 
   try {
-    const isMovie = type === 'movie';
-    const isTv = type === 'tv';
-    const isAll = type === 'all';
+    // 鉴权 (跟 /api/search 对齐 - basic 看全部, 不卡 access_level)
+    let userGroup: string = 'user';
+    try {
+      const authHeader = req.headers.get('authorization');
+      let token: string | null = null;
+      if (authHeader?.startsWith('Bearer ')) {
+        token = authHeader.replace('Bearer ', '');
+      } else {
+        token = req.cookies.get('zzmm_token')?.value || null;
+      }
+      if (token) {
+        const payload = jwt.verify(token, (process.env.JWT_SECRET || 'cLWhs2015')) as any;
+        const userId = String(payload.id);      // 2026-10-20: 全 API 点击计数 (fire-and-forget)
+      void recordClick(req, Number(payload.id));
 
-    // 2026-08-12 修: 改用 GROUP BY 简化版, 旧版 DISTINCT ON + nested subquery 在 Neon HTTP endpoint 实际跑 38s (EXPLAIN 92ms 不准)
-    //   GROUP BY 1.8s, 加速 20x
-    //   业务: GROUP BY tmdb_id 拿每个 tmdb 第 1 条 + 资源数 count, 按 release_date DESC
-    const rows = await sql`
+        const uRow = await sql`SELECT user_group FROM xx_users WHERE id = ${userId} LIMIT 1`;
+        if (uRow[0]?.user_group) userGroup = String(uRow[0].user_group).toLowerCase();
+      }
+    } catch { /* 未登录 user */ }
+
+    // ── WHERE 条件 ──
+    const conds: string[] = ['r.import_channel=\'zezhe\'', 'r.status=\'active\'', 'r.tmdb_id IS NOT NULL', 'r.tmdb_id != \'\'', 'r.tmdb_id != \'NOMATCH\'', 't.release_date IS NOT NULL'];
+    const condVals: any[] = [];
+    const addCond = (condSQL: string, ...vals: any[]) => {
+      const offset = condVals.length;
+      const renum = condSQL.replace(/\$(\d+)/g, (_, n) => `$${parseInt(n) + offset}`);
+      conds.push(renum);
+      condVals.push(...vals);
+    };
+
+    // category 过滤 (兼容老 type)
+    if (category !== '全部' && category !== 'all') {
+      // '电影' 走 tmdb_type='movie', 其他按 doc_sheet/category 精确匹配
+      if (category === '电影' || category === 'movie') {
+        addCond('t.tmdb_type = $1', 'movie');
+      } else if (category === '剧集' || category === 'tv') {
+        addCond('t.tmdb_type = $1', 'tv');
+      } else {
+        addCond('r.category = $1', category);
+      }
+    }
+
+    // source 过滤
+    if (source && source !== '全部') {
+      addCond('r.source = $1', SOURCE_KEY_MAP[source] || source);
+    }
+
+    // year 过滤 (按 release_date)
+    if (year && year !== '全部') {
+      if (['2026','2025','2024','2023','2022','2021','2020'].includes(year)) {
+        addCond('t.release_date LIKE $1', year + '-%');
+      } else if (year === '2010-2019') {
+        conds.push("t.release_date >= '2010-01-01' AND t.release_date <= '2019-12-31'");
+      } else if (year === '2000-2009') {
+        conds.push("t.release_date >= '2000-01-01' AND t.release_date <= '2009-12-31'");
+      }
+    }
+
+    // region 过滤 (按 origin_country)
+    const regionCodes = REGION_CODES[region];
+    if (regionCodes) {
+      const regionParts: string[] = ["t.origin_country IS NOT NULL AND t.origin_country <> ''"];
+      for (const c of regionCodes) {
+        const offset = condVals.length;
+        regionParts.push(`(t.origin_country LIKE $${offset + 1})`);
+        condVals.push('%' + c + '%');
+      }
+      conds.push('(' + regionParts.join(' OR ') + ')');
+    }
+
+    // matchStatus 过滤 (TMDB 已匹配 = tmdb_id 是 10000+ 数字)
+    if (matchStatus === '已批配') {
+      conds.push("(r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000)");
+    } else if (matchStatus === '未匹配') {
+      // basic API 已经过滤 r.tmdb_id IS NOT NULL, 剩余的都是"未匹配 10+ 位"或非数字
+      conds.push("(NOT (r.tmdb_id ~ '^[0-9]+$' AND (r.tmdb_id)::int > 10000))");
+    }
+
+    const whereSQL = 'WHERE ' + conds.join(' AND ');
+
+    // ── 排序 ──
+    let orderBy = 't.release_date DESC';
+    if (sort === 'added_time') {
+      orderBy = 'MAX(r.created_at) DESC';
+    } else if (sort === 'rating') {
+      // 2026-10-16: 修 GROUP BY 缺 t.vote_count — 用 MAX 聚合 (每组就 1 个)
+      orderBy = 'COALESCE(NULLIF(t.vote_average, \'\')::numeric, 0) DESC NULLS LAST, MAX(NULLIF(t.vote_count, \'\')::int) DESC NULLS LAST, t.release_date DESC';
+    }
+
+    // ── Count (distinct tmdb) ──
+    const countSQL = `SELECT COUNT(DISTINCT r.tmdb_id) as cnt FROM xx_resources r JOIN xx_tmdb_cache t ON t.tmdb_id = r.tmdb_id ${whereSQL}`;
+    const countRows = await sql(countSQL, condVals) as any[];
+    const total = parseInt(countRows?.[0]?.cnt || '0');
+
+    // ── List (GROUP BY tmdb_id) ──
+    const listSQL = `
       SELECT
         r.tmdb_id,
         t.title_zh, t.tmdb_type, t.release_date, t.poster_path, t.vote_average, t.overview,
@@ -57,37 +167,15 @@ export async function GET(req: NextRequest) {
         MIN(r.access_level) as access_level,
         MIN(r.name) as resource_name,
         COUNT(*) as resource_count,
-        -- 2026-08-14: 短剧打标 - 业务规则: 短剧不是分类, 是 tag
-        --   按 tmdb_id GROUP BY, 该 tmdb 下任一资源是短剧 → isShortDrama=true
-        --   检测: r.name 包含 "短剧" 或 r.tags 数组里含 "短剧"
         BOOL_OR(r.name ILIKE '%短剧%' OR array_to_string(r.tags, ',') ILIKE '%短剧%') as is_short_drama
       FROM xx_resources r
       JOIN xx_tmdb_cache t ON t.tmdb_id = r.tmdb_id
-      WHERE r.import_channel='zezhe'
-        AND r.status='active'
-        AND r.tmdb_id IS NOT NULL
-        AND r.tmdb_id != ''
-        AND r.tmdb_id != 'NOMATCH'
-        AND t.release_date IS NOT NULL
-        AND (${isAll} OR t.tmdb_type = ${type})
+      ${whereSQL}
       GROUP BY r.tmdb_id, t.title_zh, t.tmdb_type, t.release_date, t.poster_path, t.vote_average, t.overview
-      ORDER BY t.release_date DESC
-      LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
+      ORDER BY ${orderBy}
+      LIMIT $${condVals.length + 1} OFFSET $${condVals.length + 2}
     `;
-
-    const totalRow = await sql`
-      SELECT count(DISTINCT r.tmdb_id) as cnt
-      FROM xx_resources r
-      JOIN xx_tmdb_cache t ON t.tmdb_id = r.tmdb_id
-      WHERE r.import_channel='zezhe'
-        AND r.status='active'
-        AND r.tmdb_id IS NOT NULL
-        AND r.tmdb_id != ''
-        AND r.tmdb_id != 'NOMATCH'
-        AND t.release_date IS NOT NULL
-        AND (${isAll} OR t.tmdb_type = ${type})
-    `;
-    const total = parseInt(totalRow[0]?.cnt || '0');
+    const rows = await sql(listSQL, [...condVals, pageSize, (page - 1) * pageSize]) as any[];
 
     const items = rows.map((r: any) => ({
       resourceId: r.resource_id,
@@ -96,8 +184,6 @@ export async function GET(req: NextRequest) {
       title: r.title_zh || r.resource_name,
       releaseDate: r.release_date,
       posterPath: r.poster_path,
-      // 2026-08-12 修: 兼容 poster_path 可能是完整 URL (8-12 测试发现 cache 里部分 row 已存完整 URL)
-      //   否则会拼成 'https://image.tmdb.org/t/p/w500https://image.tmdb.org/t/p/w500/...' (重复 base)
       posterUrl: r.poster_path
         ? (r.poster_path.startsWith('http') ? r.poster_path : `${TMDB_IMAGE_BASE}${r.poster_path}`)
         : null,
@@ -107,14 +193,19 @@ export async function GET(req: NextRequest) {
       resourceCount: parseInt(r.resource_count || '1'),
       accessLevel: r.access_level,
       category: r.category,
-      isShortDrama: !!r.is_short_drama,  // 2026-08-14: 短剧打标
+      isShortDrama: !!r.is_short_drama,
     }));
 
     return NextResponse.json({
       total,
       page,
       pageSize,
-      type,
+      category,
+      source,
+      region,
+      year,
+      matchStatus,
+      sort,
       items,
     }, {
       headers: {

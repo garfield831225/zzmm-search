@@ -253,7 +253,8 @@ export async function POST(request: NextRequest) {
       });
       try {
         const r = await sql(
-          `INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) WHERE link IS NOT NULL AND link != '' DO NOTHING RETURNING id, name`,
+          // 2026-10-18 修: 改 (link, name) 联合 unique, 之前 (link) WHERE partial 缺 index 报 42P10
+          `INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link, name) DO NOTHING RETURNING id, name`,
           params
         );
         for (const row of r as any[]) {

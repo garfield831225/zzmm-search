@@ -3,10 +3,10 @@
 // 不动泽泽妈妈 21-sheet 导入 (那个用 ZZMM_SHEET_MAP)
 // 2026-07-17: 1对N 改造, 加 9 个新 source + magnet 兜底 category + 优先级排序
 
-export type ResourceSource = '115' | 'baidu' | 'quark' | 'aliyun' | 'xunlei' | '123' | 'uc' | 'tianyi' | 'yidong' | 'magnet' | 'ed2k' | 'telegra_ph' | 'other';
+export type ResourceSource = '115' | 'baidu' | 'quark' | 'aliyun' | 'xunlei' | '123' | 'uc' | 'tianyi' | 'yidong' | 'guangya' | 'magnet' | 'ed2k' | 'telegra_ph' | 'other';
 export type ResourceAccessLevel = 'basic' | 'vip' | 'code';
 export type ResourcePayType = 'free' | 'code';
-export type ImportChannel = 'zezemom_excel' | 'tg_baidu' | 'tg_quark' | 'tg_music' | 'tg_aliyun' | 'tg_xunlei' | 'tg_123' | 'tg_uc' | 'tg_tianyi' | 'tg_yidong' | 'tg_magnet' | 'tg_115' | 'tg_telegraph' | 'tg_other' | 'other';
+export type ImportChannel = 'zezemom_excel' | 'tg_baidu' | 'tg_quark' | 'tg_music' | 'tg_aliyun' | 'tg_xunlei' | 'tg_123' | 'tg_uc' | 'tg_tianyi' | 'tg_yidong' | 'tg_guangya' | 'tg_magnet' | 'tg_115' | 'tg_telegraph' | 'tg_other' | 'other';
 
 // ─── 全局写死 sort 优先级 (G5-a) ────────────────────────────────────────
 // 打开组 (1-9) + 复制组 (10) — 所有资源统一按这个排
@@ -20,6 +20,7 @@ export const SOURCE_SORT: Record<string, number> = {
   'uc': 7,
   'tianyi': 8,
   'yidong': 9,
+  'guangya': 9,
   'magnet': 10,
   'ed2k': 10,  // 跟 magnet 同组, 复制按钮
   'telegra_ph': 99,  // 兜底, 不该入库
@@ -37,6 +38,7 @@ export const SOURCE_LABELS: Record<string, { label: string; icon: string; action
   'uc': { label: 'UC 网盘', icon: '🅿️', action: 'open' },
   'tianyi': { label: '天翼云盘', icon: '☂️', action: 'open' },
   'yidong': { label: '移动云盘', icon: '📱', action: 'open' },
+  'guangya': { label: '光鸭云盘', icon: '🦆', action: 'open' },
   'magnet': { label: '磁力', icon: '🧲', action: 'copy' },
   'ed2k': { label: '磁力', icon: '🧲', action: 'copy' },
 };
@@ -169,6 +171,10 @@ export function detectSource(link: string): ResourceSource {
   if (l.includes('cloud.189.cn') || l.includes('189.cn')) return 'tianyi';
   // 移动云盘
   if (l.includes('yun.139.com') || l.includes('mcloud.139.com') || l.includes('139.com')) return 'yidong';
+  // 光鸭云盘 (2026-10-23 新增)
+  //   domain_hint 用完整域名 'guangyapan.com', 覆盖 www/h5/app 三个子域
+  //   不用裸词 'guangya'/'duck' — 会误伤 magnet hash 里的 DUCK 和阿里云盘分享码
+  if (l.includes('guangyapan.com')) return 'guangya';
   // 磁力 (magnet: 或 thunder:// 转 magnet 后)
   if (l.startsWith('magnet:') || l.includes('magnet')) return 'magnet';
   // ed2k
@@ -244,6 +250,7 @@ export function detectImportChannel(link: string, hint?: string): ImportChannel 
     if (h.includes('uc')) return 'tg_uc';
     if (h.includes('tianyi') || h.includes('189')) return 'tg_tianyi';
     if (h.includes('yidong') || h.includes('139')) return 'tg_yidong';
+    if (h.includes('guangya')) return 'tg_guangya';
     if (h.includes('zezemom') || h.includes('zzmm')) return 'zezemom_excel';
   }
   // 没 hint 时按主链接 source 反推
@@ -256,6 +263,7 @@ export function detectImportChannel(link: string, hint?: string): ImportChannel 
   if (src === 'uc') return 'tg_uc';
   if (src === 'tianyi') return 'tg_tianyi';
   if (src === 'yidong') return 'tg_yidong';
+  if (src === 'guangya') return 'tg_guangya';
   if (src === '115') return 'zezemom_excel';
   // 磁力/ed2k → 算 tg 其他
   return 'other';

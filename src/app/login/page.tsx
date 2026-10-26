@@ -174,14 +174,14 @@ export default function LoginPage() {
 
             <div>
               <label className="block text-sm text-white/60 mb-2">验证码</label>
-              <div className="flex gap-3">
+              <div className="flex gap-2 sm:gap-3">
                 <input
                   type="text"
                   value={captcha}
                   onChange={(e) => setCaptcha(e.target.value.toLowerCase())}
                   placeholder="输入图形验证码"
                   maxLength={4}
-                  className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-violet-500/50 tracking-widest text-center uppercase"
+                  className="flex-1 min-w-0 bg-white/5 border border-white/10 rounded-xl px-3 sm:px-4 py-3 text-white placeholder-white/30 focus:outline-none focus:border-violet-500/50 tracking-widest text-center uppercase"
                   required
                 />
                 <img
@@ -189,7 +189,7 @@ export default function LoginPage() {
                   src={captchaUrl}
                   alt="验证码"
                   onClick={refreshCaptcha}
-                  className="w-28 h-11 rounded-xl cursor-pointer hover:opacity-80 transition"
+                  className="w-[92px] sm:w-28 h-11 shrink-0 rounded-xl cursor-pointer hover:opacity-80 transition"
                   style={{ background: '#1a1a2e', objectFit: 'fill' }}
                 />
               </div>

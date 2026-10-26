@@ -44,6 +44,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     let unlocked = false;
     let lumenBalance = 0;
     let userVipActive = false;
+    let isSvip = false;
     if (auth.userId) {
       const existing = await sql`SELECT id FROM xx_user_unlocks WHERE user_id = ${auth.userId} AND resource_id = ${resourceId} LIMIT 1` as any[];
       unlocked = !!existing[0];
@@ -54,6 +55,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       if (users[0]) {
         lumenBalance = users[0].lumen_balance || 0;
         userVipActive = (users[0].user_group === 'vip' || users[0].user_group === 'admin') && isFutureTime(users[0].expire_at);
+        isSvip = users[0].user_group === 'svip';
       }
     }
 
@@ -68,6 +70,10 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       access_level: r.access_level || 'free',
       pay_type: r.pay_type,
       need_login: !!auth.error,
+      // 2026-10-15: svip 永久免流明/credits (跟 admin 一样)
+      user_svip: isSvip,
+      // 2026-10-15: basic 用 credits 解锁 vip 资源时, 前端拿 credit_cost 算消耗
+      credit_cost: r.pay_type === 'vip' ? 5 : 0,
     });
   } catch (e: any) {
     console.error('[unlock-status] error:', e);

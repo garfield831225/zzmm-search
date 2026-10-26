@@ -12,6 +12,7 @@ import {
   CheckCircle2, AlertCircle, LogOut, Home, MessageCircle, Edit3, Lock, Unlock, Coins, Upload
 } from 'lucide-react';
 import { useRequireAuth } from '@/lib/use-require-auth';
+import BasicClaimBanner from '@/components/BasicClaimBanner';
 
 interface UserInfo {
   id: number;
@@ -189,26 +190,25 @@ export default function ProfilePage() {
     setToast({ type, msg });
   };
 
-  // 2026-08-11: 积分兑换流明 (复用 /api/points/redeem, 10 积分 = 1 流明)
+  // 2026-10-15: 积分兑换流明 (复用 /api/points/redeem, 20 积分 = 1 流明, 无上限不限频率)
   const handlePointsRedeem = async () => {
-    if (pointsBalance < 10) {
-      showToast('error', `积分不足, 当前 ${pointsBalance} 积分, 至少需要 10 积分 (1 流明)`);
+    if (pointsBalance < 20) {
+      showToast('error', `积分不足, 当前 ${pointsBalance} 积分, 至少需要 20 积分 (1 流明)`);
       return;
     }
-    const maxLumen = Math.floor(pointsBalance / 10);
-    const maxAmount = Math.min(pointsBalance, 10000);
+    const maxAmount = pointsBalance;
     const input = prompt(
       `💡 积分兑换流明\n\n` +
-      `比例: 10 积分 = 1 流明\n` +
+      `比例: 20 积分 = 1 流明\n` +
       `当前积分: ${pointsBalance}\n` +
-      `最多可兑: ${maxAmount} 积分 = ${Math.floor(maxAmount / 10)} 流明\n` +
-      `(必须 10 的倍数, 单次最多 10000 积分 / 1000 流明)\n\n` +
-      `请输入要兑换的积分数量:`, '10'
+      `最多可兑: ${maxAmount} 积分 = ${Math.floor(maxAmount / 20)} 流明\n` +
+      `(必须 20 的倍数, 无上限不限频率)\n\n` +
+      `请输入要兑换的积分数量:`, '20'
     );
     if (!input) return;
     const amount = parseInt(input, 10);
-    if (!amount || amount < 10 || amount > 10000 || amount % 10 !== 0) {
-      showToast('error', '兑换数量必须是 10-10000 的 10 倍数');
+    if (!amount || amount % 20 !== 0) {
+      showToast('error', '兑换数量必须是 20 的整数倍');
       return;
     }
     try {
@@ -526,6 +526,13 @@ export default function ProfilePage() {
           )}
         </div>
 
+        {/* 2026-10-15: basic 月度福利横幅 (领 1 天 vip) */}
+        {user.user_group === 'basic' && (
+          <div className="mb-6">
+            <BasicClaimBanner />
+          </div>
+        )}
+
         {/* 4 个统计卡 */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 mb-6">
           {/* 2026-08-11: 流明卡片 (原错误标"积分" → 实际是 lumen, 改"流明 💡")
@@ -537,7 +544,7 @@ export default function ProfilePage() {
             <div className="absolute top-2 right-2 z-10 flex gap-1">
               <button
                 onClick={handlePointsRedeem}
-                title={`积分兑换流明 (10 积分 = 1 流明, 当前 ${pointsBalance} 积分)`}
+                title={`积分兑换流明 (20 积分 = 1 流明, 当前 ${pointsBalance} 积分, 无上限不限频率)`}
                 className="px-2 py-0.5 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 rounded-md text-[10px] text-cyan-200 font-medium transition"
               >
                 🔁 积分兑换

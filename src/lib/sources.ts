@@ -23,6 +23,7 @@ export const SOURCE_DICT: SourceType[] = [
   { code: 'uc',      display_name: 'UC 网盘',   icon: '🟣', color: '#7B61FF', sort_order: 80, domain_hint: 'drive.uc.cn' },
   { code: 'cmcc',    display_name: '中国移动云盘', icon: '🟦', color: '#005BAC', sort_order: 90, domain_hint: 'yun.139.com' },
   { code: 'pikpak',  display_name: 'PikPak',    icon: '⚫', color: '#000000', sort_order: 100, domain_hint: 'mypikpak.com|pikpak.com' },
+  { code: 'guangya', display_name: '光鸭云盘', icon: '🦆', color: '#FF6800', sort_order: 110, domain_hint: 'guangyapan.com' },
   { code: 'magnet',  display_name: '磁力链接',  icon: '🧲', color: '#666666', sort_order: 200, domain_hint: 'magnet:' },
   { code: 'ed2k',    display_name: '电驴链接',  icon: '🐴', color: '#8B4513', sort_order: 210, domain_hint: 'ed2k://' },
 ];

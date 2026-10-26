@@ -97,6 +97,26 @@ export default function TitlesPage() {
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [categories, setCategories] = useState<CategoryBtn[]>([]);
+  // 2026-10-22: 微信联系信息 (从 xx_system_settings 读, 后台可改)
+  const [wechat, setWechat] = useState('HKmaipanren');
+  const [wechatQr, setWechatQr] = useState('/wechat-qr.png');
+  const [copiedWechat, setCopiedWechat] = useState(false);
+
+  // 拉微信配置 (公开可读, 不需要 admin)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch('/api/titles/wechat');
+        if (!r.ok) return;
+        const d = await r.json();
+        if (cancelled) return;
+        if (d?.wechat) setWechat(String(d.wechat));
+        if (d?.wechatQr) setWechatQr(String(d.wechatQr));
+      } catch { /* 用默认值 */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     setSubCategory('');
@@ -242,6 +262,55 @@ export default function TitlesPage() {
           </div>
         </div>
       </header>
+
+      {/* 2026-10-22: 微信联系 banner + 二维码 (醒目位置, 用户拍板) */}
+      {/*   - 微信号 / 二维码路径从 xx_system_settings 读, 后台可改 (改完立即生效) */}
+      <div className="border-b border-emerald-500/20 bg-gradient-to-r from-emerald-500/[0.12] via-teal-500/[0.08] to-transparent">
+        <div className="max-w-[1600px] mx-auto px-3 md:px-6 py-3 md:py-4 flex items-center gap-3 md:gap-5 flex-wrap">
+          {/* 二维码 */}
+          <div className="relative shrink-0">
+            <img
+              src={wechatQr}
+              alt="微信二维码"
+              className="w-16 h-16 md:w-20 md:h-20 rounded-xl bg-white p-1 shadow-lg shadow-emerald-500/20"
+            />
+            <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 text-white text-[10px] flex items-center justify-center border-2 border-[#0a0a0f]">
+              💬
+            </span>
+          </div>
+
+          {/* 文案 */}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 text-[10px] font-semibold tracking-wide">
+                扫码加好友
+              </span>
+              <h2 className="text-sm md:text-base font-bold text-white">
+                请联系微信 {wechat} 获取更多信息
+              </h2>
+            </div>
+            <p className="text-xs md:text-sm text-white/55 leading-relaxed">
+              资源更新 · 会员开通 · 定制需求 · 合作洽谈 —— 扫码添加好友, 第一时间获取动态
+            </p>
+            {/* 微信号可复制 */}
+            <button
+              onClick={() => {
+                try {
+                  navigator.clipboard.writeText(wechat);
+                  setCopiedWechat(true);
+                  setTimeout(() => setCopiedWechat(false), 2000);
+                } catch {}
+              }}
+              className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.08] hover:bg-white/[0.15] border border-white/10 text-emerald-300 text-xs font-mono transition"
+              title="点击复制微信号"
+            >
+              <span className="text-white/50">微信号</span>
+              <span className="font-semibold">{wechat}</span>
+              <span className="text-[10px]">{copiedWechat ? '✓ 已复制' : '📋'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
 
       <main className="max-w-[1600px] mx-auto px-3 md:px-6 py-4 md:py-6">
         {/* 5 个区切换 - mobile 2 列, PC 5 列 */}

@@ -41,3 +41,10 @@ zzmm-zzmm*.mjs
 .next/
 .vercel/
 node_modules/
+
+# 2026-10-26: 本地 build 日志 + 临时文件 (不提交)
+build.log
+HTTP
+build-run.log
+deploy-run.log
+*.tsbuildinfo

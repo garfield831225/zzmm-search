@@ -297,5 +297,6 @@ function detectSource(link: string): string {
   if (l.includes('quark.cn')) return 'quark';
   if (l.includes('baidu.com')) return 'baidu';
   if (l.includes('aliyun.com') || l.includes('alipan')) return 'aliyun';
+  if (l.includes('guangyapan.com')) return 'guangya';
   return 'other';
 }

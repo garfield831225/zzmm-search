@@ -18,12 +18,19 @@ function randSeg(n: number): string {
 }
 
 // VIP 套餐模板
-const VIP_PLANS: Record<string, { plan_id: string; duration: number; label: string; default_price: number }> = {
-  vip_30d:     { plan_id: 'VIP-30D',     duration: 30,   label: 'VIP 30天',   default_price: 12 },
-  vip_90d:     { plan_id: 'VIP-180D',    duration: 90,   label: 'VIP 季卡',   default_price: 58 },
-  vip_365d:    { plan_id: 'VIP-365D',    duration: 365,  label: 'VIP 年卡',   default_price: 98 },
-  vip_forever: { plan_id: 'VIP-FOREVER', duration: 0,    label: 'VIP 永久',   default_price: 198 },
-  vip_trial:   { plan_id: 'VIP-TRIAL-1D', duration: 1,   label: 'VIP 试用 1 天', default_price: 0 },
+// 2026-10-15: 价格重构 (用户拍板, 修正版)
+//   - VIP-30D 12 → 15
+//   - VIP-180D 删档 (老 plan_id, 用 vip_90d → VIP-90D 替代)
+//   - VIP-90D 新档 (¥40, 季卡, plan_id 改名 VIP-90D)
+//   - VIP-365D 98 → 150
+//   - VIP-FOREVER 198 → 388, **升级为永久 SVIP (user_group='svip')** (用户拍板, 跟 vip 并列)
+//   - 删除 vip_svip 新档 (用户说 vip-forever 直接变 svip 不要再加一档)
+const VIP_PLANS: Record<string, { plan_id: string; duration: number; label: string; default_price: number; user_group: string }> = {
+  vip_trial:   { plan_id: 'VIP-TRIAL-1D', duration: 1,    label: 'VIP 试用 1 天', default_price: 0,   user_group: 'vip' },
+  vip_30d:     { plan_id: 'VIP-30D',     duration: 30,   label: 'VIP 30天',   default_price: 15,  user_group: 'vip' },
+  vip_90d:     { plan_id: 'VIP-90D',     duration: 90,   label: 'VIP 季卡',   default_price: 40,  user_group: 'vip' },
+  vip_365d:    { plan_id: 'VIP-365D',    duration: 365,  label: 'VIP 年卡',   default_price: 150, user_group: 'vip' },
+  vip_forever: { plan_id: 'VIP-FOREVER', duration: 0,    label: '永久 SVIP',  default_price: 388, user_group: 'svip' },
 };
 
 function genCodeFull(channel: string): string {
@@ -125,7 +132,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // VIP 套餐 (vip_30d/180d/365d/forever)
+    // VIP 套餐 (vip_trial/30d/90d/365d/forever/svip)
     const plan = VIP_PLANS[planKey];
     if (!plan) return NextResponse.json({ error: '未知的 plan: ' + planKey }, { status: 400 });
 
@@ -143,9 +150,9 @@ export async function POST(req: NextRequest) {
           await pool.query(
             `INSERT INTO xx_activation_codes
              (code, code_type, plan_id, duration, channel, sent_note, batch_id, created_by, expires_at, is_used, user_group, price_at_issue)
-             VALUES ($1, 'vip', $2, $3, $4, $5, $6, $7, $8, false, 'vip', $9)
+             VALUES ($1, 'vip', $2, $3, $4, $5, $6, $7, $8, false, $9, $10)
              ON CONFLICT (code) DO NOTHING`,
-            [code, plan.plan_id, durationValue, channel, note, batchId, auth.userId, expiresAt, plan.default_price]
+            [code, plan.plan_id, durationValue, channel, note, batchId, auth.userId, expiresAt, plan.user_group, plan.default_price]
           );
           inserted++;
         } catch (e: any) {
@@ -159,7 +166,7 @@ export async function POST(req: NextRequest) {
       codes, plan: plan.label, plan_id: plan.plan_id, count, channel,
       channel_label: channel === 'wd' ? '微店' : '闲鱼',
       batch_id: batchId || '', price_at_issue: plan.default_price,
-      inserted, requested: count
+      inserted, requested: count, user_group: plan.user_group
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });

@@ -34,6 +34,7 @@ function detectSource(link: string): string {
   if (link.includes('aliyundrive.com')) return 'aliyun';
   if (link.includes('123pan.com')) return '123';
   if (link.includes('cloud.189.cn')) return 'tianyi';
+  if (link.includes('guangyapan.com')) return 'guangya';
   if (link.includes('magnet:')) return 'magnet';
   if (link.includes('ed2k://')) return 'ed2k';
   if (link.includes('thunder:') || link.includes('xunlei')) return 'thunder';
@@ -211,10 +212,11 @@ async function handleZezheSync(
       item.category || '其他',
       item.size || '',
       item.doc_sheet || inferDocSheetFromCategory(item.category || '其他'),
-      'zezhe',
+      // 2026-10-18 重点: 独立付费 sheet → single_pay, 不走 zezhe 通道
+      item.doc_sheet === '独立付费' ? 'single_pay' : 'zezhe',
     ]);
     try {
-      const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) WHERE link IS NOT NULL AND link != '' DO NOTHING RETURNING id`, params);
+      const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link, name) DO NOTHING RETURNING id`, params);
       inserted += (r as any[]).length;
     } catch (err: any) {
       console.error(`[zezhe-sync] 插入批次失败:`, err.message);
@@ -362,10 +364,11 @@ async function handleZezheFullSync(
       item.category || '其他',
       item.size || '',
       item.doc_sheet || inferDocSheetFromCategory(item.category || '其他'),
-      'zezhe',
+      // 2026-10-18 重点: 独立付费 sheet → single_pay, 不走 zezhe 通道
+      item.doc_sheet === '独立付费' ? 'single_pay' : 'zezhe',
     ]);
     try {
-      const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) WHERE link IS NOT NULL AND link != '' DO NOTHING RETURNING id`, params);
+      const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link, name) DO NOTHING RETURNING id`, params);
       inserted += (r as any[]).length;
     } catch (err: any) {
       console.error(`[zezhe-full-sync] 插入批次失败:`, err.message);
@@ -434,7 +437,8 @@ export async function POST(request: NextRequest) {
             item.doc_sheet || inferDocSheetFromCategory(item.category || '其他'),
           ]);
           try {
-            const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) WHERE link IS NOT NULL AND link != '' DO NOTHING RETURNING id`, params);
+            // 2026-10-18 修: 改 (link, name) 联合 unique (现成), 之前 (link) WHERE partial 缺 index 报 42P10
+            const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link, name) DO NOTHING RETURNING id`, params);
             totalImported += (r as any[]).length;
           } catch {
             totalFailed += batch.length;
@@ -461,6 +465,15 @@ export async function POST(request: NextRequest) {
     const channel: string = (importMode === 'zzmm' || importMode === 'zezhe-sync') ? 'zezhe' : 'other';
 
     const sql = neon(process.env.DATABASE_URL || '');
+
+    // 2026-10-18 重点: 泽泽妈 22 sheet 导入时, "独立付费" sheet 不属于 basic 免费内容, 不走 zezhe 通道
+    //   业务规则: 独立付费 sheet → import_channel='single_pay' (单独付费区)
+    //   zezhe 通道只包含基本免费内容 (21 个常规 sheet)
+    //   按 item.doc_sheet 拆分 channel: 每个 item 单独决定 import_channel
+    const finalChannelByItem = (item: any): string => {
+      if (item.doc_sheet === '独立付费') return 'single_pay';
+      return channel;
+    };
     const blacklist = await getBlacklistedCodes(sql);
 
     // 过滤黑名单访问码的记录
@@ -509,10 +522,11 @@ export async function POST(request: NextRequest) {
     for (let i = 0; i < filteredItems.length; i += BATCH) {
       const batch = filteredItems.slice(i, i + BATCH);
       // 2026-07-27: 加 doc_sheet 字段 (从 category 推, 套 sheet-mapping 合并规则)
-      const cols = 'name, link, link_code, source, category, size, doc_sheet, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel';
+      // 2026-10-18 重点: 加 pay_type + access_level 字段 (item 传过来的就尊重, 否则 default)
+      const cols = 'name, link, link_code, source, category, size, doc_sheet, type, tags, tmdb_id, imdb_id, status, valid_status, view_count, created_at, updated_at, import_channel, pay_type, access_level';
       const vals = batch.map((_: any, idx: number) => {
-        const base = idx * 8;
-        return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, $${base+7}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), $${base+8})`;
+        const base = idx * 10;
+        return `($${base+1}, $${base+2}, $${base+3}, $${base+4}, $${base+5}, $${base+6}, $${base+7}, DEFAULT, '{}', NULL, NULL, 'active', 'unchecked', 0, NOW(), NOW(), $${base+8}, $${base+9}, $${base+10})`;
       }).join(', ');
       const params: any[] = batch.flatMap((item: any) => [
         item.name || '',
@@ -522,11 +536,14 @@ export async function POST(request: NextRequest) {
         item.category || '其他',
         item.size || '',
         item.doc_sheet || inferDocSheetFromCategory(item.category || '其他'),
-        channel,
+        finalChannelByItem(item),  // 2026-10-18: 独立付费 sheet → single_pay, 其他走 channel
+        // 2026-10-18 重点: pay_type/access_level fallback 'free' (跟 column default 一致, 避免 NOT NULL 报错)
+        item.pay_type || 'free',
+        item.access_level || 'free',
       ]);
       try {
-        // ON CONFLICT (link) DO NOTHING：partial unique index 需带 WHERE 子句才能匹配
-        const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link) WHERE link IS NOT NULL AND link != '' DO NOTHING RETURNING id`, params);
+        // 2026-10-18 修: 改 (link, name) 联合 unique (现成), 之前 (link) WHERE partial 缺 index 报 42P10
+        const r = await sql(`INSERT INTO xx_resources (${cols}) VALUES ${vals} ON CONFLICT (link, name) DO NOTHING RETURNING id`, params);
         const inserted = (r as any[]).length;  // 实际插入的数量
         totalImported += inserted;
       } catch (err: any) {

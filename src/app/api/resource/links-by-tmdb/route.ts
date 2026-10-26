@@ -24,6 +24,7 @@ const SOURCE_PRIORITY: Record<string, number> = {
   'uc': 9, 'UC网盘': 9,
   'tianyi': 10, '天翼云盘': 10,
   'yidong': 11, '移动云盘': 11,
+  'guangya': 12, '光鸭云盘': 12,
 };
 
 const SOURCE_DISPLAY: Record<string, string> = {
@@ -31,7 +32,7 @@ const SOURCE_DISPLAY: Record<string, string> = {
   'aliyun': '阿里云盘', '123': '123网盘', 'tianyi': '天翼云盘',
   'magnet': '磁力链接', 'ed2k': 'ed2k链接', 'thunder': '迅雷链接',
   'xunlei': '迅雷网盘', 'uc': 'UC网盘', 'yidong': '移动云盘',
-  'ali': '阿里云盘',
+  'ali': '阿里云盘', 'guangya': '光鸭云盘',
 };
 
 export async function GET(request: NextRequest) {

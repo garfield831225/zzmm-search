@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
 
+import { recordClick } from '@/lib/track-click';  // 2026-10-20 异常用户登录: 全 API 点击计数
 export const dynamic = 'force-dynamic';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
@@ -20,7 +21,9 @@ export async function GET(req: NextRequest) {
     }
     if (!token) return NextResponse.json({ error: '未登录' }, { status: 401 });
     const payload = jwt.verify(token, JWT_SECRET) as any;
-    const userId = String(payload.id);
+    const userId = String(payload.id);      // 2026-10-20: 全 API 点击计数 (fire-and-forget)
+      void recordClick(req, Number(payload.id));
+
 
     const sql = neon(process.env.DATABASE_URL || '');
     const userGroup = String(payload.user_group || payload.group || '').toLowerCase();

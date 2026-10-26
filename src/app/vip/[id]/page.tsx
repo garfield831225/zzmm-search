@@ -489,6 +489,7 @@ function DownloadPanel({ links, title }: { links: VipLink[]; title: string }) {
     if (s?.includes('aliyun') || s?.includes('alipan')) return '☁️ 阿里云盘';
     if (s?.includes('baidu')) return '📦 百度网盘';
     if (s?.includes('quark')) return '⚡ 夸克网盘';
+    if (s?.includes('guangyapan')) return '🦆 光鸭云盘';
     if (s?.includes('115')) return '💾 115 网盘';
     if (s?.includes('magnet')) return '🧲 磁力链接';
     if (s?.includes('ed2k')) return '🔗 ed2k 链接';

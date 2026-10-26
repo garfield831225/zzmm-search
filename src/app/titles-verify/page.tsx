@@ -1,16 +1,12 @@
 'use client';
-// 2026-08-04: /titles 进入前验证码门
-//   - 输入 2015 → setCookie titles_2015 + set sessionStorage → 跳 /titles
-//   - 错误密码 → 提示重新输入
-//   - middleware 也会在 /titles 之前检查 cookie
-//
-// ⚠️ 静态密码验证是简单防护, 加密强度低, 但能挡 90% 自动化爬虫
-
+// 2026-10-22: /titles 访问码验证页 (安全码存 DB, 后台可改)
+//   - 密码硬编码 '2015' → 改成调 /api/titles/verify 服务端比对
+//   - 改码后台改完立即生效, 不用重新发版
+//   - 输对 → setCookie titles_2015 + set sessionStorage → 跳 /titles
+//   - 5 分钟内最多 10 次尝试 (服务端限流, 防暴力猜 4 位数字)
 'use client';
 import { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-
-const PASSWORD = '2015';
 
 function TitlesVerifyInner() {
   const router = useRouter();
@@ -19,28 +15,46 @@ function TitlesVerifyInner() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setSubmitting(true);
-
-    if (code.trim() !== PASSWORD) {
-      setError('❌ 密码错误, 请重新输入');
-      setSubmitting(false);
+    const value = code.trim();
+    if (!/^\d{4}$/.test(value)) {
+      setError('请输入 4 位数字安全码');
       return;
     }
+    setSubmitting(true);
 
-    // 1) setCookie (让 middleware 放行, 持久 7 天)
-    const expires = new Date();
-    expires.setDate(expires.getDate() + 7);
-    document.cookie = `titles_2015=1; expires=${expires.toUTCString()}; path=/; SameSite=Lax`;
+    try {
+      // 服务端比对 (安全码在 DB, 后台可改)
+      const res = await fetch('/api/titles/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: value }),
+      });
+      const data = await res.json().catch(() => ({}));
 
-    // 2) set sessionStorage (防 cookie 被禁)
-    try { sessionStorage.setItem('titles_2015', '1'); } catch {}
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || '❌ 安全码错误, 请重新输入');
+        setSubmitting(false);
+        return;
+      }
 
-    // 3) 跳 /titles
-    const redirect = params.get('redirect') || '/titles';
-    setTimeout(() => router.push(redirect), 200);
+      // 1) setCookie (让 middleware 放行, 持久 7 天)
+      const expires = new Date();
+      expires.setDate(expires.getDate() + 7);
+      document.cookie = `titles_2015=1; expires=${expires.toUTCString()}; path=/; SameSite=Lax`;
+
+      // 2) set sessionStorage (防 cookie 被禁)
+      try { sessionStorage.setItem('titles_2015', '1'); } catch {}
+
+      // 3) 跳 /titles
+      const redirect = params.get('redirect') || '/titles';
+      router.push(redirect);
+    } catch (err: any) {
+      setError('网络错误, 请重试');
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -55,7 +69,7 @@ function TitlesVerifyInner() {
           </div>
           <h1 className="text-xl font-bold mb-1">泽泽资源 - 进入验证</h1>
           <p className="text-xs text-white/50">
-            请输入 4 位验证码以进入 /titles 页面
+            请输入 4 位数字安全码以进入 /titles 页面
           </p>
         </div>
 
@@ -90,7 +104,7 @@ function TitlesVerifyInner() {
         </button>
 
         <div className="mt-4 text-[10px] text-white/30 text-center">
-          (验证码 7 天内自动记忆, 可直接访问)
+          (安全码 7 天内自动记忆, 可直接访问)
         </div>
       </form>
     </div>

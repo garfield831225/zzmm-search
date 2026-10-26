@@ -30,6 +30,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
 
+import { recordClick } from '@/lib/track-click';  // 2026-10-20 异常用户登录: 全 API 点击计数
 // 2026-08-01: 修 Neon HTTP endpoint 偶发返 stale data bug
 //   (catalog 看到 7/31 11:00 那 13 条外语电影 link 没插入前的 7516, 但 DB 实际 7529)
 //   - neonConfig.fetchConnectionCache = false 强制每次新 connection
@@ -48,14 +49,14 @@ const SOURCE_DISPLAY_MAP: Record<string, string> = {
   '115': '115网盘', 'baidu': '百度网盘', 'quark': '夸克网盘',
   'aliyun': '阿里云盘', '123': '123网盘', 'tianyi': '天翼云盘',
   'magnet': '磁力链接', 'ed2k': 'ed2k链接', 'thunder': '迅雷链接',
-  'xunlei': '迅雷', 'uc': 'UC网盘', 'yidong': '移动云盘',
+  'xunlei': '迅雷', 'uc': 'UC网盘', 'yidong': '移动云盘', 'guangya': '光鸭云盘',
   'other': '⏳ 待归类',  // 2026-07-27: vip section 下"待归类"特殊 source
 };
 const SOURCE_KEY_MAP: Record<string, string> = {
   '115网盘': '115', '百度网盘': 'baidu', '阿里云盘': 'aliyun',
   '夸克网盘': 'quark', '123网盘': '123', '天翼云盘': 'tianyi',
   '磁力链接': 'magnet', 'ed2k链接': 'ed2k', '迅雷链接': 'thunder',
-  '迅雷': 'xunlei', 'UC网盘': 'uc', '移动云盘': 'yidong',
+  '迅雷': 'xunlei', 'UC网盘': 'uc', '移动云盘': 'yidong', '光鸭云盘': 'guangya',
   '⏳ 待归类': 'other',
 };
 
@@ -71,6 +72,9 @@ export async function GET(request: NextRequest) {
       const JWT_SECRET = process.env.JWT_SECRET || 'cLWhs2015';
       const payload = jwt.verify(authHeader.replace('Bearer ', ''), JWT_SECRET) as any;
       currentUserId = Number(payload.id) || null;
+
+      // 2026-10-20: 全 API 点击计数 (fire-and-forget)
+      void recordClick(request, Number(payload.id));
     } catch { /* 匿名用户 */ }
   }
 
@@ -78,10 +82,22 @@ export async function GET(request: NextRequest) {
   const section = searchParams.get('section') || '';  // '' (全部) | zezhe | vip | code
   const sheet = searchParams.get('sheet') || '';        // zezhe 区分类
   const source = searchParams.get('source') || '';      // vip/code 区分类 (含 'other' 待归类)
+  // 2026-10-16: 扩展 sort 支持 release_date / added_time / rating (默认 asc=按 created_at 旧→新)
   const sort = (searchParams.get('sort') || 'asc').toLowerCase();
   const zone = searchParams.get('zone') || 'titles';
   const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
   const pageSize = Math.min(150, Math.max(1, parseInt(searchParams.get('pageSize') || '50')));
+  // 2026-10-16: 5 行筛选 — region/year/matchStatus (跟 /api/search 对齐)
+  const region = searchParams.get('region') || '';
+  const year = searchParams.get('year') || '';
+  const matchStatus = searchParams.get('matchStatus') || '';
+  // region → 国家代码 (跟 /api/search REGION_CODES 一致)
+  const REGION_CODES: Record<string, string[]> = {
+    '大陆': ['CN'],
+    '欧美': ['US', 'GB', 'FR', 'DE', 'IT', 'ES', 'CA', 'AU', 'NZ'],
+    '日韩': ['JP', 'KR'],
+    '港澳台': ['HK', 'TW', 'MO'],
+  };
 
   try {
     // 1. Section 过滤 (3 大区, 没 pending 了)
@@ -111,7 +127,13 @@ export async function GET(request: NextRequest) {
       conds.push(renum);
       condVals.push(...vals);
     };
-    addCond('r.status = $1', 'active');
+    // 2026-09-27: tg section 用 active, 其他 (zezhe/默认/library) 用 status != 'deleted'
+    // zehe 文档含 matched/unmatched (62k+),tg section 只要 active (345k)
+    if (section === 'tg') {
+      addCond('r.status = $1', 'active');
+    } else {
+      addCond('r.status != $1', 'deleted');
+    }
     if (section !== '') conds.push(sectionFilter);
     // sheet 过滤: 普通 sheet 用等值, "未分类" 用 IS NULL
     if (isUnclassifiedSheet) {
@@ -122,21 +144,62 @@ export async function GET(request: NextRequest) {
       // vip/code 区的 source 过滤; 'other' = category='其他' (待归类网盘)
       if (source === 'other') {
         // 待归类: 是网盘 + category='其他' + 不是 zezhe
-        conds.push("(r.source IN ('baidu','quark','aliyun','115','uc','xunlei','123','tianyi','yidong','magnet','ed2k') AND r.category = '其他')");
+        conds.push("(r.source IN ('baidu','quark','aliyun','115','uc','xunlei','123','tianyi','yidong','magnet','ed2k','guangya') AND r.category = '其他')");
       } else {
         addCond('r.source = $1', SOURCE_KEY_MAP[source] || source);
       }
     }
     if (q) addCond('(r.name ILIKE $1 OR r.category ILIKE $1)', `%${q}%`);
+    // 2026-10-16: region 过滤 (按 c.origin_country, LEFT JOIN xx_tmdb_cache c)
+    const regionCodes = REGION_CODES[region];
+    if (regionCodes) {
+      const regionParts: string[] = ["c.origin_country IS NOT NULL AND c.origin_country <> ''"];
+      for (const c of regionCodes) {
+        const offset = condVals.length;
+        regionParts.push(`(c.origin_country LIKE $${offset + 1})`);
+        condVals.push('%' + c + '%');
+      }
+      conds.push('(' + regionParts.join(' OR ') + ')');
+    }
+    // 2026-10-16: year 过滤 (按 c.release_date)
+    if (year && year !== '') {
+      if (['2026','2025','2024','2023','2022','2021','2020'].includes(year)) {
+        addCond('c.release_date LIKE $1', year + '-%');
+      } else if (year === '2010-2019') {
+        conds.push("c.release_date >= '2010-01-01' AND c.release_date <= '2019-12-31'");
+      } else if (year === '2000-2009') {
+        conds.push("c.release_date >= '2000-01-01' AND c.release_date <= '2009-12-31'");
+      }
+    }
+    // 2026-10-16: matchStatus 过滤 (跟 /api/search 一致)
+    if (matchStatus === '已批配') {
+      conds.push("(r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000)");
+    } else if (matchStatus === '未匹配') {
+      conds.push("NOT (r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000)");
+    }
     const whereSQL = 'WHERE ' + conds.join(' AND ');
 
-    // 4. Count
-    const countSQL = `SELECT COUNT(*) as cnt FROM xx_resources r ${whereSQL}`;
+    // 4. Count — 2026-10-16: region/year/matchStatus 引用 c (xx_tmdb_cache), 需要 LEFT JOIN c
+    const countSQL = `SELECT COUNT(*) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id ${whereSQL}`;
     const countRows = await sql(countSQL, condVals) as any[];
     const total = parseInt(countRows?.[0]?.cnt || '0');
 
     // 5. 主表 + 副表 LEFT JOIN 单次 query (json_agg 聚合副链接)
-    const orderDir = sort === 'desc' ? 'DESC' : 'ASC';
+    // 2026-10-16: sort 扩展支持 release_date / added_time / rating
+    let orderClause: string;
+    if (sort === 'desc') {
+      orderClause = 'r.created_at DESC, r.id DESC';
+    } else if (sort === 'asc') {
+      orderClause = 'r.created_at ASC, r.id ASC';
+    } else if (sort === 'release_date') {
+      orderClause = 'COALESCE(c.release_date, \'9999-12-31\') DESC, r.id DESC';
+    } else if (sort === 'added_time') {
+      orderClause = 'r.created_at DESC, r.id DESC';
+    } else if (sort === 'rating') {
+      orderClause = 'NULLIF(c.vote_average, \'\')::numeric DESC NULLS LAST, COALESCE(NULLIF(c.vote_count, \'\')::int, 0) DESC, r.id DESC';
+    } else {
+      orderClause = 'r.created_at ASC, r.id ASC';
+    }
     const offset = (page - 1) * pageSize;
     const limitPlaceholder = `$${condVals.length + 1}`;
     const offsetPlaceholder = `$${condVals.length + 2}`;
@@ -169,7 +232,7 @@ export async function GET(request: NextRequest) {
       FROM xx_resources r
       LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
       ${whereSQL}
-      ORDER BY r.created_at ${orderDir}, r.id ${orderDir}
+      ORDER BY ${orderClause}
       LIMIT ${limitPlaceholder} OFFSET ${offsetPlaceholder}
     `;
     const dbRows = await sql(listSQL, [...condVals, pageSize, offset]) as any[];
@@ -180,9 +243,13 @@ export async function GET(request: NextRequest) {
     //   - admin 默认全解锁
     //   - 已解锁 → 前端显示 link; 未解锁 → 前端显示解锁按钮
     const unlockedIds = new Set<number>();
+    let userInfo: any = null;
     if (currentUserId) {
       try {
         const uRows = await sql`SELECT id, user_group FROM xx_users WHERE id = ${currentUserId} LIMIT 1` as any[];
+        if (uRows[0]) {
+          userInfo = uRows[0];
+        }
         if (uRows[0]?.user_group === 'admin') {
           // admin 全解锁 — 标所有 row.id
           dbRows.forEach((r: any) => unlockedIds.add(r.id));
@@ -195,9 +262,11 @@ export async function GET(request: NextRequest) {
 
     const items = dbRows.map((row: any) => {
       const subLinks = Array.isArray(row.sub_links) ? row.sub_links : (typeof row.sub_links === 'string' ? JSON.parse(row.sub_links) : []);
+      // 2026-10-15: name 兜底 (2026-10-13 17:57 一批 115 链接漏提文件名, name='', 显示 [无标题 #ID])
+      const rawName = row.display_title || row.name;
       const base: any = {
         id: row.id,
-        name: row.display_title || row.name,
+        name: rawName && String(rawName).trim() ? rawName : `（无标题资源 #${row.id}）`,
         displayCategory: row.doc_sheet || row.category,
         category: row.category,
         docSheet: row.doc_sheet,
@@ -227,10 +296,12 @@ export async function GET(request: NextRequest) {
         base.payType = row.pay_type || 'free';
       }
       // 2026-08-16: 加 unlocked 字段 (供前端 payType=lumen/code 时决定显示链接)
-      base.unlocked = unlockedIds.has(row.id);
+      // 2026-10-15: admin + svip 永远 unlocked (不需要付费/解锁, 直接看 link)
+      base.unlocked = (userInfo?.user_group === 'admin' || userInfo?.user_group === 'svip') || unlockedIds.has(row.id);
       // 2026-08-16: payType='lumen'/'code' 且未解锁 → 隐藏 link/url
       //   (admin 手动发布的单资源付费必须先流明解锁, 否则看不到)
-      const hideLink = (row.pay_type === 'lumen' || row.pay_type === 'code') && !base.unlocked;
+      // 2026-10-15: admin + svip 永远不 hide
+      const hideLink = (row.pay_type === 'lumen' || row.pay_type === 'code') && !base.unlocked && userInfo?.user_group !== 'admin' && userInfo?.user_group !== 'svip';
       if (subLinks && subLinks.length > 0 && !hideLink) {
         base.links = subLinks;
       } else if (row.link && !hideLink) {
@@ -258,11 +329,11 @@ export async function GET(request: NextRequest) {
     //    code → source 分布
     let categories: { name: string; key: string; count: number }[] = [];
     if (section === 'zezhe') {
-      // 7a. 21-sheet 库的 sheet 名 + count
+      // 7a. 21-sheet 库的 sheet 名 + count (含 matched/unmatched)
       const sheetRows = await sql`
         SELECT doc_sheet, COUNT(*) as cnt
         FROM xx_resources
-        WHERE status='active' AND import_channel IN ('zezhe', 'zezemom_excel') AND doc_sheet IS NOT NULL
+        WHERE status != 'deleted' AND import_channel IN ('zezhe', 'zezemom_excel') AND doc_sheet IS NOT NULL
         GROUP BY doc_sheet
         ORDER BY cnt DESC, doc_sheet ASC
       `;
@@ -270,11 +341,11 @@ export async function GET(request: NextRequest) {
       // (catalog HTTP endpoint 看到 stale 7/31 11:00 那 13 条外语电影 link 不存在, 但 DB 实际 7529)
       // (Pool 走 WebSocket + TCP, 强制 read-write, 不走 HTTP read replica)
       categories = (sheetRows || []).map((r: any) => ({ name: r.doc_sheet, key: r.doc_sheet, count: parseInt(r.cnt) }));
-      // 7b. 追加 "未分类" (sheet=NULL 的, 大多是原盘类, 18868 条)
+      // 7b. 追加 "未分类" (sheet=NULL 的, 大多是原盘类)
       const unclassifiedRow = await sql`
         SELECT COUNT(*)::int as cnt
         FROM xx_resources
-        WHERE status='active' AND import_channel IN ('zezhe', 'zezemom_excel') AND doc_sheet IS NULL
+        WHERE status != 'deleted' AND import_channel IN ('zezhe', 'zezemom_excel') AND doc_sheet IS NULL
       `;
       if (unclassifiedRow[0]?.cnt > 0) {
         categories.push({ name: '📦 未分类 (原盘等)', key: '__unclassified__', count: parseInt(unclassifiedRow[0].cnt) });

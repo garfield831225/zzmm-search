@@ -143,9 +143,15 @@ export async function POST(req: NextRequest) {
       //   之前无条件 SET user_group='vip' 把 admin 账号也降级了 (id=1 admin 被改成 vip)
       //   修法: CASE WHEN user_group='admin' THEN 'admin' ELSE 'vip' END
       //   expire_at 还是要 extend (admin 用 2100 永久日期, extend 也无所谓)
+      // 2026-10-15: vip_forever (plan_id='VIP-FOREVER') → user_group='svip' (永久变 SVIP)
+      //   admin 仍然 admin, 永久码 → svip, 其他 (vip_30d/90d/365d/trial) → vip
       const updatedUser = await sql`
         UPDATE xx_users
-        SET user_group = CASE WHEN user_group = 'admin' THEN 'admin' ELSE 'vip' END,
+        SET user_group = CASE
+              WHEN user_group = 'admin' THEN 'admin'
+              WHEN ${c.plan_id} = 'VIP-FOREVER' THEN 'svip'
+              ELSE 'vip'
+            END,
             expire_at = (CASE
               WHEN expire_at IS NULL OR expire_at < NOW() THEN NOW() + (${c.duration} * INTERVAL '1 day')
               ELSE expire_at + (${c.duration} * INTERVAL '1 day')
@@ -180,6 +186,41 @@ export async function POST(req: NextRequest) {
           INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description, created_at)
           VALUES (${userId}, 0, 0, ${logType}, ${c.code}, ${logDesc}, NOW())
         `.catch(() => {});
+
+        // 2026-10-15: 激活 lumen bonus (admin/viewer_apply 不送, 真实 vip/svip 用户送)
+        //   VIP-30D  → +5 lumen
+        //   VIP-90D  → +20 lumen
+        //   VIP-365D → +100 lumen
+        //   VIP-FOREVER (svip) → +300 lumen
+        //   VIP-TRIAL-1D → 0 (体验码不送)
+        const LUMEN_BONUS: Record<string, number> = {
+          'VIP-30D': 5,
+          'VIP-90D': 20,
+          'VIP-365D': 100,
+          'VIP-FOREVER': 300,
+          'VIP-SVIP': 300,  // alias
+        };
+        const lumenBonus = !isCurrentAdmin && !isViewerApply ? (LUMEN_BONUS[c.plan_id] || 0) : 0;
+        if (lumenBonus > 0) {
+          try {
+            await sql`
+              INSERT INTO xx_user_lumen (user_id, balance, updated_at)
+              VALUES (${userId}, ${lumenBonus}, NOW())
+              ON CONFLICT (user_id) DO UPDATE SET balance = xx_user_lumen.balance + ${lumenBonus}, updated_at = NOW()
+            `;
+            // 拿最新余额
+            const balRow = await sql`SELECT balance FROM xx_user_lumen WHERE user_id = ${userId}` as any[];
+            const newBalance = balRow[0]?.balance ?? lumenBonus;
+            await sql`
+              INSERT INTO xx_lumen_logs (user_id, change_amount, balance_after, type, ref_code, description, created_at)
+              VALUES (${userId}, ${lumenBonus}, ${newBalance}, 'activate_bonus', ${c.code}, ${`激活码 ${c.plan_id} 赠送 +${lumenBonus} lumen`}, NOW())
+            `;
+          } catch (e: any) {
+            console.error('[activate] lumen bonus failed:', e.message);
+            // bonus 失败不阻塞激活流程
+          }
+        }
+
         return NextResponse.json({
           success: true,
           code_type: 'vip',
@@ -282,12 +323,16 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// 2026-10-14: 加 VIP-90D + VIP-SVIP, VIP-180D 标记停售 (老码兼容保留 label)
 function planLabelByPlanId(planId: string): string {
   const map: Record<string, string> = {
     'VIP-30D': '30 天会员',
-    'VIP-180D': '季卡会员',
+    'VIP-90D': '季卡会员',
+    'VIP-180D': '季卡会员 (停售)',
     'VIP-365D': '年卡会员',
     'VIP-FOREVER': '永久会员',
+    'VIP-SVIP': '永久 SVIP',
+    'VIP-TRIAL-1D': '试用 1 天',
   };
   return map[planId] || planId;
 }

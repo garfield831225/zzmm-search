@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
 
+import { recordClick } from '@/lib/track-click';  // 2026-10-20 异常用户登录: 全 API 点击计数
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 15;
@@ -37,6 +38,8 @@ async function getUserId(req: NextRequest): Promise<number | null> {
   if (!token) return null;
   try {
     const payload = jwt.verify(token, JWT_SECRET) as any;
+      // 2026-10-20: 全 API 点击计数 (fire-and-forget)
+      void recordClick(req, Number(payload.id));
     return parseInt(payload.id);
   } catch {
     return null;

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { Crown, Clock, Infinity, Sparkles, Tag, ArrowRight, Home, Store, Check } from 'lucide-react';
+import { Crown, Clock, Infinity, Sparkles, Tag, ArrowRight, Home, Store, Check, Gift } from 'lucide-react';
 
 // 2026-07-29 全站闲鱼 VIP 购买引导页
 // 替换原 /shop (单资源购买) 作为 VIP 升级入口
@@ -18,11 +18,12 @@ import { Crown, Clock, Infinity, Sparkles, Tag, ArrowRight, Home, Store, Check }
 const SHOP_PRODUCT_URL = 'https://m.tb.cn/h.83JDFcd?tk=0ZuHgET6kFS';
 const SHOP_STORE_URL = 'https://m.tb.cn/h.8WtUS7Z?tk=qNj9gET60wz';
 
+// 2026-10-15: 价格重构 (修正版, vip_forever 直接变永久 SVIP, 不要再加一档)
 const PLANS = [
   { key: 'month', label: '月度', price: '¥15', days: 30, color: 'from-cyan-500 to-blue-600', badge: '', desc: '体验' },
   { key: 'season', label: '季度', price: '¥40', days: 90, color: 'from-violet-500 to-purple-600', badge: '', desc: '划算' },
   { key: 'year', label: '年度', price: '¥150', days: 365, color: 'from-pink-500 to-rose-600', badge: '热销', desc: '超值' },
-  { key: 'forever', label: '永久', price: '¥388', days: 0, color: 'from-amber-500 to-orange-600', badge: '至尊', desc: '终身' },
+  { key: 'forever', label: '永久 SVIP', price: '¥388', days: 0, color: 'from-amber-500 via-orange-500 to-rose-500', badge: '至尊', desc: '终身' },
 ];
 
 const CLOUDS = ['115 网盘', '百度网盘', '夸克网盘', '阿里云盘', '迅雷', 'UC', '天翼云盘', '123 网盘', '移动云'];
@@ -31,6 +32,9 @@ export default function UpgradePage() {
   const router = useRouter();
   const [logged, setLogged] = useState(false);
   const [userGroup, setUserGroup] = useState<string>('user');
+  // 2026-10-15: basic 月度 1 天 vip 体验 claim 状态
+  const [claimStatus, setClaimStatus] = useState<{ eligible: boolean; vip_expire_at?: string | null; claimed_this_month?: boolean; period_key?: string } | null>(null);
+  const [claiming, setClaiming] = useState(false);
 
   useEffect(() => {
     const t = localStorage.getItem('token');
@@ -41,7 +45,41 @@ export default function UpgradePage() {
     } catch {}
   }, []);
 
-  const isVip = userGroup === 'vip' || userGroup === 'admin';
+  // 2026-10-15: basic 用户拉 claim 状态
+  useEffect(() => {
+    if (!logged) return;
+    if (userGroup !== 'basic') return;
+    const tk = localStorage.getItem('token') || '';
+    fetch('/api/basic-vip-claim', { headers: { Authorization: `Bearer ${tk}` } })
+      .then(r => r.json())
+      .then(d => setClaimStatus(d))
+      .catch(() => setClaimStatus(null));
+  }, [logged, userGroup]);
+
+  const claimVipTrial = async () => {
+    setClaiming(true);
+    try {
+      const tk = localStorage.getItem('token') || '';
+      const r = await fetch('/api/basic-vip-claim', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${tk}` },
+      });
+      const d = await r.json();
+      if (r.ok) {
+        setClaimStatus({ eligible: false, claimed_this_month: true, period_key: claimStatus?.period_key, vip_expire_at: d.vip_expire_at });
+        alert('🎉 1 天 vip 体验已激活! 24h 后自动降级 basic');
+      } else {
+        alert(d.error || '领取失败');
+      }
+    } catch (e: any) {
+      alert('领取失败: ' + (e.message || '未知错误'));
+    } finally {
+      setClaiming(false);
+    }
+  };
+
+  const isVip = userGroup === 'vip' || userGroup === 'svip' || userGroup === 'admin';
+  const isBasic = userGroup === 'basic';
 
   // 2026-08-08: 如果是 ?from=lovemovie 跳过来的 + 已登录 + 是 VIP/admin
   // 自动重定向到子域名影视站 (server.py 在 lovemovie.zzmm-search.uk)
@@ -103,6 +141,39 @@ export default function UpgradePage() {
               <div className="font-medium">您已经是 VIP 会员</div>
               <div className="text-xs text-amber-300/70 mt-1">如需续费，请到闲鱼选 SPU 下单</div>
             </div>
+          </motion.div>
+        )}
+
+        {/* 2026-10-15: basic 每月 1 天 vip 体验 claim 按钮 */}
+        {isBasic && claimStatus && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 bg-gradient-to-r from-pink-500/20 to-violet-500/20 border border-pink-500/30 rounded-xl text-white/90 text-sm flex items-center gap-3"
+          >
+            <Gift className="w-6 h-6 flex-shrink-0 text-pink-300" />
+            {claimStatus.claimed_this_month ? (
+              <div className="flex-1">
+                <div className="font-medium text-pink-200">本月 1 天 vip 体验已领取</div>
+                <div className="text-xs text-white/60 mt-0.5">
+                  vip 到期: {claimStatus.vip_expire_at ? new Date(claimStatus.vip_expire_at).toLocaleString('zh-CN') : '—'} · 下月 1 号再来
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex-1">
+                  <div className="font-medium">🎁 领取本月 1 天 vip 体验</div>
+                  <div className="text-xs text-white/60 mt-0.5">basic 月度福利 · 24h 自动降级</div>
+                </div>
+                <button
+                  onClick={claimVipTrial}
+                  disabled={claiming}
+                  className="px-4 py-1.5 bg-gradient-to-r from-pink-500 to-violet-500 hover:opacity-90 disabled:opacity-50 rounded-lg text-sm font-medium transition"
+                >
+                  {claiming ? '领取中...' : '立即领取'}
+                </button>
+              </>
+            )}
           </motion.div>
         )}
 

@@ -110,6 +110,7 @@ export async function POST(req: NextRequest) {
       if (h.includes('tianyi') || h.includes('189')) return 'tg_tianyi';
       if (h.includes('yidong') || h.includes('139')) return 'tg_yidong';
       if (h.includes('quark')) return 'tg_quark';
+  if (h.includes('guangya')) return 'tg_guangya';
       if (h.includes('music')) return 'tg_music';
       if (h.includes('baidu')) return 'tg_baidu';
     }
@@ -128,6 +129,7 @@ export async function POST(req: NextRequest) {
     const dominant = Object.entries(sourceCount).sort((a, b) => b[1] - a[1])[0][0];
     if (dominant === 'aliyun') return 'tg_aliyun';
     if (dominant === 'quark') return 'tg_quark';
+    if (dominant === 'guangya') return 'tg_guangya';
     if (dominant === 'baidu') return 'tg_baidu';
     if (dominant === 'magnet' || dominant === 'ed2k') return 'tg_magnet';
     if (dominant === '123') return 'tg_123';
@@ -288,7 +290,8 @@ export async function POST(req: NextRequest) {
   }
 
   // 5. 去重 L1: 资源入 xx_resources (1条/消息), 副链接入 xx_resource_links (N条)
-  let l1Inserted = 0;
+  let l1Inserted = 0;   // 新增 (真 INSERT)
+  let l1Updated = 0;    // 更新 (同 link 已存在, DO UPDATE)
   let l1Skipped = 0;
   let l1Failed = 0;
   let l1LinksInserted = 0;
@@ -299,10 +302,11 @@ export async function POST(req: NextRequest) {
     // Neon serverless v3 的 RETURNING 不可靠, 不能用 r?.[0]?.id 判定
     // ANY() array literal 对中文/特殊字符转义坏, 改单条 SELECT 50 并发
     // 2026-07-26 改: 50 并发 → 5 并发 (Neon 免费版 RPS 限制 5/s, 50 并发排队卡到 100s+)
-    // 2026-08-12 改: 5 并发 → 2 并发 (用户报 batch 1 288 条 90s 超时 + batch 2 46s 网络断开)
-    //   实测: 5 并发 × 3 SQL/条 = 174 SQL, 90s 内打完撞 Neon RPS 5 限制, Neon 端拒后续 SQL 触发 batch 2 失败
-    //   改 2 并发 + 合并 before+after SELECT → 2 SQL/条, 288 条 144 SQL 在 RPS 5 内能稳定跑
-    const CONCURRENCY = 2;
+    // 2026-10-19 改: 1 并发 → 8 并发 (Neon HTTP proxy max=10 够用, 单批 500 candidates × 3 SQL = 1500 SQL 串行太慢)
+    //   实测 proxy 10 并发 18ms, 8 并发足够; 单批 500 candidates 走 8 并发 ≈ 60-90s (client abort 180s)
+    //   之前 1 并发: 1300 candidates × 3 SQL 串行 = 800s, 必超 180s abort
+    //   8 并发: 500 candidates × 3 SQL 并行 = 200 SQL / 8 = 25s, 跟实际 Neon RPS 5-8 匹配
+    const CONCURRENCY = 8;
 
     for (let i = 0; i < candidates.length; i += CONCURRENCY) {
       const chunk = candidates.slice(i, i + CONCURRENCY);
@@ -311,13 +315,35 @@ export async function POST(req: NextRequest) {
       //   2026-08-12 优化: 之前 2 次 SELECT (before + after), 改 1 次拿 (id, existed)
       const beforeResults = await Promise.all(chunk.map(async (c) => {
         try {
-          const r = await sql`SELECT id, name FROM xx_resources WHERE link = ${c.link} LIMIT 1` as any[];
-          const existing = r && r[0];
-          // existed: 链接 + 名字都匹配 (业务去重规则)
-          const existed = existing && existing.name === c.name;
-          return { key: `${c.link}\u0000${c.name}`, existed, id: existed ? existing.id : null };
+          // 2026-10-26 改: 按 link 查 (不再 link+name) —— 业务去重规则是"同一链接只留一条"
+          //   TG 剧集的 name 带集数后缀 (更新至14集/16集/18集...), 同一 link 每集一个 name
+          //   → (link,name) 唯一约束拦不住 → 每次导入都新插 (实测库里 2158 组重复 / 17219 条)
+          //   现在: link 已存在 → UPDATE 那条 (刷新 name/集数), 不 INSERT 新行
+          // 2026-10-26 修: 必须过滤 status —— 软删记录 (status='deleted') 仍占用 (link,name) 唯一约束
+          //   查不到 active 的就拿 deleted 的, 后面 DO UPDATE 时把它恢复成 active (内容又有了)
+          //   不然: 命中软删记录 → UPDATE 成功但状态还是 deleted → 用户看不到刚导入的资源
+          const r = await sql`
+            SELECT id, name, status FROM xx_resources
+            WHERE link = ${c.link} AND status = 'active'
+            ORDER BY id LIMIT 1
+          ` as any[];
+          let existing = r && r[0];
+          if (!existing) {
+            // 该 link 没有 active 记录 → 看有没有被软删的 (去重时标记的), 准备复活
+            const r2 = await sql`
+              SELECT id, name, status FROM xx_resources
+              WHERE link = ${c.link} AND status = 'deleted'
+              ORDER BY id DESC LIMIT 1
+            ` as any[];
+            existing = r2 && r2[0];
+          }
+          // existed: 该 link 已经有记录 (不论 name 是否相同)
+          //   软删的 (status='deleted') 也算 —— 复活它比新插一行好 (避免又占一个 (link,name) 槽位)
+          const existed = !!existing;
+          const wasDeleted = !!existing && existing.status === 'deleted';
+          return { key: `${c.link}\u0000${c.name}`, existed, id: existing ? existing.id : null, sameName: !!existing && existing.name === c.name, wasDeleted };
         } catch {
-          return { key: `${c.link}\u0000${c.name}`, existed: false, id: null };
+          return { key: `${c.link}\u0000${c.name}`, existed: false, id: null, sameName: false, wasDeleted: false };
         }
       }));
       const existedMap = new Map<string, { existed: boolean; id: number | null }>();
@@ -325,29 +351,95 @@ export async function POST(req: NextRequest) {
         existedMap.set(r.key, { existed: r.existed, id: r.id });
       });
 
-      // 2. INSERT (不依赖 RETURNING)
-      // 2026-07-27: 加 doc_sheet 字段 (从 category 推, 套 sheet-mapping 合并规则)
-      // 2026-08-01: ON CONFLICT 改 (link) 唯一 + DO UPDATE 覆盖 name
-      //   之前 (link, name) 复合唯一 → 重导入时旧 name="描述：xxx" + 新 name="4分44秒" 不冲突 → 重复插入
-      //   现在用 constraint name 明确指定 (PG 有 2 个 UNIQUE 索引时不指定会失败)
-      //   覆盖 name: 只覆盖"描述：xxx"等脏数据, 不覆盖用户手动编辑过的 name
-      const insertResults = await Promise.all(chunk.map(async (c) => {
+      // 2. INSERT + RETURNING id (Neon HTTP proxy 支持 RETURNING, rows.length = 真插入+DO UPDATE 行数)
+      // 2026-10-18 改: 之前只数 existed=false 的真新插入, DO UPDATE 走的 existed=true 路径算 skipped
+      //   结果: tg_baidu DB 已有 84529 条, 用户 1472 messages 几乎全 DO UPDATE, 显示 inserted=0 用户误以为"没入库"
+      //   修: RETURNING id rows 长度就是真正受影响行数 (INSERT 新增 + DO UPDATE 触发)
+      // 2.1 同 chunk 内按 link 分组 —— 同一 link 只允许一次 INSERT
+      //   2026-10-26: before 查询是批量并发跑完的, 同一 chunk 里两个"库里还没有的同 link"候选
+      //   都查不到 → 都走 INSERT → 又造出重复 (TG 剧集同一条 115 链接发两条: 更新至14集 / 更新至16集)
+      //   做法: 每个 link 的第一个候选当 primary (负责 INSERT), 其余当 secondary (UPDATE primary 那条)
+      const linkOwner = new Map<string, number>();
+      const primaryIdx: number[] = [];
+      const secondaryIdx: number[] = [];
+      chunk.forEach((c, i) => {
+        // link 为空 (理论上不该进 candidates, 这里兜底) → 不参与分组, 各自独立处理
+        if (!c.link) { primaryIdx.push(i); return; }
+        if (linkOwner.has(c.link)) secondaryIdx.push(i);
+        else { linkOwner.set(c.link, i); primaryIdx.push(i); }
+      });
+
+      const runOne = async (c: any, forcedId: number | null) => {
         try {
           const docSheet = c.doc_sheet || inferDocSheetFromCategory(c.category);
-          await sql`
+          // 2026-10-26 改: 按 link 去重 —— link 已存在 → 显式 UPDATE 那条, 完全不走 INSERT
+          //   为什么不能只靠 ON CONFLICT (link,name):
+          //     ON CONFLICT 只在 (link,name) 完全相同时触发
+          //     TG 集数更新 → name 变了 (更新至14集 → 更新至16集) → 走 INSERT 新行 → 重复又产生
+          //   所以: before 已按 link 查到 id → 这里直接 UPDATE 那条
+          //   forcedId: 同一 chunk 内同 link 的后续候选 → 复用 primary 刚拿到的 id
+          const knownId = forcedId ?? existedMap.get(`${c.link}\u0000${c.name}`)?.id ?? null;
+          if (knownId) {
+            const rUpd = await sql`
+              UPDATE xx_resources
+              SET name = CASE
+                    WHEN import_channel LIKE 'tg_%'
+                     AND ${c.name} !~ '^(描述|简介|概要|剧情|介绍|内容|故事|desc|summary)[:：]'
+                    THEN ${c.name}
+                    ELSE name
+                  END,
+                  status = CASE
+                    WHEN status = 'deleted' AND import_channel LIKE 'tg_%' THEN 'active'
+                    ELSE status
+                  END,
+                  updated_at = NOW()
+              WHERE id = ${knownId}
+              RETURNING id
+            ` as any[];
+            return { c, ok: true, id: rUpd?.[0]?.id, affected: (rUpd || []).length, isNew: false };
+          }
+          // link 完全没有 → INSERT (RETURNING id + xmax 判定新增/更新)
+          //   xmax = 0 是 PG 判断"这行是本次 INSERT 的"的标准技巧, 用来区分 新增 vs 更新
+          const r = await sql`
             INSERT INTO xx_resources (name, link, link_code, source, category, size, doc_sheet, tags, access_level, pay_type, import_channel, status, is_multi_link, created_at, updated_at)
             VALUES (${c.name}, ${c.link}, ${c.link_code || ''}, ${c.source}, ${c.category}, ${c.size || ''}, ${docSheet}, ${c.tags || []}::text[], ${c.access_level}, ${c.pay_type}, ${c.import_channel}, 'active', ${c.is_multi_link || false}, NOW(), NOW())
-            ON CONFLICT (link) WHERE link IS NOT NULL AND link <> '' DO UPDATE SET
-              name = CASE WHEN xx_resources.name ~ '^(描述|简介|概要|剧情|介绍|内容|故事|desc|summary)[:：]' THEN EXCLUDED.name ELSE xx_resources.name END,
+            ON CONFLICT (link, name) DO UPDATE SET
+              name = CASE
+                WHEN xx_resources.import_channel LIKE 'tg_%'
+                 AND EXCLUDED.name !~ '^(描述|简介|概要|剧情|介绍|内容|故事|desc|summary)[:：]'
+                THEN EXCLUDED.name
+                ELSE xx_resources.name
+              END,
+              -- 2026-10-26: 命中软删记录时恢复成 active (只恢复 TG 来源, 避免复活用户手动删的 zezhe 资源)
+              status = CASE
+                WHEN xx_resources.status = 'deleted' AND xx_resources.import_channel LIKE 'tg_%' THEN 'active'
+                ELSE xx_resources.status
+              END,
               updated_at = NOW()
-          `;
-          return { c, ok: true };
+            RETURNING id, (xmax = 0) AS is_new
+          ` as any[];
+          const isNew = r?.[0]?.is_new === true || r?.[0]?.is_new === 't' || r?.[0]?.is_new === 1;
+          return { c, ok: true, id: r?.[0]?.id, affected: (r || []).length, isNew };
         } catch (e: any) {
           // 2026-08-01: log SQL error 到 stderr 方便诊断
           console.error('[tg-json] INSERT failed:', e.message?.slice(0, 200), 'name:', c.name?.slice(0, 30), 'link:', c.link?.slice(0, 60));
           return { c, ok: false, e };
         }
-      }));
+      };
+
+      // Phase 1: primary (每个 link 的第一个候选) 并发处理
+      const primaryResults = await Promise.all(primaryIdx.map((i) => runOne(chunk[i], null)));
+      // Phase 2: secondary (同 chunk 内同 link 的后续候选) → 复用 primary 的 id 走 UPDATE, 不再 INSERT
+      //   TG 消息按时间顺序排列 → 后面的候选集数更新 → 名字最终落在最新那个 ✅
+      const chunkLinkId = new Map<string, number>();
+      primaryResults.forEach((r, k) => {
+        const c = chunk[primaryIdx[k]];
+        if (r?.ok && r.id) chunkLinkId.set(c.link, r.id);
+      });
+      const secondaryResults = await Promise.all(
+        secondaryIdx.map((i) => runOne(chunk[i], chunkLinkId.get(chunk[i].link) ?? null))
+      );
+      const insertResults = [...primaryResults, ...secondaryResults];
 
       // 3. after: 并发查 id (只查 INSERT 成功的 + 新插入的)
       //   2026-08-12 优化: 只对没拿到 id 的查 (如果 before 找到了 id, INSERT 时 ON CONFLICT 覆盖, id 不变; 如果没找到, INSERT 新增, id 变化)
@@ -389,16 +481,21 @@ export async function POST(req: NextRequest) {
         const key = `${ir.c.link}\u0000${ir.c.name}`;
         const m = existedMap.get(key);
         const existed = m?.existed || false;
-        const id = idByKey.get(key);
-        if (id && !existed) {
-          // 真新插入
-          l1Inserted++;
+        // 2026-10-18 改: 用 RETURNING id 的 affected 计数 (含 DO UPDATE 触发行)
+        //   之前: 只数 existed=false (新插入), existed=true (DO UPDATE 触发) 算 skipped
+        //   现在: RETURNING id 返回所有受影响行, 不管 INSERT 新增 还是 DO UPDATE 都算 l1Inserted
+        //   注意: ON CONFLICT (link, name) DO UPDATE + RETURNING id 一定返 1 id (PG 行为)
+        if (ir.id) {
+          // 2026-10-26: 区分 真新增 vs 更新 (原来 DO UPDATE 也算 inserted, 显示误导)
+          if (ir.isNew === false) l1Updated++;
+          else l1Inserted++;
+          // 副链接 INSERT (用 ir.id, 不再用 idByKey)
           if (ir.c.sub_links && ir.c.sub_links.length > 0) {
             for (const sl of ir.c.sub_links) {
               subLinkPromises.push(
                 sql`
                   INSERT INTO xx_resource_links (resource_id, source, url, password, sort, status, access_level)
-                  VALUES (${id}, ${sl.source}, ${sl.url}, ${sl.password}, ${sl.sort}, 'active', 'vip')
+                  VALUES (${ir.id}, ${sl.source}, ${sl.url}, ${sl.password}, ${sl.sort}, 'active', 'vip')
                   ON CONFLICT (resource_id, source) DO NOTHING
                 `.then(() => l1LinksInserted++).catch((e2: any) => {
                   if (errors.length < 5) errors.push(`SubLink[${sl.source}] ${e2.message?.slice(0, 100)}`);
@@ -407,7 +504,7 @@ export async function POST(req: NextRequest) {
             }
           }
         } else {
-          l1Skipped++;  // 已存在
+          l1Skipped++;  // 异常: 没有 id
         }
       }
 
@@ -511,7 +608,7 @@ export async function POST(req: NextRequest) {
       total_messages: messages.length,
       skipped_no_link: skippedNoLink,
       skipped_non_disk: skippedNonDisk,
-      l1: { candidates: candidates.length, inserted: l1Inserted, skipped: l1Skipped, failed: l1Failed, links_inserted: l1LinksInserted },
+      l1: { candidates: candidates.length, inserted: l1Inserted, updated: l1Updated, skipped: l1Skipped, failed: l1Failed, links_inserted: l1LinksInserted },
       l2: { candidates: l2Candidates.length, inserted: l2Inserted, queue_added: l2QueueAdded, skipped: l2Skipped, failed: l2Failed },
     },
     by_category: byCategory,

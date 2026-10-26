@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
 
+import { recordClick } from '@/lib/track-click';  // 2026-10-20 异常用户登录: 全 API 点击计数
 export const dynamic = 'force-dynamic';
 export const maxDuration = 5;
 
@@ -15,6 +16,8 @@ export async function GET(req: NextRequest) {
   try {
     const payload = jwt.verify(authHeader.replace('Bearer ', ''), process.env.JWT_SECRET || 'cLWhs2015') as any;
     const userId = String(payload.id);
+      // 2026-10-20: 全 API 点击计数 (fire-and-forget)
+      void recordClick(req, Number(payload.id));
     const sql = neon(process.env.DATABASE_URL || '');
 
     // 2026-07-16: ids 参数 → 只返 unlockedIds (轻量查询, 给 library 用)
