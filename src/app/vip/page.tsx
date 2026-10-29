@@ -191,7 +191,7 @@ function VipPageInner() {
       <div className="min-h-screen bg-[#0a0a0f] text-white relative flex items-center justify-center p-4">
         <div className="bg-[#12121a] rounded-2xl p-8 md:p-10 max-w-md w-full border border-amber-500/20 text-center">
           <div className="text-5xl mb-4">👑</div>
-          <h1 className="text-2xl font-bold mb-2 bg-gradient-to-r from-amber-300 via-pink-300 to-violet-300 bg-clip-text text-transparent">
+          <h1 className="neon-title text-2xl font-bold mb-2">
             VIP 影视区
           </h1>
           <p className="text-sm text-white/60 mb-6 leading-relaxed">
@@ -256,7 +256,7 @@ function VipPageInner() {
               <div className="h-px w-6 bg-gradient-to-r from-violet-400 to-transparent" />
               <span className="text-[10px] font-medium tracking-[0.2em] text-white/40 uppercase">Private Collection</span>
             </div>
-            <h1 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-transparent">
+            <h1 className="neon-title text-3xl font-bold tracking-tight">
               VIP 影视区
             </h1>
             <p className="text-xs text-white/40 mt-1.5">

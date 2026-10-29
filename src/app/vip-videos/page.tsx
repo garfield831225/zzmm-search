@@ -180,7 +180,7 @@ export default function VipVideosPage() {
       <div className="min-h-screen bg-[#0a0a0f] text-white flex items-center justify-center p-4">
         <div className="max-w-md w-full text-center">
           <div className="text-6xl mb-4">🔒</div>
-          <h1 className="text-2xl font-bold mb-2">VIP 视频区</h1>
+          <h1 className="text-2xl font-bold mb-2 neon-title">VIP 视频区</h1>
           <p className="text-white/60 mb-6">
             本区域聚合 <b className="text-violet-300">B站 / 西瓜 / AcFun / 优酷 / 腾讯 / 爱奇艺 / 芒果 / 豆瓣</b> 8 个公开搜索源<br />
             <b className="text-amber-300">需要 VIP 会员</b>才能访问
@@ -209,7 +209,7 @@ export default function VipVideosPage() {
                 <Library className="w-5 h-5" />
               </Link>
               <div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-violet-400 to-pink-400 bg-clip-text text-transparent flex items-center gap-2">
+                <h1 className="neon-title text-xl font-bold flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-violet-400" /> VIP 影视搜索
                 </h1>
                 <p className="text-xs text-white/40 mt-0.5">8 平台聚合 · 0 服务器带宽 · VIP 赠品</p>

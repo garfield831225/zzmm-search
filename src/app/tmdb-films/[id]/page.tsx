@@ -142,7 +142,7 @@ export default function TmdbFilmDetailPage() {
                 {isTv ? <Tv className="w-3 h-3" /> : <Film className="w-3 h-3" />}
                 <span>{isTv ? '剧集' : '电影'} · TMDB ID {tmdb.tmdb_id}</span>
               </div>
-              <h1 className="text-3xl md:text-4xl font-bold">{tmdb.title}</h1>
+              <h1 className="text-3xl md:text-4xl font-bold neon-title">{tmdb.title}</h1>
               {tmdb.original_title && tmdb.original_title !== tmdb.title && (
                 <p className="text-white/50 mt-1">{tmdb.original_title}</p>
               )}

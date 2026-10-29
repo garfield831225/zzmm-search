@@ -165,7 +165,7 @@ export default function TmdbDetailPage() {
               )}
             </div>
 
-            <h1 className="text-3xl font-bold mb-2">{title}</h1>
+            <h1 className="text-3xl font-bold mb-2 neon-title">{title}</h1>
 
             {credits?.original_title && credits.original_title !== title && (
               <div className="text-gray-400 text-sm mb-3">{credits.original_title}</div>

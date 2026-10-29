@@ -477,10 +477,15 @@ export default function LibraryPage() {
                 📋
               </Link>
               <div className="min-w-0">
-                <h1 className="text-lg font-bold bg-gradient-to-r from-violet-400 via-fuchsia-400 to-pink-400 bg-clip-text text-transparent tracking-wide">
+                {/* 2026-10-30 霓虹改版: 原来是 bg-gradient-to-r + bg-clip-text + text-transparent
+                    → 渐变起点色偏暗, 在深底上字几乎看不见 (用户投诉「logo 字都看不清楚」)
+                    改用 .neon-title: 实色填充保证对比度, 发光只做装饰 */}
+                <h1 className="text-xl md:text-2xl neon-title leading-tight">
                   资源库
                 </h1>
-                <p className="text-[11px] text-white/40">三区浏览 · 共 {total.toLocaleString()} 条</p>
+                <p className="text-[11px] text-white/55 mt-0.5">
+                  三区浏览 · 共 <span className="neon-num">{total.toLocaleString()}</span> 条
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">

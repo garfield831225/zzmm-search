@@ -143,7 +143,7 @@ export default function ActivatePage() {
               <Sparkles className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold">兑换中心</h1>
+              <h1 className="text-xl font-bold neon-title">兑换中心</h1>
               <p className="text-xs text-white/40 mt-0.5">激活码兑换 · 流明余额 · 兑换历史</p>
             </div>
           </div>

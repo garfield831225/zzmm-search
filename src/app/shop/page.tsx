@@ -41,7 +41,7 @@ export default function ShopPage() {
         >
           <div className="text-center mb-8">
             <div className="text-5xl mb-3">🛒</div>
-            <h1 className="text-2xl md:text-3xl font-bold">激活码购买</h1>
+            <h1 className="text-2xl md:text-3xl font-bold neon-title">激活码购买</h1>
             <p className="text-sm text-white/40 mt-2">单资源一次性解锁 · 8 位激活码</p>
           </div>
 

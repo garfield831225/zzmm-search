@@ -193,7 +193,7 @@ export default function GamesPage() {
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h1 className="text-2xl font-bold flex items-center gap-2">
+              <h1 className="text-2xl font-bold flex items-center gap-2 neon-title">
                 <span>🎮</span>
                 <span>游戏中心</span>
                 <span className="text-xs px-2 py-0.5 bg-amber-500/20 text-amber-400 rounded-full border border-amber-500/30">

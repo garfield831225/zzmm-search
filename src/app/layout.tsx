@@ -25,8 +25,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="泽泽妈资源库" />
+        {/* 2026-10-30 霓虹改版: Orbitron 自托管字体预加载
+            预加载 latin 子集, 首屏标题不等字体下载完再渲染 */}
+        <link
+          rel="preload"
+          href="/fonts/orbitron-800.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
       </head>
-      <body className="antialiased">
+      <body className="antialiased min-h-screen bg-[#07070d]">
         <AuthGuard />
         {children}
       </body>

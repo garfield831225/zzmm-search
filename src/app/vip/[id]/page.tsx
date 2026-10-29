@@ -190,7 +190,7 @@ export default function VipDetailPage() {
 
           {/* 标题 + 简介 */}
           <div className="flex-1 min-w-0">
-            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-2">
+            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight mb-2 neon-title">
               {resource.title}
             </h1>
             {resource.originalTitle && resource.originalTitle !== resource.title && (

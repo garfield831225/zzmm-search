@@ -36,7 +36,7 @@ function ChartsPageInner() {
                 <img src="/logo-hdzzmm-128.png" alt="HDZZMM" width={36} height={36} className="w-9 h-9 rounded-lg shrink-0" loading="lazy" decoding="async" />
               </picture>
               <div className="min-w-0">
-                <h1 className="text-lg font-bold bg-gradient-to-r from-violet-400 via-fuchsia-400 to-pink-400 bg-clip-text text-transparent">
+                <h1 className="neon-title text-lg font-bold">
                   观影推荐
                 </h1>
                 <p className="text-[11px] text-white/40 truncate">榜单 + 追剧日历 · 数据源 TMDB / SIMKL / TVMaze</p>

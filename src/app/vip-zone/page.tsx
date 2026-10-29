@@ -120,7 +120,7 @@ export default function VipZonePage() {
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-3">
               <Link href="/" className="text-white/60 hover:text-white text-sm">← 返回首页</Link>
-              <h1 className="text-lg font-bold flex items-center gap-2">
+              <h1 className="text-lg font-bold flex items-center gap-2 neon-title">
                 <span className="text-base">💎</span>
                 VIP 多网盘专区
               </h1>

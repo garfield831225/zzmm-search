@@ -232,7 +232,7 @@ export default function TitlesPage() {
               📑
             </div>
             <div className="min-w-0">
-              <h1 className="text-lg md:text-2xl font-bold truncate">资源目录</h1>
+              <h1 className="text-lg md:text-2xl font-bold truncate neon-title">资源目录</h1>
               <p className="text-xs md:text-sm text-white/50 mt-0.5 truncate">共 {total.toLocaleString()} 条 · 实时同步 · 无登录无链接</p>
             </div>
           </div>

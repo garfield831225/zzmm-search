@@ -158,7 +158,7 @@ export default function RequestPage() {
       <header className="sticky top-0 z-30 bg-[#0a0a0f]/95 backdrop-blur border-b border-white/5">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
           <Link href="/" className="text-white/60 hover:text-white text-sm">← 返回首页</Link>
-          <h1 className="text-lg font-bold">💎 求片专区</h1>
+          <h1 className="text-lg font-bold neon-title">💎 求片专区</h1>
           <button
             onClick={() => setShowForm(true)}
             className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 rounded text-sm font-medium"

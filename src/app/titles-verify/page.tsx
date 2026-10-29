@@ -67,7 +67,7 @@ function TitlesVerifyInner() {
           <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-2xl">
             🔒
           </div>
-          <h1 className="text-xl font-bold mb-1">泽泽资源 - 进入验证</h1>
+          <h1 className="text-xl font-bold mb-1 neon-title">泽泽资源 - 进入验证</h1>
           <p className="text-xs text-white/50">
             请输入 4 位数字安全码以进入 /titles 页面
           </p>

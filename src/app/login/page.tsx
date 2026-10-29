@@ -125,7 +125,7 @@ export default function LoginPage() {
               <span className="text-2xl">🎬</span>
             </div>
             <div>
-              <h1 className="text-xl font-bold text-white">泽泽妈妈资源库</h1>
+              <h1 className="text-xl font-bold neon-title">泽泽妈妈资源库</h1>
               <p className="text-sm text-white/40">登录账号</p>
             </div>
           </div>

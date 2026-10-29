@@ -101,7 +101,7 @@ export default function UpcomingPage() {
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/" className="text-white/60 hover:text-white text-sm">← 返回首页</Link>
-            <h1 className="text-lg font-bold">🆕 最新上映 (近 30 天)</h1>
+            <h1 className="text-lg font-bold neon-title">🆕 最新上映 (近 30 天)</h1>
           </div>
           <div className="text-xs text-white/40">共 {total} 部 · 每天 03:30 自动更新</div>
         </div>

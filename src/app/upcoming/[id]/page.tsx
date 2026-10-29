@@ -205,7 +205,7 @@ export default function UpcomingDetailPage() {
             <img src={tmdb.posterUrl} alt={tmdb.title} className="w-32 sm:w-40 rounded-lg flex-shrink-0" />
           )}
           <div>
-            <h1 className="text-2xl font-bold mb-1">{tmdb.title}</h1>
+            <h1 className="text-2xl font-bold mb-1 neon-title">{tmdb.title}</h1>
             <div className="text-xs text-white/40 mb-3">
               {tmdb.tmdbType === 'tv' ? '剧集' : '电影'} · TMDB #{tmdb.tmdbId} · {tmdb.releaseDate}
             </div>

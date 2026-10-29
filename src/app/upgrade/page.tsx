@@ -190,7 +190,7 @@ export default function UpgradePage() {
             <Sparkles className="w-3.5 h-3.5" />
             <span>邀约制 · 不断更新 · 9 大云盘</span>
           </div>
-          <h1 className="text-3xl md:text-4xl font-bold mb-3 bg-gradient-to-r from-amber-300 via-pink-300 to-violet-300 bg-clip-text text-transparent">
+          <h1 className="neon-amber text-3xl md:text-4xl font-bold mb-3">
             升级 VIP 会员
           </h1>
           <p className="text-sm md:text-base text-white/60 max-w-xl mx-auto">

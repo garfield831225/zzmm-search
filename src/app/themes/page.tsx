@@ -98,7 +98,7 @@ export default function ThemesPage() {
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link href="/" className="text-white/60 hover:text-white text-sm">← 返回首页</Link>
-            <h1 className="text-lg font-bold">🎬 主题专区</h1>
+            <h1 className="text-lg font-bold neon-title">🎬 主题专区</h1>
           </div>
           <div className="text-xs text-white/40">共 {themes.length} 个主题 · admin 后台管理</div>
         </div>

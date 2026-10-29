@@ -445,7 +445,7 @@ export default function ProfilePage() {
       <main className="flex-1 min-w-0 p-4 md:p-8 max-w-5xl">
         {/* 头部 */}
         <div className="mb-8 flex items-center gap-3 flex-wrap">
-          <h1 className="text-2xl md:text-3xl font-bold">个人中心</h1>
+          <h1 className="text-2xl md:text-3xl font-bold neon-title">个人中心</h1>
           <span className="text-white/40">·</span>
           <span className="text-white/60 text-sm md:text-base">{user.username}</span>
           <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full inline-block" />

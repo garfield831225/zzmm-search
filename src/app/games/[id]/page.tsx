@@ -156,7 +156,7 @@ export default function GameDetailPage() {
               )}
             </div>
 
-            <h1 className="text-3xl font-bold mb-4">{game.name}</h1>
+            <h1 className="text-3xl font-bold mb-4 neon-title">{game.name}</h1>
 
             {game.description && (
               <p className="text-slate-300 mb-6 leading-relaxed whitespace-pre-line">

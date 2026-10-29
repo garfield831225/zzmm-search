@@ -613,14 +613,20 @@ export default function HomePage() {
                   alt="HDZZMM"
                   width={48}
                   height={48}
-                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex-shrink-0 shadow-[0_0_16px_rgba(168,85,247,0.3)]"
+                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex-shrink-0 shadow-[0_0_18px_rgba(167,139,250,0.45)] ring-1 ring-violet-400/35"
                   loading="eager"
                   decoding="async"
                 />
               </picture>
               <div className="min-w-0">
-                <h1 className="text-xl font-bold bg-gradient-to-r from-violet-400 via-fuchsia-400 to-pink-400 bg-clip-text text-transparent tracking-wide">HDZZMM</h1>
-                <p className="text-xs text-white/40 truncate">共 {total.toLocaleString()} 条资源 · 当前显示 {items.length} 条</p>
+                {/* 2026-10-30 霓虹改版: 原来 bg-clip-text + text-transparent → 渐变起点暗, 字看不清
+                    改用 .neon-title (Orbitron 字体 + 实色填充 + 多层辉光) */}
+                <h1 className="text-xl sm:text-2xl neon-title leading-tight">
+                  HDZZMM
+                </h1>
+                <p className="text-xs text-white/55 truncate">
+                  共 <span className="neon-num">{total.toLocaleString()}</span> 条资源 · 当前显示 {items.length} 条
+                </p>
               </div>
             </div>
             {/* 2026-08-14: 工具栏 9 入口重排 -> 3 下拉 + 2 单链接 (NavMenu 组件) */}
@@ -972,11 +978,11 @@ export default function HomePage() {
             const allIds = (item as any)._allIds || [item.id];
             return (
             <motion.div key={item.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              className="group cursor-pointer rounded-2xl bg-white/[0.02] border border-white/[0.05] backdrop-blur-sm p-2 transition-all duration-300 hover:border-violet-400/40 hover:bg-white/[0.04] hover:shadow-[0_0_24px_rgba(168,85,247,0.12)]"
+              className="group cursor-pointer rounded-2xl bg-[#12121f]/75 border border-white/[0.07] backdrop-blur-sm p-2 transition-all duration-300 hover:border-violet-400/50 hover:bg-[#1b1b2b]/85 hover:shadow-[0_0_30px_rgba(167,139,250,0.28)]"
               onClick={() => handleItemClick(item)}
             >
               {/* Poster */}
-              <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-2.5">
+              <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-2.5 ring-1 ring-white/[0.06] group-hover:ring-violet-400/40 transition duration-300">
                 {(() => {
                   // 2026-10-29 A1 🔥 海报兜底链
                   //   原来只认 item.tmdb?.poster_path (来自带 expires_at 过滤的 tmdbMap)
@@ -1005,7 +1011,7 @@ export default function HomePage() {
                 {/* Bottom Info Bar */}
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-2 pt-6 pb-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-white/80">{item.tmdb?.release_date?.slice(0, 4) || ''}</span>
+                    <span className="text-xs neon-num">{item.tmdb?.release_date?.slice(0, 4) || ''}</span>
                     {item.tmdb?.vote_average && (
                       <StarRating score={parseFloat(item.tmdb.vote_average)} />
                     )}

@@ -136,7 +136,7 @@ export default function TmdbFilmsPage() {
                 <Library className="w-5 h-5" />
               </Link>
               <div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-violet-400 to-pink-400 bg-clip-text text-transparent">
+                <h1 className="neon-title text-xl font-bold">
                   🎬 TMDB 影视
                 </h1>
                 <p className="text-xs text-white/40">全量电影 + 您的导入 + 实时更新</p>

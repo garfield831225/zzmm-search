@@ -185,7 +185,7 @@ export default function BountyPage() {
     <div className="min-h-screen bg-zinc-950 text-white p-6">
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-2">
-          <h1 className="text-3xl font-bold">💎 悬赏专区</h1>
+          <h1 className="text-3xl font-bold neon-title">💎 悬赏专区</h1>
           <div className="text-sm text-zinc-400">
             我的流明: <span className="text-yellow-400 font-bold">{lumenBalance}</span>
           </div>

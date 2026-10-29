@@ -44,11 +44,11 @@ export default function NavMenu({ user, onLogout }: { user: UserInfo | null; onL
   const menuBtnCls = (active: boolean) =>
     `group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-all duration-200 ${
       active
-        ? 'bg-white/15 ring-1 ring-white/20'
-        : 'bg-white/[0.04] hover:bg-white/10 border border-white/[0.06]'
+        ? 'bg-violet-500/20 ring-1 ring-violet-400/50 shadow-[0_0_16px_rgba(167,139,250,0.35)]'
+        : 'bg-white/[0.04] hover:bg-violet-500/[0.12] hover:ring-1 hover:ring-violet-400/35 border border-white/[0.06] hover:border-violet-400/30'
     }`;
 
-  const dropdownItemCls = 'flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-white/80 hover:bg-white/10 hover:text-white transition cursor-pointer';
+  const dropdownItemCls = 'flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-white/85 hover:bg-violet-500/[0.18] hover:text-white transition cursor-pointer';
 
   return (
     <div ref={containerRef} className="flex items-center gap-2 flex-wrap justify-end">
@@ -60,7 +60,7 @@ export default function NavMenu({ user, onLogout }: { user: UserInfo | null; onL
           <ChevronDown size={12} className={`transition-transform ${openMenu === 'recommend' ? 'rotate-180' : ''}`} />
         </button>
         {openMenu === 'recommend' && (
-          <div className="absolute right-0 top-full mt-2 w-48 bg-[#1a1a2e]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl py-1.5 z-50">
+          <div className="absolute right-0 top-full mt-2 w-48 bg-[#12121f]/95 backdrop-blur-xl border border-violet-400/25 rounded-xl shadow-[0_0_30px_rgba(139,92,246,0.25)] py-1.5 z-50">
             <Link href="/charts" onClick={() => setOpenMenu(null)} className={dropdownItemCls}>
               <ListChecks size={14} className="text-violet-400" />
               <span>榜单</span>
@@ -82,7 +82,7 @@ export default function NavMenu({ user, onLogout }: { user: UserInfo | null; onL
             <ChevronDown size={12} className={`transition-transform ${openMenu === 'online' ? 'rotate-180' : ''}`} />
           </button>
           {openMenu === 'online' && (
-            <div className="absolute right-0 top-full mt-2 w-48 bg-[#1a1a2e]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl py-1.5 z-50">
+            <div className="absolute right-0 top-full mt-2 w-48 bg-[#12121f]/95 backdrop-blur-xl border border-violet-400/25 rounded-xl shadow-[0_0_30px_rgba(139,92,246,0.25)] py-1.5 z-50">
               <Link href="/vip" onClick={() => setOpenMenu(null)} className={dropdownItemCls}>
                 <Crown size={14} className="text-amber-400" />
                 <span>VIP 影视区</span>
@@ -112,7 +112,7 @@ export default function NavMenu({ user, onLogout }: { user: UserInfo | null; onL
             <ChevronDown size={12} className={`transition-transform ${openMenu === 'me' ? 'rotate-180' : ''}`} />
           </button>
           {openMenu === 'me' && (
-            <div className="absolute right-0 top-full mt-2 w-48 bg-[#1a1a2e]/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl py-1.5 z-50">
+            <div className="absolute right-0 top-full mt-2 w-48 bg-[#12121f]/95 backdrop-blur-xl border border-violet-400/25 rounded-xl shadow-[0_0_30px_rgba(139,92,246,0.25)] py-1.5 z-50">
               <Link href="/profile" onClick={() => setOpenMenu(null)} className={dropdownItemCls}>
                 <User size={14} className="text-cyan-400" />
                 <span>个人中心</span>

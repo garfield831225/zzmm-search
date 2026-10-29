@@ -68,12 +68,12 @@ function getSourceMeta(src?: string) {
   return SOURCE_META[src.toLowerCase()] || SOURCE_META.default;
 }
 
-const accentColor: Record<string, { bg: string; text: string; border: string; glow: string }> = {
-  cyan:    { bg: 'from-cyan-500/10 to-blue-500/10',    text: 'text-cyan-300',    border: 'border-cyan-500/30',    glow: 'shadow-cyan-500/10' },
-  violet:  { bg: 'from-violet-500/10 to-purple-500/10', text: 'text-violet-300',  border: 'border-violet-500/30',  glow: 'shadow-violet-500/10' },
-  amber:   { bg: 'from-amber-500/10 to-orange-500/10',  text: 'text-amber-300',   border: 'border-amber-500/30',   glow: 'shadow-amber-500/10' },
-  pink:    { bg: 'from-pink-500/10 to-rose-500/10',     text: 'text-pink-300',    border: 'border-pink-500/30',    glow: 'shadow-pink-500/10' },
-  emerald: { bg: 'from-emerald-500/10 to-green-500/10', text: 'text-emerald-300', border: 'border-emerald-500/30', glow: 'shadow-emerald-500/10' },
+const accentColor: Record<string, { bg: string; text: string; border: string; glow: string; hex: string }> = {
+  cyan:    { bg: 'from-cyan-500/10 to-blue-500/10',    text: 'text-cyan-300',    border: 'border-cyan-500/30',    glow: 'shadow-cyan-500/10',    hex: '34,211,238' },
+  violet:  { bg: 'from-violet-500/10 to-purple-500/10', text: 'text-violet-300',  border: 'border-violet-500/30',  glow: 'shadow-violet-500/10',  hex: '167,139,250' },
+  amber:   { bg: 'from-amber-500/10 to-orange-500/10',  text: 'text-amber-300',   border: 'border-amber-500/30',   glow: 'shadow-amber-500/10',   hex: '251,191,36' },
+  pink:    { bg: 'from-pink-500/10 to-rose-500/10',     text: 'text-pink-300',    border: 'border-pink-500/30',    glow: 'shadow-pink-500/10',    hex: '244,114,182' },
+  emerald: { bg: 'from-emerald-500/10 to-green-500/10', text: 'text-emerald-300', border: 'border-emerald-500/30', glow: 'shadow-emerald-500/10', hex: '52,211,153' },
 };
 
 export default function HomeSection({ title, titleEn, emoji, href, items, accent = 'cyan', loading, linkMode }: SectionProps) {
@@ -114,9 +114,21 @@ export default function HomeSection({ title, titleEn, emoji, href, items, accent
       <div className="flex items-center justify-between mb-3 px-1">
         <div className="flex items-center gap-2">
           {emoji && <span className="text-xl">{emoji}</span>}
-          <h2 className={`text-base sm:text-lg font-bold ${color.text}`}>
+          {/* 2026-10-30 霓虹改版: 标题改「实色 + 主色辉光」
+              原来用 ${color.text} (纯 accent 文字色), 在深底上偏暗看不清
+              现在文字本体保持高对比白, 只用 accent 色做外发光 */}
+          <h2
+            className="text-base sm:text-lg font-bold"
+            style={{
+              color: '#f8fafc',
+              textShadow:
+                `0 0 1px rgba(255,255,255,0.95), ` +
+                `0 0 10px rgba(${color.hex},0.85), ` +
+                `0 0 26px rgba(${color.hex},0.45)`,
+            }}
+          >
             {title}
-            {titleEn && <span className="ml-2 text-[10px] sm:text-xs text-white/40 font-normal tracking-wider uppercase">{titleEn}</span>}
+            {titleEn && <span className="ml-2 text-[10px] sm:text-xs neon-label font-normal">{titleEn}</span>}
           </h2>
         </div>
         {href && (
@@ -201,7 +213,7 @@ export default function HomeSection({ title, titleEn, emoji, href, items, accent
                 >
                   {isSourceCard && sm ? (
                     // ============ 网盘资源卡片 (无海报) ============
-                    <div className={`relative aspect-[2/3] rounded-xl overflow-hidden bg-gradient-to-br ${sm.gradient} mb-1.5 ring-1 ring-white/10 group-hover/card:ring-violet-400/40 transition`}>
+                    <div className={`relative aspect-[2/3] rounded-xl overflow-hidden bg-gradient-to-br ${sm.gradient} mb-1.5 ring-1 ring-white/10 group-hover/card:ring-violet-400/40 transition duration-300 group-hover/card:shadow-[0_0_28px_rgba(167,139,250,0.30)]`}>
                       {/* 大 emoji 占位 */}
                       <div className="absolute inset-0 flex flex-col items-center justify-center p-2">
                         <div className="text-5xl sm:text-6xl drop-shadow-lg group-hover/card:scale-110 transition duration-500">{sm.emoji}</div>
@@ -237,7 +249,7 @@ export default function HomeSection({ title, titleEn, emoji, href, items, accent
                     </div>
                   ) : (
                     // ============ 原海报卡片 (TMDB 资源) ============
-                    <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-1.5 ring-1 ring-white/5 group-hover/card:ring-violet-400/40 transition">
+                    <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-1.5 ring-1 ring-white/10 group-hover/card:ring-violet-400/50 transition duration-300 group-hover/card:shadow-[0_0_28px_rgba(167,139,250,0.30)] group-hover/card:shadow-violet-500/25">
                       <img
                         src={it.posterUrl || TMDB_FALLBACK}
                         alt={it.title}
@@ -315,7 +327,11 @@ export default function HomeSection({ title, titleEn, emoji, href, items, accent
               <div className="flex-shrink-0 w-[140px] sm:w-[160px] flex items-center justify-center">
                 <Link
                   href={href}
-                  className={`w-full aspect-[2/3] rounded-xl border-2 border-dashed ${color.border} bg-gradient-to-br ${color.bg} flex flex-col items-center justify-center gap-2 text-sm ${color.text} hover:scale-105 transition shadow-lg ${color.glow}`}
+                  className={`w-full aspect-[2/3] rounded-xl border border-dashed ${color.border} bg-gradient-to-br ${color.bg} flex flex-col items-center justify-center gap-2 text-sm font-semibold transition duration-300 hover:scale-105 shadow-lg ${color.glow}`}
+                  style={{
+                    color: '#e2e8f0',
+                    textShadow: `0 0 10px rgba(${color.hex},0.6)`,
+                  }}
                 >
                   <ChevronRight size={28} />
                   <span>查看更多</span>
