@@ -6,7 +6,8 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
-import { recordClick } from '@/lib/track-click';  // 2026-10-20 异常用户登录: 全 API 点击计数
+import { recordClick } from '@/lib/track-click';
+import { FILM_CATEGORIES, NONFILM_CATEGORIES as NONFILM_CATEGORIES_LIST, NONFILM_CATS as NONFILM_CATS_LIST } from '@/lib/categories';  // 2026-10-20 异常用户登录: 全 API 点击计数
 
 // 2026-08-13: 公共 API (moviezone + 子站) - 加 CORS 头
 const CORS_HEADERS = {
@@ -35,9 +36,12 @@ const SOURCE_DISPLAY_MAP: Record<string, string> = {
   'aliyun': '阿里云盘', '123': '123网盘', 'tianyi': '天翼云盘',
   'magnet': '磁力链接', 'ed2k': 'ed2k链接', 'thunder': '迅雷链接',
 };
-const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频道', '综艺', '演唱会', '纪录片', '原盘', 'REMUX', '系列电影'];
-const NONFILM_CATEGORIES = ['全部', '音乐', '体育', '游戏', '电子书', '精品课', '文档'];
-const NONFILM_CATS = ['音乐', '体育', '游戏', '电子书', '精品课', '文档'];
+// 2026-10-29: 分类统一到 lib/categories.ts
+//   旧版 NONFILM_CATS 只列 6 个 → 软件(10719)/PC游戏/学习资料/有声书/导航首页/合集(4288)
+//   /其他(19561) 全混进首页影视专区; 且影视筛选器漏了「短剧」(84425 条筛不出来)
+const CATEGORIES = FILM_CATEGORIES;
+const NONFILM_CATEGORIES = NONFILM_CATEGORIES_LIST;
+const NONFILM_CATS = NONFILM_CATS_LIST;
 
 // 地区 → 国家代码映射（与 TMDB iso_3166_1 一致）
 const REGION_CODES: Record<string, string[]> = {
@@ -212,14 +216,16 @@ export async function GET(request: NextRequest) {
 
     if (isLibraryZone) {
       if (['admin', 'vip', 'basic', 'member'].includes(userGroup)) {
-        addCond("r.access_level IN ('basic', 'vip', 'code')");
+        // 2026-10-29: 去掉 access_level 过滤 → 看全部资源
+        //   原盘 33701 条全是 access_level='free', 全库 free 有 65034 条
+        //   之前的 IN ('basic','vip','code') 把它们对 admin/vip 全藏了
+        //   业务铁律: VIP 锁 = 前端展示, 不卡后端 access_level
       } else {
         addCond('1=0');
       }
-    } else if (['admin', 'vip'].includes(userGroup)) {
-      addCond("r.access_level IN ('basic', 'vip', 'code')");
-    } else if (['basic', 'member'].includes(userGroup)) {
-      // basic 用户 → 看全部资源 (VIP 锁 = 前端展示, 不卡后端)
+    } else if (['admin', 'vip', 'basic', 'member'].includes(userGroup)) {
+      // 2026-10-29: 同上 — admin/vip/basic/member 一律看全部资源
+      //   (basic 分支原本就是"看全部", 现在 admin/vip 跟它对齐)
     } else {
       addCond('1=0');
     }
@@ -253,8 +259,18 @@ export async function GET(request: NextRequest) {
       ELSE 1
     END)`;
     // 2026-07-27: 外层 orderClause 改用 alias (subquery 暴露的列), 不能引用 c / 内层表达式
+    // 2026-10-29 排序规则重写 (用户反馈"排序不太好"):
+    //   旧版两个毛病:
+    //   1) added_time(📅上架) 开头是 has_tmdb DESC → "有封面" 排在 "刚上架" 前面
+    //      用户点「上架」想看新上架的, 结果先看到一堆有封面的老片
+    //   2) 默认排序也是 has_tmdb DESC 打头 → 70% 没匹配上的资源全被压到末尾
+    //      (实测 460995 条里 321290 条是 NOMATCH) → 新资源永远看不见
+    //   新版:
+    //   - added_time 纯按上架时间 (created_at), 不掺匹配状态
+    //   - 默认(上映) 用 sort_date (有封面用上映日期, 没封面用上架时间) 倒序 → 新旧都能靠前
+    //   - rating/hot 保留 has_tmdb (未匹配本来就没评分/播放量, 排后面是对的)
     const innerOrderClause = sort === 'added_time'
-      ? `has_tmdb DESC, ${dateWeight}, created_at DESC`
+      ? `created_at DESC, id DESC`
       : sort === 'import_time_asc'
         ? `created_at ASC, id ASC`
         : sort === 'hot'
@@ -263,7 +279,7 @@ export async function GET(request: NextRequest) {
             ? `has_tmdb DESC, vote_average_num DESC NULLS LAST, COALESCE(vote_count_int, 0) DESC, ${dateWeight}`
             : sort === 'cover_first'
               ? `has_cover DESC, ${dateWeight}, sort_date DESC NULLS LAST, created_at DESC`
-              : `has_tmdb DESC, ${dateWeight}, sort_date DESC NULLS LAST, created_at DESC`;
+              : `sort_date DESC NULLS LAST, created_at DESC, id DESC`;
     // 外层 (subquery 外) 只能用 subquery 暴露的列, 用 alias 替代
     const orderClause = innerOrderClause
       .replace(new RegExp(dateWeight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 'date_weight');
@@ -272,7 +288,10 @@ export async function GET(request: NextRequest) {
     // ─── Count ────────────────────────────────────────────────────────────────
     // 2026-07-27: 改成 distinct count (按 tmdb_id), 跟 fetch 同步, 否则 total 跟 items 数对不上
     // 2026-07-29: 改用 COALESCE(tmdb_id, 'id_'||id) - 没 tmdb_id 的资源按 id 独立, 否则 1 万条非影视资源被合并成 1 条
-    const countSQL = `SELECT COUNT(DISTINCT COALESCE(NULLIF(r.tmdb_id, ''), 'id_' || r.id::text)) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id ${whereSQL}`;
+    // 2026-10-29 🔥 再修: tmdb_id='NOMATCH' 不是空串 → COALESCE 保留它 → **所有未匹配资源被合并成 1 个**
+    //   实测: 影视区 count 16349 (错的) vs 303344 (对的) —— 少算 28.7 万条
+    //   修法: 把 'NOMATCH' 也当"没有 tmdb_id", 按 id 独立计数
+    const countSQL = `SELECT COUNT(DISTINCT COALESCE(NULLIF(NULLIF(r.tmdb_id, ''), 'NOMATCH'), 'id_' || r.id::text)) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id ${whereSQL}`;
     const countRows = await sql(countSQL, condVals) as any[];
     const total = parseInt(countRows?.[0]?.cnt || '0');
 
@@ -297,7 +316,7 @@ export async function GET(request: NextRequest) {
                CASE WHEN EXISTS (SELECT 1 FROM xx_music_cache m WHERE m.resource_id = r.id)
                      OR EXISTS (SELECT 1 FROM xx_sports_cache s WHERE s.resource_id = r.id)
                     THEN 1 ELSE 0 END as has_cover,
-               ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(r.tmdb_id, ''), 'id_' || r.id::text) ORDER BY created_at DESC, id ASC) as rn
+               ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(NULLIF(r.tmdb_id, ''), 'NOMATCH'), 'id_' || r.id::text) ORDER BY created_at DESC, id ASC) as rn
         FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
         ${whereSQL}
       ) sub
@@ -396,7 +415,8 @@ export async function GET(request: NextRequest) {
     // 2026-07-27: 二次查同 tmdb_id 的所有 link (合并多连接到一个 item)
     // 用户痛点: dedup by tmdb_id 后只显示 1 个 link, 实际 600+ link 全藏起来
     // 这里按 source 优先级 + created_at 排序, 卡片用前 8 个, modal 用完整列表
-    const tmdbIds = Array.from(new Set(dbRows.map((r: any) => r.tmdb_id).filter(Boolean)));
+    // 2026-10-29: 过滤掉 'NOMATCH' —— 它不是真 tmdb_id, 拿去查副链接会白占 500 条 LIMIT
+    const tmdbIds = Array.from(new Set(dbRows.map((r: any) => r.tmdb_id).filter((x: any) => x && x !== 'NOMATCH')));
     let tmdbLinksMap = new Map<string, any[]>();
     // source 优先级: 115 > 夸克 > 百度 > 阿里 > 磁力 > ed2k > 其他 (2026-07-31 提到外层供副表 push 用)
     const SOURCE_PRIORITY: Record<string, number> = {

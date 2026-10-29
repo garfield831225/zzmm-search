@@ -13,11 +13,13 @@ import NavMenu from '@/components/NavMenu';
 import SearchBox from '@/components/SearchBox';
 import MobileNav from '@/components/MobileNav';
 import BasicClaimBanner from '@/components/BasicClaimBanner';
+import { FILM_CATEGORIES } from '@/lib/categories';
 
 const TMDB_IMAGE_BASE = 'https://image.zzmm-search.uk/t/p/w500';
 const TMDB_IMAGE_FALLBACK = TMDB_FALLBACK;
 
-const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频道', '综艺', '演唱会', '纪录片', '原盘', 'REMUX', '系列电影'];
+// 2026-10-29: 分类统一到 lib/categories.ts (原来这里漏了「短剧」84425 条, 用户根本筛不出来)
+const CATEGORIES = FILM_CATEGORIES;
 const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '夸克网盘', '磁力链接', 'ed2k链接'];
 const REGIONS = ['全部', '大陆', '欧美', '日韩', '港澳台'];
 const YEARS = ['全部', '2026', '2025', '2024', '2023', '2022', '2021', '2020', '2010-2019', '2000-2009'];

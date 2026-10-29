@@ -6,6 +6,7 @@
 //   - 简化返回: 跟 search 一样, 但去掉 groups/categories/sources (公共 API 简化)
 import { NextRequest, NextResponse } from 'next/server';
 import jwt from 'jsonwebtoken';
+import { NONFILM_CATS as NONFILM_CATS_LIST } from '@/lib/categories';
 import { recordClick } from '@/lib/track-click';  // 2026-10-20 异常用户登录: 全 API 点击计数
 
 export const dynamic = 'force-dynamic';
@@ -21,7 +22,8 @@ const CORS_HEADERS = {
 };
 
 const VALID_GROUPS = new Set(['user', 'basic', 'member', 'vip', 'admin']);
-const NONFILM_CATS = new Set(['音乐', '体育', '游戏', '电子书', '精品课', '文档']);
+// 2026-10-29: 统一到 lib/categories.ts (补全非影视分类)
+const NONFILM_CATS = new Set(NONFILM_CATS_LIST);
 
 function errJson(code: string, message: string, hint?: string, status = 400) {
   return NextResponse.json(

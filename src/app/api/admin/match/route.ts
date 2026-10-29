@@ -217,6 +217,12 @@ export async function GET(req: Request) {
             const r = await sql`UPDATE xx_resources SET tmdb_id = 'NOMATCH', last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id} RETURNING id`;
             return { id: item.id, tmdb_id: r.length ? 'NOMATCH' : null, updateFailed: !r.length };
           }
+          // 2026-10-29: 'SKIP' = 该分类不该用 TMDB 匹配 (软件/音乐/电子书/文档/游戏/体育...)
+          //   不写 tmdb_id (避免污染匹配状态), 也不当失败
+          if (result === 'SKIP') {
+            const r = await sql`UPDATE xx_resources SET last_attempt_at = NOW() WHERE id = ${item.id} RETURNING id`;
+            return { id: item.id, tmdb_id: null, skipped: true, updateFailed: !r.length };
+          }
           if (result) {
             const updResult = await sql`UPDATE xx_resources SET tmdb_id = ${result.id}, matched_tmdb_at = NOW(), last_attempt_at = NOW(), updated_at = NOW() WHERE id = ${item.id} RETURNING id`;
             if (!updResult.length) {

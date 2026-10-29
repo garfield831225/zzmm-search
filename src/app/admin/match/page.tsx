@@ -1,10 +1,12 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react';
+import { MATCH_CATEGORIES } from '@/lib/categories';  // 2026-10-29: 分类统一 (补上「短剧」)
 
 const TMDB_IMAGE = 'https://image.zzmm-search.uk/t/p/w200';
 
-const CATEGORIES = ['全部', '电影', '剧集', '动漫', '少儿频道', '综艺', '纪录片', '演唱会', '原盘', 'REMUX', '系列电影', '连载', '音乐', '体育', '合集'];
+// 2026-10-29: 统一到 lib/categories.ts (补上「短剧」)
+const CATEGORIES = MATCH_CATEGORIES;
 const TMDB_TYPES = ['movie', 'tv'];
 
 export default function MatchManagePage() {

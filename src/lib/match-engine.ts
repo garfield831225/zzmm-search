@@ -28,17 +28,6 @@ const tmdbLimiter = new RateLimiter();
 
 // ─── 辅助函数 ──────────────────────────────────────────────────────────
 
-function chineseToNumber(str: string): number {
-  const map: Record<string, number> = {
-    '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
-    '六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
-  };
-  if (/^\d+$/.test(str)) return parseInt(str);
-  if (map[str] !== undefined) return map[str];
-  if (str.startsWith('十')) return 10 + (map[str[1]] || 0);
-  if (str.includes('十')) return (map[str[0]] || 0) * 10 + (map[str[2]] || 0);
-  return 1;
-}
 
 function isEnglishName(name: string): boolean {
   return /^[a-zA-Z\s\d.'-]+$/.test(name.trim());
@@ -59,176 +48,13 @@ export function isGarbled(name: string): boolean {
   return garbageLen / name.length > 0.4;
 }
 
-// 重写版 cleanFolderName (多策略提取)
-export function cleanFolderName(raw: string): { cleanName: string; year: string; season: number | null } {
-  // Step 0: ISO文件名优先从第一个方括号提取
-  if (raw.endsWith('.iso')) {
-    const firstBracket = raw.match(/^\[([^\]]+)\]/);
-    if (firstBracket) {
-      let extracted = firstBracket[1];
-      if (!/[\u4e00-\u9fff]/.test(extracted)) {
-        const allBrackets = Array.from(raw.matchAll(/\[([^\]]+)\]/g));
-        if (allBrackets.length >= 2) extracted = allBrackets[1][1];
-      }
-      extracted = extracted.replace(/\s*\d{4}(?=\W|$)/, '').trim();
-      extracted = extracted.replace(/^(4K|8K|2160p|1080p|720P|DIY|CEE|美版|日版|港版|欧版|韩版|台版|DV|HDR|Dolby|Atmos|DTS|HEVC|LPCM)\s*/i, '');
-      if (extracted.length >= 2) return { cleanName: extracted, year: '', season: null };
-    }
-  }
-
-  // 先去掉尾部 (年份) 或 （年份）后缀
-  raw = raw.replace(/\s*\( ?\d{4} ?\)\s*$/, '').replace(/\s*（ ?\d{4} ?）\s*$/, '').trim();
-  let title = raw;
-  let year = '';
-  const yearMatch = raw.match(/\b(19\d{2}|20\d{2})\b/);
-  if (yearMatch) {
-    const y = parseInt(yearMatch[1]);
-    if (y >= 1900 && y <= 2030) year = String(y);
-  }
-
-  let season: number | null = null;
-  // 2026-08-14: 加 negative lookahead (?!集) - "第N季" 后面不跟"集" 才是真正的季
-  //   避免 "第22集" / "第2季第3集" 里"第2季"被误识别成 season=2
-  //   (虽然前面 regex 已经把 "第N集" 剥了, 这里加 lookahead 是双保险)
-  const seasonMatch = raw.match(/第([一二三四五六七八九十\d]+)季(?!集)|S(\d{1,2})(?![集\d])/i);
-  if (seasonMatch) {
-    season = seasonMatch[1] ? chineseToNumber(seasonMatch[1]) : parseInt(seasonMatch[2]);
-  }
-
-  // 2026-06-03: 在主流程入口就剥掉「第X季」「Sxx」「(YYYY)」字样，避免干扰 TMDB 搜索
-  // 例：「乘风第七季」→ 「乘风」,「开始推理吧 第四季」→ 「开始推理吧」
-  // 例：「老友记 第一季（1994）」→ 「老友记」（不剥 year 不然搜不到 Friends 1994）
-  // 2026-07-09: 新加常见后缀 token 剥除
-  // 2026-07-09: 智能续集识别 - "真人快打2" 搜不到时, 降级搜 "真人快打" (TMDB 用系列名)
-  // 2026-08-14: 调 match-engine 规则 - 提高 电影/电视剧/动漫/纪录片/真人秀 命中率
-  //   关键: 通用 quality suffix 剥除 (4K/HDR/1080p/720p/集数) 保留 - 适用于所有类型
-  //   移除: 短剧专属剥除 (横屏短剧/微短剧/全集【】) - 用户撤销短剧, 不要
-  //   移除: 演员描述剥除 (主演/演员名) - 电影常用 "丹尼尔·克雷格 主演" 不能瞎剥
-  //   保留: 集数描述 - "全76集"/"更新至20集"/"全8集" 都能帮搜更准 (TMDB 搜剧名比搜全名准)
-  raw = raw
-    .replace(/第[一二三四五六七八九十\d]+季/g, '')
-    .replace(/S\d{1,2}(?=[^\d]|$)/gi, '')
-    .replace(/Season\s*\d{1,2}/gi, '')
-    .replace(/[（(]\s*\d{4}\s*[)）]/g, '')
-    // 集数描述 - 任意位置 (电影/电视剧/动漫/纪录片 都有, 集数信息对 TMDB 搜索是噪声)
-    .replace(/\s*(?:更新[至]?\s*\d{1,4}\s*集?|全\s*\d{1,4}\s*集?|更\s*\d{1,4}\s*集?|\d{1,4}\s*集\s*全|E\s*\d{1,3}\s*[-~]\s*\d{1,3}\s*集|E\s*\d{1,3})/gi, '')
-    // HDR 描述 (任意位置)
-    .replace(/\s*(?:HDR\s*10\s*\+|HDR10\s*\+|Dolby\s*Vision\s*HDR|HDR\s*&\s*DV|DV\s*&\s*HDR|HDR|SDR|高码|高码率)/gi, '')
-    // 字幕/语言描述
-    .replace(/\s*(?:内封简繁字幕|内嵌简中|中字|简繁|双语字幕|双语|国配|国语配音|国粤双语)/g, '')
-    // 规格 token (任意位置, 包含 4K/1080p/2160p/720p/BluRay/BDMV/REMUX/HDTV/WEB-DL/HEVC/AVC/H264/H265/TrueHD/Atmos/DTS-HD)
-    .replace(/\b(?:4K|8K|2160p|1080p|720p|480p|UHD|HDTV|Blu-?ray|Bluray|BDMV|REMUX|WEB-?DL|HEVC|AVC|x\.?264|x\.?265|HDR10|HDR10\+|TrueHD|Atmos|DTS-?HD|DTS|DV|杜比视界|杜比音效|杜比|Dolby\s*Vision|Dolby\s*Atmos|IMAX\s*Enhanced|IMAX|4K\s*修复|导演剪辑版?|终极版|加长版|特别版|抢先版|正式版|国语配音|国配|港版|台版|美版|日版|韩版|欧版|东南亚版|英版|重制版|修复版|高码|高码率)\b/gi, '')
-    .replace(/\s+(?:杜比视界|杜比音效|Dolby\s*Vision|Dolby\s*Atmos|IMAX\s*Enhanced|IMAX|4K\s*修复|导演剪辑版?|终极版|加长版|特别版|抢先版|正式版|国语配音|国配|港版|台版|美版|日版|韩版|欧版|东南亚版|英版|重制版|修复版|高码|高码率)\s*$/i, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-
-  // A1: 片名.规格（排除片名.年份）
-  const firstDot = raw.indexOf('.');
-  if (firstDot > 0 && firstDot < 20) {
-    const beforeDot = raw.slice(0, firstDot).trim();
-    const afterDot = raw.slice(firstDot + 1);
-    if (!(beforeDot.length >= 2 && beforeDot.length <= 5 && /[\u4e00-\u9fff]/.test(beforeDot) && /^(19\d{2}|20\d{2})$/i.test(afterDot))) {
-      if (beforeDot.length >= 2 && /[\u4e00-\u9fff]/.test(beforeDot)) {
-        return { cleanName: beforeDot, year, season };
-      }
-    }
-  }
-
-  // A2: PT格式 [中文名_英文名_年份] 或 [片名.年份]
-  const ptMatch = raw.match(/^\[([^\]]+)\]/);
-  if (ptMatch) {
-    const parts = ptMatch[1].split('_');
-    const chinese = parts.find(p => /[\u4e00-\u9fff]/.test(p));
-    if (chinese) {
-      let t = chinese.replace(/第\d+季/i, '').replace(/\s*\d{4}$/, '').trim();
-      if (t) return { cleanName: t, year, season };
-    }
-    const dotInBrackets = ptMatch[1].match(/^([^_\.]+)/);
-    if (dotInBrackets) {
-      let t = dotInBrackets[1].trim();
-      if (t.endsWith('.')) t = t.slice(0, -1);
-      if (t.length >= 2 && /[\u4e00-\u9fff]/.test(t)) {
-        return { cleanName: t, year, season };
-      }
-    }
-  }
-
-  // B: 多段括号 [片名][规格]
-  const multiBrackets = Array.from(raw.matchAll(/\[([^\]]+)\]/g));
-  for (const m of multiBrackets) {
-    const content = m[1].trim();
-    if (content.length >= 2 && /[\u4e00-\u9fff]/.test(content)) {
-      const lower = content.toLowerCase();
-      if (/^(4k|8k|2160p|1080p|720p|480p|blu-?ray|bluray|bdmv|remux|web-?dl|hdtv|diy|cee|美版|日版|港版|欧版|韩版|台版|hdr10|hdr|dolby|dts|atmos|truehd|aac|dts-?hd|ac3|imax|sdr|国语|英语|粤语|中字|字幕|配音|特效|简繁|双语)$/i.test(content)) continue;
-      if (/^(4k|8k|2160p|1080p|720p|480p|blu-?ray|bluray|bdmv|remux|web-?dl|hdtv)\s/i.test(content)) continue;
-      if (/^(19\d{2}|20\d{2})\s*$/i.test(content)) continue;
-      let t = content.replace(/\d{1,2}\.\d+G$/, '').trim();
-      if (t && t.length >= 2) return { cleanName: t, year, season };
-    }
-  }
-
-  // C: 点分隔
-  const dotParts = raw.split('.');
-  for (const part of dotParts) {
-    const p = part.trim();
-    if (p.length >= 2 && /[\u4e00-\u9fff]/.test(p)) {
-      if (!/^(19\d{2}|20\d{2}|4K|8K|蓝光原盘|蓝光remux|HDTV|WEBRip|BluRay|DIY)$/i.test(p)) {
-        return { cleanName: p, year, season };
-      }
-    }
-  }
-
-  // D: 书名号
-  const bookMatch = raw.match(/《([^》]+)》/);
-  if (bookMatch) {
-    const content = bookMatch[1].trim();
-      if (content.length >= 2) {
-        let t = content.replace(/\s*(19\d{2}|20\d{2})\s*/g, ' ').replace(/\s*(4K|蓝光原盘|蓝光|HDTV|WEBRip)\s*/gi, ' ').trim();
-        if (t) return { cleanName: t, year, season };
-      }
-  }
-
-  // E: 括号
-  const parenMatch = raw.match(/[（(]([^）)]+)[)）]/);
-  if (parenMatch) {
-    const content = parenMatch[1].trim();
-    if (content.length >= 2 && /[\u4e00-\u9fff]/.test(content)) {
-      return { cleanName: content, year, season };
-    }
-  }
-
-  // F: 最长中文片段
-  const chineseFragments = raw.match(/[\u4e00-\u9fff][^\[\]（）【】《》\s]{0,30}/g);
-  if (chineseFragments && chineseFragments.length > 0) {
-    let best = '';
-    for (const frag of chineseFragments) {
-      if (frag.length > best.length && frag.length >= 2) best = frag.trim();
-    }
-    if (best) return { cleanName: best, year, season };
-  }
-
-  // G: 纯英文
-  const trimmed = raw.replace(/^[\[\]（）【】《》\s]+|[\[\]（）【】《》\s]+$/g, '').trim();
-  if (trimmed.length >= 2 && !/[\u4e00-\u9fff]/.test(trimmed)) {
-    return { cleanName: trimmed, year, season };
-  }
-
-  // H: 去掉尾部 (年份) 后缀
-  const afterStrip = raw.replace(/\s*\(\d{4}\)\s*$/, '').trim();
-  if (afterStrip.length >= 2 && /[\u4e00-\u9fff]/.test(afterStrip)) return { cleanName: afterStrip, year, season };
-
-  // 兜底
-  let t = raw
-    .replace(/\[[^\]]*\]/g, ' ').replace(/[（(][^）)]*[)）]/g, ' ')
-    .replace(/《[^》]*》/g, ' ').replace(/【[^】]*】/g, ' ')
-    .replace(/\d{1,2}\.\d+G$/, '').replace(/\b(19\d{2}|20\d{2})\b/g, ' ')
-    .replace(/\b(4K|8K|1080p|2160p|720p|480p)\b/gi, ' ')
-    .replace(/\b(Bluray|BluRay|BDMV|WEB-DL|REMUX|DIY|CEE|美版|日版|港版|欧版|韩版|台版)\b/gi, ' ')
-    .replace(/\./g, ' ').replace(/\s+/g, ' ').trim();
-  if (t.length < 2) t = raw;
-  t = t.replace(/第[一二三四五六七八九十\d]+季/g, '').replace(/\s+/g, ' ').trim();
-  return { cleanName: t, year, season };
-}
+// 2026-10-29: 片名提取已重写到 lib/clean-title.ts (用 8864 条真实样本实测定位的 7 个缺陷)
+//   旧版问题: F 分支被画质/字幕词劫持 / WEB-4K 残留 / HDR10 留 10 / 集数标记没剥
+//   / 发布组前缀没剥 / 双语片名没拆 / 短剧前缀+演员名没剥
+//   新的返回 { cleanName, year, season, alts } —— alts 是备选片名, 匹配层依次尝试
+import { cleanFolderName } from './clean-title';
+export { cleanFolderName };
+export type { CleanResult } from './clean-title';
 
 // 状态黑名单
 const BAD_STATUSES: Record<string, string[]> = {
@@ -350,15 +176,9 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, 
         return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
       }
     }
-    // sub-string
-    for (const c of filtered) {
-      const t = c.result.title || c.result.name || '';
-      if (!t) continue;
-      const tn = norm(t);
-      if (tn.includes(cn) && cn.length >= 2 && tn.length - cn.length <= 6) {
-        return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
-      }
-    }
+    // 2026-10-29: tier 顺序改成 exact → prefix → sub (prefix 比 sub 精确)
+    //   原因: 「龙之家族 第三季」用 sub 会匹配到《龙之家族：幕后特辑》(特辑不是正片)
+    //   prefix 不成立 → 落到 sub 时若候选是「龙之家族」本身则差值大 → 不匹配 ✅
     // prefix
     for (const c of filtered) {
       const t = c.result.title || c.result.name || '';
@@ -366,6 +186,17 @@ async function searchTmdb(name: string, type: 'tv' | 'movie', category: string, 
       const tn = norm(t);
       if (tn.startsWith(cn) && cn.length >= 2) {
         return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
+      }
+    }
+    // sub-string (⚠️ 短名 <3 字禁用 —— "火花" 会匹配到《幽灵火花》这种同类型不同作品)
+    if (cn.length >= 3) {
+      for (const c of filtered) {
+        const t = c.result.title || c.result.name || '';
+        if (!t) continue;
+        const tn = norm(t);
+        if (tn.includes(cn) && tn.length - cn.length <= 6) {
+          return { ...c.result, genres: c.result.genre_ids ? [] : (c.result.genres || []), tmdb_status: c.status };
+        }
       }
     }
     // bigram
@@ -406,12 +237,48 @@ function subTypeToTmdb(subType: string | null): 'movie' | 'tv' {
 function subTypeToTmdbWithExtension(subType: string | null): 'movie' | 'tv' {
   if (!subType) return 'movie';
   const s = subType.toLowerCase();
-  if (['剧集', '韩剧', '欧美剧', '港台剧', '国产剧', '日剧', '动漫', '动画', '综艺', '纪录片', '少儿', '演唱会', '连载'].some(t => s.includes(t))) return 'tv';
+  // 2026-10-29: 加「短剧」—— 短剧 84425 条原来按 movie 搜, TMDB 里短剧都在 tv → 匹配率只有 1.7%
+  if (['剧集', '韩剧', '欧美剧', '港台剧', '国产剧', '日剧', '动漫', '动画', '综艺', '纪录片', '少儿', '演唱会', '连载', '短剧', '微短剧'].some(t => s.includes(t))) return 'tv';
   return 'movie';
 }
 
+// 2026-10-29: 不该用 TMDB 匹配的分类 (各有专属数据源)
+//   软件→无 / 音乐→MusicBrainz / 电子书·文档·精品课·学习资料→文档库 / 游戏→无 / 体育→Football API / 合集→多资源集合
+//   实测这些分类合计 46908 条, 其中大量是 null_tmdb (从没匹配过) → 跳过能省十几万次 TMDB 调用
+//   并且避免给"短剧合集""课程"之类硬匹配出错的封面
+export const SKIP_MATCH_CATEGORIES = new Set([
+  '软件', '音乐', '电子书', '文档', '精品课', '学习资料', '有声书',
+  '游戏', 'PC游戏', 'Swtich游戏', '体育', '导航首页', '合集',
+]);
+
+// 2026-10-29: 明确按 tv 搜的分类 (短剧漏了 → 1.7% 匹配率)
+export const TV_ONLY_CATEGORIES = new Set(['连载', '剧集', '动漫', '综艺', '少儿频道', '短剧']);
+export const MOVIE_ONLY_CATEGORIES = new Set(['电影', '华语电影', '外语电影', '动画电影', 'REMUX', '系列电影']);
+
+/**
+ * 分类 → TMDB 类型候选 (cron 和 admin 共用, 避免两套实现跑偏)
+ */
+export function getTypesForCategory(category: string, subType: string | null, season: number | null): ('tv' | 'movie')[] | null {
+  if (SKIP_MATCH_CATEGORIES.has(category)) return null;
+  if (season !== null) return ['tv'];
+  if (TV_ONLY_CATEGORIES.has(category)) return ['tv'];
+  if (category === '演唱会') return ['movie'];
+  if (category === '纪录片') return ['tv', 'movie'];
+  if (category === '原盘') {
+    if (['电影', '动画电影', '演唱会', '3D原盘'].includes(subType || '')) return ['movie'];
+    return ['tv'];
+  }
+  if (MOVIE_ONLY_CATEGORIES.has(category)) return ['movie'];
+  if (subType) {
+    const t = subTypeToTmdbWithExtension(subType);
+    return [t];
+  }
+  return null;
+}
+
 // 核心匹配函数 (单条)
-export async function matchOne(rawName: string, category: string, subType: string | null): Promise<{ id: string; tmdb_type: 'movie' | 'tv'; poster: string; title: string; vote: number; year: string } | 'GARBLED' | 'NOMATCH'> {
+// 2026-10-29: 返回类型加 'SKIP' (不该用 TMDB 匹配的分类: 软件/音乐/电子书/文档/游戏/体育...)
+export async function matchOne(rawName: string, category: string, subType: string | null): Promise<{ id: string; tmdb_type: 'movie' | 'tv'; poster: string; title: string; vote: number; year: string } | 'GARBLED' | 'NOMATCH' | 'SKIP'> {
   if (isGarbled(rawName)) return 'GARBLED';
 
   // {tmdb-XXXXX} 占位符
@@ -434,26 +301,19 @@ export async function matchOne(rawName: string, category: string, subType: strin
     || /[（(]\d{4}[)）]/.test(rawName)
     || /第[一二三四五六七八九十\d]+季|S\d{1,2}/i.test(rawName);
 
-  let cleanName: string, year: string, season: number | null;
-  if (isFileNameString) {
-    const r = cleanFolderName(rawName);
-    cleanName = r.cleanName; year = r.year; season = r.season;
-  } else {
-    cleanName = rawName
-      .replace(/\s*[（(]\s*\d{4}\s*[)）]\s*$/g, '')
-      .replace(/第[一二三四五六七八九十\d]+季.*$/g, '')
-      .replace(/\s*\{tmdb-\d+\}/g, '')
-      .trim();
-    const ym = cleanName.match(/[（(]\s*(19\d{2}|20\d{2})\s*[)）]/);
-    year = ym ? ym[1] : '';
-    if (year && ym) cleanName = cleanName.replace(ym[0], '').trim();
-    const sm = cleanName.match(/第([一二三四五六七八九十\d]+)季|S(\d{1,2})/i);
-    season = sm ? (sm[1] ? chineseToNumber(sm[1]) : parseInt(sm[2])) : null;
-    if (sm) cleanName = cleanName.replace(sm[0], '').trim();
-  }
+  // 2026-10-29: 统一走 clean-title 的新提取器 (多策略 + 多候选)
+  //   旧版只对"像文件名"的字符串走清洗, 其它走简易 replace → 很多脏名字没被清洗
+  const cleaned = cleanFolderName(rawName);
+  let cleanName = cleaned.cleanName;
+  let year = cleaned.year;
+  let season = cleaned.season;
+  const altNames: string[] = cleaned.alts || [];
 
   if (!cleanName || cleanName.length < 2) return 'NOMATCH';
   if (cleanName.length > 80) cleanName = cleanName.slice(0, 80);
+
+  // 2026-10-29: 不该用 TMDB 匹配的分类直接跳过 (省配额, 避免错匹配)
+  if (SKIP_MATCH_CATEGORIES.has(category)) return 'SKIP';
 
   const isEng = isEnglishName(cleanName);
 
@@ -480,53 +340,61 @@ export async function matchOne(rawName: string, category: string, subType: strin
     } else if (subType) {
       const tmdbType = subTypeToTmdbWithExtension(subType);
       typeOrder = [tmdbType, tmdbType === 'movie' ? 'tv' : 'movie'];
-    } else if (['连载', '剧集', '动漫', '综艺', '少儿频道'].includes(category)) {
+    } else if (TV_ONLY_CATEGORIES.has(category)) {
       typeOrder = ['tv'];
-    } else if (['电影', '华语电影', '外语电影', '动画电影', 'REMUX', '系列电影'].includes(category)) {
+    } else if (MOVIE_ONLY_CATEGORIES.has(category)) {
       typeOrder = ['movie', 'tv'];
     } else {
       typeOrder = ['movie', 'tv'];
     }
 
-    let keyIdx = 0;
-    for (const s of strategies) {
-      for (const type of typeOrder) {
-        const result = await searchTmdb(cleanName, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length, s.useYear);
-        keyIdx++;
-        if (result) {
-          return {
-            id: String(result.id),
-            tmdb_type: type,
-            poster: result.poster_path ? `${TMDB_IMG}${result.poster_path}` : '',
-            title: result.title || result.name || cleanName,
-            vote: result.vote_average || 0,
-            year: (result.release_date || result.first_air_date || '').slice(0, 4) || year,
-          };
-        }
-      }
+    // 2026-10-29: 多候选片名依次尝试
+    //   旧版只试 1 个片名 → 片名提取错一点就彻底匹配不上
+    //   新版: 主名 + 备选名 (clean-title 返回的 alts, 如双语片名的另一段/次长中文片段)
+    //   预算上限 16 次 TMDB 调用/条 (admin 单条/小批量手动匹配用; 批量走 cron 的评分版, 预算更小)
+    const MAX_CALLS = 16;
+    const names: string[] = [];
+    for (const n of [cleanName, ...altNames]) {
+      if (!n || n.length < 2) continue;
+      if (names.includes(n)) continue;
+      names.push(n);
     }
+    const nameList = names.slice(0, 4);
 
-    // 续集降级
-    let noTrailingNum = cleanName;
-    for (let i = 0; i < 3; i++) {
-      const next = noTrailingNum.replace(/[\s:：\-_+/&]?\d{1,3}\s*$/, '').trim();
-      if (next === noTrailingNum) break;
-      noTrailingNum = next;
-    }
-    if (noTrailingNum !== cleanName && noTrailingNum.length >= 2) {
+    let keyIdx = 0;
+    const mkResult = (result: any, type: 'tv' | 'movie') => ({
+      id: String(result.id),
+      tmdb_type: type,
+      poster: result.poster_path ? `${TMDB_IMG}${result.poster_path}` : '',
+      title: result.title || result.name || cleanName,
+      vote: result.vote_average || 0,
+      year: (result.release_date || result.first_air_date || '').slice(0, 4) || year,
+    });
+
+    for (const nm of nameList) {
       for (const s of strategies) {
         for (const type of typeOrder) {
-          const result = await searchTmdb(noTrailingNum, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length, s.useYear);
+          if (keyIdx >= MAX_CALLS) break;
+          const result = await searchTmdb(nm, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length, s.useYear);
           keyIdx++;
-          if (result) {
-            return {
-              id: String(result.id),
-              tmdb_type: type,
-              poster: result.poster_path ? `${TMDB_IMG}${result.poster_path}` : '',
-              title: result.title || result.name || cleanName,
-              vote: result.vote_average || 0,
-              year: (result.release_date || result.first_air_date || '').slice(0, 4) || year,
-            };
+          if (result) return mkResult(result, type);
+        }
+      }
+      // 续集降级 (真人快打2 → 真人快打)
+      let noTrailingNum = nm;
+      for (let i = 0; i < 3; i++) {
+        const next = noTrailingNum.replace(/[\s:：\-_+/&]?\d{1,3}\s*$/, '').trim();
+        if (next === noTrailingNum) break;
+        noTrailingNum = next;
+      }
+      if (noTrailingNum !== nm && noTrailingNum.length >= 2) {
+        for (const s of strategies) {
+          if (keyIdx >= MAX_CALLS) break;
+          for (const type of typeOrder) {
+            if (keyIdx >= MAX_CALLS) break;
+            const result = await searchTmdb(noTrailingNum, type, category, s.useYear ? year : undefined, s.lang, keyIdx % TMDB_KEYS.length, s.useYear);
+            keyIdx++;
+            if (result) return mkResult(result, type);
           }
         }
       }

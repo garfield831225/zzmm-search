@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useRequireAuth } from '@/lib/use-require-auth';
+import { FILM_CATEGORIES } from '@/lib/categories';
 
 const TMDB_IMAGE_BASE = 'https://image.zzmm-search.uk/t/p/w500';
 
@@ -26,7 +27,8 @@ interface BasicItem {
 }
 
 // 2026-10-16 P12: 5 行筛选 + SORT 3 按钮 + Per Page (跟首页影视专区一致)
-const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频道', '综艺', '演唱会', '纪录片', '原盘', 'REMUX', '系列电影'];
+// 2026-10-29: 分类统一到 lib/categories.ts (补上「短剧」)
+const CATEGORIES = FILM_CATEGORIES;
 const SOURCES = ['全部', '115网盘', '百度网盘', '阿里云盘', '夸克网盘', '磁力链接', 'ed2k链接'];
 const REGIONS = ['全部', '大陆', '欧美', '日韩', '港澳台'];
 const YEARS = ['全部', '2026', '2025', '2024', '2023', '2022', '2021', '2020', '2010-2019', '2000-2009'];
