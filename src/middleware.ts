@@ -207,6 +207,11 @@ const PUBLIC_PATHS = [
   //   - ⚠️ 不加进白名单会被 middleware 307 到 /login → 浏览器把登录页 HTML 当图片解码 → 裂图
   //   - ⚠️ 以后 public/ 新增静态文件都要在这加一条 (middleware 比 Next.js 静态服务先跑)
   '/poster-placeholder.svg',
+  // 2026-10-30 霓虹改版: Orbitron 自托管字体 (public/fonts/*.woff2)
+  //   - ⚠️ 不加白名单 → 未登录用户(登录页/注册页)请求字体被 307 到 /login
+  //     → 浏览器拿登录页 HTML 当 woff2 解码 → 字体失败 → 登录页标题退回系统字体
+  //   - 登录页/注册页都是公开页, 它们的标题用了 .neon-title → 必须能拿到字体
+  '/fonts',
   // 2026-08-14 拿掉的页面 (保留作为注释):
   // '/basic', '/upcoming', '/themes', '/nonfilm', '/library', '/vip', '/vip-videos',
   // '/tmdb', '/tmdb-films', '/request', '/profile', '/games', '/bounty', '/charts', '/titles', '/terms'
@@ -223,8 +228,21 @@ const PUBLIC_PATHS = [
   '/api/exclusive-zone',
 ];
 
+// 2026-10-30: public/ 静态资源扩展名 (字体/图片/图标) —— 这些必须公开可取
+//   见 middleware() 里的通用放行逻辑
+const STATIC_ASSET_EXT = /\.(woff2?|ttf|otf|eot|png|jpe?g|webp|avif|gif|svg|ico)$/i;
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // 2026-10-30: public/ 静态资源通用放行 (字体/图片/图标...)
+  //   - 背景: middleware 比 Next.js 静态服务先跑, public/ 里的文件默认会被 307 到 /login
+  //   - 这类文件本来就该公开 (它们是静态资源, 不是受保护的数据), 拦下来只是白跑一趟
+  //   - 之前每次新增 public/ 文件都要手动加白名单条目, 漏了就出 bug (字体那次就是)
+  //   - 只放行纯静态资源扩展名, 不碰 .json/.js/.css (那些走 _next/static, matcher 已排除)
+  if (STATIC_ASSET_EXT.test(pathname)) {
+    return NextResponse.next();
+  }
 
   // 2026-08-04 P7: Preview 环境全放行 (生产环境没有 APP_ENV=preview 变量, 不受影响)
   // - middleware 完全跳过 token 校验
