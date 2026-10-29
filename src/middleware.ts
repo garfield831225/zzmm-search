@@ -58,6 +58,9 @@ const PUBLIC_PATHS = [
   // 搜索公开
   '/api/search',
   '/api/search/suggest',
+  // 2026-10-29 B4: 首页「刚匹配上新」专区 API (跟 /api/search 同级别公开)
+  //   - 数据范围不比 /api/search 大 (都是 active 资源的 tmdb_id + 名字), 无新增暴露面
+  '/api/recently-matched',
   // 公共 API (跨域 moviezone + 子站)
   '/api/match-single',
   '/api/match-batch',

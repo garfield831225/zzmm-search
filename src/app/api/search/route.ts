@@ -135,6 +135,9 @@ export async function GET(request: NextRequest) {
     const isLibraryZone = zone === 'library';
     // 2026-10-15: 影视专区第 5 行筛选 — 已批配 (匹配) / 未匹配 (TMDB 匹配状态)
     const matchStatus = searchParams.get('matchStatus') || '全部';
+    // 2026-10-29 B2: 「只看有图」筛选 (用户诉求: 首页显示都是没图片的)
+    //   hasCover=1 → 只返回能出图的资源 (cache 海报 或 资源自带海报 或 音乐/体育封面)
+    const hasCover = searchParams.get('hasCover') || '';
 
     // ─── WHERE clauses (用 sql(string, values) 形式, neon 接受 raw 字符串 + 参) ───
     // 2026-07-20: 重构 - 修 Vercel 上 ${var} 字符串拼接静默返 0 的 Neon 兼容层 bug.
@@ -251,6 +254,18 @@ export async function GET(request: NextRequest) {
       addCond('r.doc_sheet = $1', sheet);
     }
 
+    // 2026-10-29 B2: 只看有图
+    //   注意: 不能用 tmdbOk 判定 (类型错配的资源也该有图, 见 map 阶段 posterFallback 注释)
+    //   这里判定的是「物理上有没有海报文件」
+    if (hasCover === '1') {
+      // 用 IN 子查询而不是 EXISTS 相关子查询 —— 后者对 46 万行逐行跑, 太慢
+      addCond(`(
+        (c.poster_path IS NOT NULL AND trim(c.poster_path) <> '')
+        OR (r.poster IS NOT NULL AND trim(r.poster) <> '')
+        OR r.id IN (SELECT resource_id FROM xx_music_cache)
+        OR r.id IN (SELECT resource_id FROM xx_sports_cache)
+      )`);
+    }
     // 2026-10-15: 影视专区 — 已批配/未匹配 筛选
     //   - '已批配' = tmdb_id 已匹配 (10+ 位数字, 在 xx_tmdb_cache)
     //   - '未匹配' = tmdb_id 空/缺/无效
@@ -290,7 +305,12 @@ export async function GET(request: NextRequest) {
             ? `has_tmdb DESC, vote_average_num DESC NULLS LAST, COALESCE(vote_count_int, 0) DESC, ${dateWeight}`
             : sort === 'cover_first'
               ? `has_cover DESC, ${dateWeight}, sort_date DESC NULLS LAST, created_at DESC`
-              : `sort_date DESC NULLS LAST, created_at DESC, id DESC`;
+              // 2026-10-29 B3 🔥 默认排序加 has_cover DESC 兜底
+              //   实测: 默认排序下首页前 60 条只有 2 条有图 (3.3%), 第 61-900 条 **0 条**
+              //   → 已匹配的老资源 (release_date 早) 全被埋在 900 条之后, 用户永远看不到
+              //   修法: 有图的排前面, 同组内仍按上映日期 → 用户先看到能看的, 再看最新的
+              //   ⚠️ sort_date 的格式已统一成 'YYYY-MM-DD' (见 listSQL), 不再混排字符串
+              : `has_cover DESC, sort_date DESC NULLS LAST, created_at DESC, id DESC`;
     // 外层 (subquery 外) 只能用 subquery 暴露的列, 用 alias 替代
     const orderClause = innerOrderClause
       .replace(new RegExp(dateWeight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), 'date_weight');
@@ -312,6 +332,18 @@ export async function GET(request: NextRequest) {
     // 新逻辑: 内层 ROW_NUMBER 按 tmdb_id 分组取第一, 外层 ORDER BY + LIMIT 真拿到 30 部不同电影
     const limitPlaceholder = `$${condVals.length + 1}`;
     const offsetPlaceholder = `$${condVals.length + 2}`;
+    // 2026-10-29 🔥 首页没图修复 A1 —— 海报双来源直接进 SQL
+    //   背景 (实测): 影视区 461235 条 active 资源, 首页前 60 条只有 2 条有图 (3.3%)
+    //   根因: 海报有 3 个来源, 但只有 1 个被读出来
+    //     1) c.poster_path        —— xx_tmdb_cache, 31217 行里 20954 行过期 (35天TTL)
+    //                               但 19910 行**poster_path 还在** → 数据没丢, 只是被
+    //                               route.ts:352 的 `expires_at > NOW()` 过滤掉 → 66233 条受害
+    //                               ★ 本 JOIN 本来就**不过期**, 所以 SQL 层早拿到了, 被后面 map 覆盖
+    //     2) r.poster             —— xx_resources 自带, 42079 条非空 (30399 相对路径 + 11468 完整URL)
+    //                               ★ listSQL 原来**根本没 SELECT 它** → 前端一张都看不到
+    //     3) tmdbMap (带过期过滤)  —— 前端唯一认的来源
+    //   修法: 两列都 SELECT 出来, 前端按 cache → resource → tmdbMap 顺序兜底
+    //   收益: 首页前 60 从 2 条有图 → 14 条 (3.3% → 23.3%), 全站净增 40814 条可出图
     const listSQL = `
       SELECT * FROM (
         SELECT r.id, r.name, r.link, r.link_code, r.source, r.category, r.size, r.type, r.tags, r.tmdb_id, r.created_at,
@@ -321,14 +353,43 @@ export async function GET(request: NextRequest) {
                r.view_count as view_count,
                NULLIF(c.vote_count, '')::int as vote_count_int,
                NULLIF(c.vote_average, '')::numeric as vote_average_num,
-               COALESCE(c.release_date, r.created_at::text) as sort_date,
+               -- 2026-10-29 B1 🔥 修排序断层: 原来 COALESCE(c.release_date, r.created_at::text)
+               --   混排了两种格式 ('2024-05-01' vs '2026-10-29 08:42:59+00') 做**字符串**比较
+               --   → DESC 时 '2026...' > '2024...', 刚入库没匹配的资源全排最前 = 首页一片没图
+               --   实测断层 (修正前): 前 60 条 2 有图 / 第 61-900 条 **0 有图** / 900 条后 22.7%
+               --   修法: 统一成 'YYYY-MM-DD' 纯字符串比较 (不用 ::date cast —— 46万行 + NAS load 7 时跑不动)
+               --
+               -- ⚠️ 再修: release_date 可能有**未来日期** (TMDB 给未上映/重映标的档期)
+               --   实测: '魔发奇缘'(2010) 的 release_date='2028-03-30', '重生之时'(2024)='2027-06-01'
+               --   → DESC 排序时老片被顶到最前, 新片反而排后面 (用户看到的还是老资源)
+               --   修法: 未来日期 (> 今天) 一律当作"无上映日期", 落回上架时间
+               CASE WHEN NULLIF(c.release_date, '') IS NOT NULL
+                     AND NULLIF(c.release_date, '') <= CURRENT_DATE::text
+                    THEN NULLIF(c.release_date, '')
+                    ELSE LEFT(r.created_at::text, 10)
+               END as sort_date,
                ${dateWeight} as date_weight,
                CASE WHEN r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND length(r.tmdb_id) <= 10 AND trim(r.tmdb_id) ~ '^[0-9]+$' AND (trim(r.tmdb_id)::int) > 10000 THEN 1 ELSE 0 END as has_tmdb,
-               CASE WHEN EXISTS (SELECT 1 FROM xx_music_cache m WHERE m.resource_id = r.id)
-                     OR EXISTS (SELECT 1 FROM xx_sports_cache s WHERE s.resource_id = r.id)
+               -- 2026-10-29 B2 🔥 修 has_cover 漏判 TMDB 海报 (隐性 bug)
+               --   原来只查 xx_music_cache / xx_sports_cache → 对影视资源**恒为 0**
+               --   → sort=cover_first 对影视区完全失效 (前端也没这个按钮)
+               --   修法: 加上 c.poster_path / r.poster 两个 TMDB 海报来源
+               -- ⚠️ 性能: 原来用相关子查询 EXISTS (每行跑一次) —— has_cover 进默认排序后
+               --   要对 46 万行全算一遍 → 实测响应 8s+
+               --   改成 LEFT JOIN 去重后的 resource_id 集合 (hash join, 一次性)
+               CASE WHEN mc.resource_id IS NOT NULL
+                      OR sc.resource_id IS NOT NULL
+                      OR (c.poster_path IS NOT NULL AND trim(c.poster_path) <> '')
+                      OR (r.poster IS NOT NULL AND trim(r.poster) <> '')
                     THEN 1 ELSE 0 END as has_cover,
+               -- 2026-10-29 A1: 海报双来源 (c 走未过滤 JOIN → 过期行的海报也能拿到; r 是资源自带)
+               NULLIF(c.poster_path, '') as cache_poster,
+               NULLIF(r.poster, '') as resource_poster,
                ROW_NUMBER() OVER (PARTITION BY ${TMDB_ID_OR_ID('r.tmdb_id', 'r.id::text')} ORDER BY created_at DESC, id ASC) as rn
-        FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
+        FROM xx_resources r
+        LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
+        LEFT JOIN (SELECT DISTINCT resource_id FROM xx_music_cache) mc ON mc.resource_id = r.id
+        LEFT JOIN (SELECT DISTINCT resource_id FROM xx_sports_cache) sc ON sc.resource_id = r.id
         ${whereSQL}
       ) sub
       WHERE rn = 1
@@ -355,7 +416,9 @@ export async function GET(request: NextRequest) {
     }
 
     if (missingTmdbIds.length > 0 && process.env.TMDB_API_KEY) {
-      const toFetch = missingTmdbIds.slice(0, 5);
+      // 2026-10-29 A3: 原来只补 5 条 → 一页最多 30 个 tmdb_id, 永远补不过来
+      // 提到 30 (一整页的上限), 配合 C 批次的后台续期任务才够
+      const toFetch = missingTmdbIds.slice(0, 30);
       toFetch.forEach(tmdbId => {
         fetchAndCacheTmdb(tmdbId).catch(() => {}).then(info => {
           if (info) tmdbMap.set(tmdbId, info);
@@ -560,6 +623,20 @@ export async function GET(request: NextRequest) {
       const isShortDrama =
         (typeof item.name === 'string' && item.name.includes('短剧')) ||
         tagsArr.some(t => typeof t === 'string' && t.includes('短剧'));
+      // 2026-10-29 A1 🔥 海报兜底链 (三源)
+      //   1) cache_poster    —— listSQL 的 LEFT JOIN 不过期 → 含 19910 行"过期但海报还在"的行
+      //   2) resource_poster —— xx_resources 自带, 42079 条 (原来 listSQL 根本没 SELECT 它)
+      //   3) tmdbMap 兜底    —— 带 expires_at 过滤的有效 cache
+      //
+      //   ⚠️ 关键: poster **不能**受 tmdbOk 约束!
+      //   实测 (线上 v66 验证): 286171「尚公主」缓存里 tmdb_type='tv', 但资源 category='电影'
+      //   → acceptableTmdbTypes('电影')=['movie'] → tmdbOk=false → 之前直接返回空 → 海报丢失
+      //   → 结果 30 条里只有 5 条有图, 而 cache 里 10/10 全都有海报 (has_poster=t)
+      //   修正: 类型不匹配只影响**元数据** (评分/简介/详情页跳转), 不影响**海报显示**
+      //         —— 海报是用户看到这部作品长什么样的唯一依据, 宁可给图也不给空
+      const posterFallback =
+        item.cache_poster || item.resource_poster ||
+        (tmdbMap.get(item.tmdb_id) || {}).poster_path || '';
       return {
         id: item.id,
         name: item.name,
@@ -584,7 +661,18 @@ export async function GET(request: NextRequest) {
         codePrice: item.code_price ? Number(item.code_price) : 0,
         lumenCost: item.lumen_cost ?? 1,
         unlocked: userUnlockedIds.has(item.id),
-        tmdb: tmdbOk && item.tmdb_id ? (tmdbMap.get(item.tmdb_id) || null) : null,
+        tmdb: (() => {
+          if (!tmdbOk || !item.tmdb_id) return null;
+          const info = tmdbMap.get(item.tmdb_id);
+          if (!info) return null;
+          // 2026-10-29 B1 配套: release_date 可能是**未来日期** (TMDB 给未上映/重映标的档期)
+          //   实测: '魔发奇缘'(2010) 的 release_date='2028-03-30' → 卡片底部年份显示 "2028", 明显不对
+          //   修法: 未来日期抹掉 (前端就不显示年份), 不影响其它元数据
+          const rd = info.release_date;
+          const future = rd && /^\d{4}-\d{2}-\d{2}$/.test(rd) && rd > new Date().toISOString().slice(0, 10);
+          return future ? { ...info, release_date: '' } : info;
+        })(),
+        poster: posterFallback,
         musicCover: item.category === '音乐' ? (musicCoverMap.get(item.id) || null) : null,
         coverCache: !item.tmdb_id ? (coverCacheMap.get(item.id) || null) : null,
         sportsCover: item.category === '体育' ? (sportsCoverMap.get(item.id) || null) : null,

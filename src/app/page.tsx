@@ -75,6 +75,8 @@ interface ResourceItem {
   tmdbIdRaw?: string;  // 2026-07-20: tmdb 原始值 (含 NOMATCH/空)
   viewCount: number;
   tmdb: TmdbInfo | null;
+  // 2026-10-29 A1: 海报兜底路径 (cache → resource → tmdbMap, 后端已排好序)
+  poster?: string;
   isCurrent?: boolean;
   credits?: { director: CreditPerson[]; cast: CreditPerson[] };
   // 2026-06-03 单资源付费
@@ -122,6 +124,8 @@ export default function HomePage() {
   const [year, setYear] = useState('全部');
   // 2026-10-15: 影视专区 — 已批配 / 未匹配 筛选
   const [matchStatus, setMatchStatus] = useState('全部');
+  // 2026-10-29 B2: 只看有图 (用户诉求: 首页显示都是没图片的)
+  const [onlyWithCover, setOnlyWithCover] = useState(false);
   const [sort, setSort] = useState('release_date');
   const [pageSize, setPageSize] = useState(30);
   // 2026-07-20: dedupBy 控制是否按 tmdb_id 去重 ('tmdb_id' 默认去重 | 'id' 不去重看全部)
@@ -158,6 +162,8 @@ export default function HomePage() {
   const [secUpcoming, setSecUpcoming] = useState<SectionItem[]>([]);
   const [secBasic, setSecBasic] = useState<SectionItem[]>([]);
   const [secVip, setSecVip] = useState<SectionItem[]>([]);
+  // 2026-10-29 B4: 「🆕 刚匹配」专区 —— 最近 7 天新匹配上 TMDB 的资源
+  const [secMatched, setSecMatched] = useState<SectionItem[]>([]);
   const [secThemes, setSecThemes] = useState<{ id: number; name: string; slug: string; item_count: number }[]>([]);
   const [secLoading, setSecLoading] = useState(true);
 
@@ -166,7 +172,7 @@ export default function HomePage() {
     let cancelled = false;
     const load = async () => {
       try {
-        const [upRes, baRes, vipRes, thRes] = await Promise.allSettled([
+        const [upRes, baRes, vipRes, thRes, rmRes] = await Promise.allSettled([
           fetch('/api/upcoming?type=all&pageSize=12'),
           fetch('/api/basic?pageSize=12'),
           // 2026-08-09: VIP 多网盘改用 /api/catalog?section=vip (网盘资源, 跟 /library 一套)
@@ -174,17 +180,22 @@ export default function HomePage() {
           //   - 跟 library page.tsx 同源, 改 href="/library?section=vip"
           fetch('/api/catalog?section=vip&pageSize=12&zone=library'),
           fetch('/api/themes'),
+          // 2026-10-29 B4: 新匹配专区 (近 7 天匹配上 TMDB 的资源, 按 matched_tmdb_at 倒序)
+          fetch('/api/recently-matched?limit=24&days=7'),
         ]);
         if (cancelled) return;
         const upData = upRes.status === 'fulfilled' ? await upRes.value.json() : { items: [] };
         const baData = baRes.status === 'fulfilled' ? await baRes.value.json() : { items: [] };
         const vipData = vipRes.status === 'fulfilled' ? await vipRes.value.json() : { items: [] };
         const thData = thRes.status === 'fulfilled' ? await thRes.value.json() : { themes: [] };
+        const rmData = rmRes.status === 'fulfilled' ? await rmRes.value.json() : { items: [] };
         setSecUpcoming((upData.items || []).map(mapToSection));
         setSecBasic((baData.items || []).map(mapToSection));
         // 2026-08-09: VIP 多网盘用 catalog 字段映射 (id/name/source/link/noPoster 跟 vip API 不一样)
         setSecVip((vipData.items || []).map(mapToCatalog));
         setSecThemes(thData.themes || []);
+        // 2026-10-29 B4: 新匹配专区
+        setSecMatched((rmData.items || []).map(mapToMatched));
         setSecLoading(false);
       } catch (e) {
         if (!cancelled) setSecLoading(false);
@@ -193,6 +204,28 @@ export default function HomePage() {
     load();
     return () => { cancelled = true; };
   }, []);
+
+  // 2026-10-29 B4: /api/recently-matched 字段映射
+  //   poster 已经是三源兜底后的结果 (cache → resource), 直接给 tmdbPoster 规整到 CF 边缘
+  function mapToMatched(it: any): SectionItem {
+    return {
+      id: it.id,
+      tmdbId: it.tmdbId,
+      tmdbType: it.tmdbType,
+      title: it.title || it.name || '',
+      posterUrl: it.poster ? tmdbPoster(it.poster, 'card') : '',
+      releaseDate: it.releaseDate,
+      voteAverage: it.voteAverage ?? undefined,
+      source: it.source,
+      sourceDisplay: it.source,
+      size: it.size,
+      accessLevel: it.accessLevel,
+      importChannel: it.importChannel,
+      payType: it.payType,
+      category: it.category,
+      lumenCost: it.lumenCost,
+    };
+  }
 
   // 将 API item 映射到 SectionItem
   // 2026-08-08: /api/upcoming|basic|vip 返的是 resourceId (xx_resources.id), 不是 id
@@ -335,15 +368,15 @@ export default function HomePage() {
   }, []);
 
   // 用 ref 记录最新 state，在 effect 调用 fetchItems 之前同步最新值
-  const latestRef = useRef({ query, category, source, region, year, matchStatus, sort, pageSize, dedupBy });
-  latestRef.current = { query, category, source, region, year, matchStatus, sort, pageSize, dedupBy };
+  const latestRef = useRef({ query, category, source, region, year, matchStatus, sort, pageSize, dedupBy, onlyWithCover });
+  latestRef.current = { query, category, source, region, year, matchStatus, sort, pageSize, dedupBy, onlyWithCover };
 
   // 空 deps —— 永远同一函数引用，永远用 latestRef 读最新 state
   const fetchItems = useCallback(async (p?: number) => {
     const targetPage = p !== undefined ? p : 1;
     setPage(targetPage);
     setLoading(true);
-    const { query: q, category: cat, source: src, region: reg, year: yr, matchStatus: ms, sort: s, pageSize: ps, dedupBy: db } = latestRef.current;
+    const { query: q, category: cat, source: src, region: reg, year: yr, matchStatus: ms, sort: s, pageSize: ps, dedupBy: db, onlyWithCover: owc } = latestRef.current;
     try {
       const params = new URLSearchParams({ page: targetPage.toString(), pageSize: ps.toString() });
       if (q) params.set('q', q);
@@ -353,6 +386,8 @@ export default function HomePage() {
       if (yr !== '全部') params.set('year', yr);
       // 2026-10-15: 影视专区 — 已批配 / 未匹配 筛选
       if (ms !== '全部') params.set('matchStatus', ms);
+      // 2026-10-29 B2: 只看有图
+      if (owc) params.set('hasCover', '1');
       params.set('sort', s);
       // 2026-07-20: dedupBy 决定是否按 tmdb_id 去重
       params.set('dedupBy', db);
@@ -381,9 +416,9 @@ export default function HomePage() {
   //   它的依赖是本 effect 的子集 (少了 matchStatus) → 每次筛选变化都打两次 /api/search
   //   /api/search 是 47 万行表的重查询, 双倍请求 = 首屏白等一倍
   useEffect(() => {
-    latestRef.current = { query, category, source, region, year, matchStatus, sort, pageSize, dedupBy };
+    latestRef.current = { query, category, source, region, year, matchStatus, sort, pageSize, dedupBy, onlyWithCover };
     fetchItems(1);
-  }, [category, source, region, year, matchStatus, sort, pageSize, dedupBy]); // eslint-line -- stable deps
+  }, [category, source, region, year, matchStatus, sort, pageSize, dedupBy, onlyWithCover]); // eslint-line -- stable deps
 
   // 2026-07-17: 真正退出 - 清 httpOnly cookie + localStorage + 跳 /
   const handleLogout = async () => {
@@ -689,6 +724,24 @@ export default function HomePage() {
         {/* 1.5 2026-08-05 P11: TMDB 最新预告片区 (横幅下面) */}
         <TrailerRow />
 
+        {/* 1.8 2026-10-29 B4: 🆕 刚匹配专区 —— 最近 7 天新匹配上 TMDB 的资源
+              用户诉求「让用户直接看到新匹配的内容」: 匹配 worker 一直在跑 (近 1 天 26307 条),
+              但主列表按上映日期排序, 刚匹配上的老资源永远排不进去 → 单独开一个专区
+              放在「最新上映」之前, 一进来就能看到系统刚补上的封面 */}
+        {secMatched.length > 0 && (
+          <div className="mt-6">
+            <HomeSection
+              title="刚匹配上新"
+              titleEn="JUST MATCHED"
+              emoji="🆕"
+              accent="emerald"
+              href="/titles"
+              items={secMatched}
+              loading={secLoading}
+            />
+          </div>
+        )}
+
         {/* 2. 最新上映模块 */}
         <div className="mt-6">
           <HomeSection
@@ -828,6 +881,18 @@ export default function HomePage() {
                   : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>{ms}</button>
             ))}
           </div>
+          {/* 2026-10-29 B2: 「只看有图」开关 (用户诉求: 首页显示都是没图片的)
+              PC + mobile 同一处 (筛选行本身是 flex-wrap + overflow-x-auto, 窄屏横滑) */}
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
+            <span className="text-[10px] text-white/30 self-center mr-0.5 shrink-0 tracking-wider">封面</span>
+            <button onClick={() => setOnlyWithCover(!onlyWithCover)}
+              aria-pressed={onlyWithCover}
+              className={`px-2.5 py-1 rounded-lg text-[11px] whitespace-nowrap transition shrink-0 ${onlyWithCover
+                ? 'bg-gradient-to-r from-violet-500/25 to-fuchsia-500/25 text-white border border-violet-400/40'
+                : 'bg-white/[0.03] text-white/50 hover:text-white/80 hover:bg-white/[0.06] border border-transparent'}`}>
+              🖼 只看有图
+            </button>
+          </div>
         </div>
 
         {/* Sort & Size Bar - 2026-07-25 改: 玻璃态 + 紫粉激活 */}
@@ -848,6 +913,14 @@ export default function HomePage() {
                 className={`px-3 py-1 rounded-lg text-xs transition ${sort === 'rating'
                   ? 'bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 text-white shadow-[0_0_8px_rgba(168,85,247,0.2)]'
                   : 'text-white/50 hover:text-white/85'}`}>⭐ 最惠</button>
+              {/* 2026-10-29 B2: 封面优先排序
+                  后端 sort='cover_first' 一直存在但对影视区**完全失效** ——
+                  has_cover 的 CASE 只查 xx_music_cache / xx_sports_cache, 没算 TMDB 海报 → 恒为 0
+                  已修 has_cover (加 c.poster_path / r.poster), 这个按钮现在才真正能用 */}
+              <button onClick={() => setSort('cover_first')}
+                className={`px-3 py-1 rounded-lg text-xs transition ${sort === 'cover_first'
+                  ? 'bg-gradient-to-r from-violet-500/30 to-fuchsia-500/30 text-white shadow-[0_0_8px_rgba(168,85,247,0.2)]'
+                  : 'text-white/50 hover:text-white/85'}`}>🖼 封面</button>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -904,20 +977,30 @@ export default function HomePage() {
             >
               {/* Poster */}
               <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-white/5 mb-2.5">
-                {item.tmdb?.poster_path ? (
-                  <img src={tmdbPoster(item.tmdb.poster_path, 'card')} alt={item.name}
-                    className="w-full h-full object-cover transition group-hover:scale-105"
-                    onError={(e) => {
-                      // 2026-10-29: 加守卫 —— fallback 本身失败时会无限重试
-                      const el = e.target as HTMLImageElement;
-                      if (el.dataset.fallbackApplied) return;
-                      el.dataset.fallbackApplied = '1';
-                      el.src = TMDB_FALLBACK;
-                    }}
-                    loading="lazy" decoding="async" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-violet-900/30 to-pink-900/30">🎬</div>
-                )}
+                {(() => {
+                  // 2026-10-29 A1 🔥 海报兜底链
+                  //   原来只认 item.tmdb?.poster_path (来自带 expires_at 过滤的 tmdbMap)
+                  //   → 过期 cache 行的海报直接消失 (66233 条资源受害)
+                  //   现在三源兜底: item.poster (后端已按 cache→resource→tmdbMap 排好) → item.tmdb.poster_path
+                  const posterSrc = (item as any).poster || item.tmdb?.poster_path || '';
+                  if (!posterSrc) {
+                    return (
+                      <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-violet-900/30 to-pink-900/30">🎬</div>
+                    );
+                  }
+                  return (
+                    <img src={tmdbPoster(posterSrc, 'card')} alt={item.name}
+                      className="w-full h-full object-cover transition group-hover:scale-105"
+                      onError={(e) => {
+                        // 2026-10-29: 加守卫 —— fallback 本身失败时会无限重试
+                        const el = e.target as HTMLImageElement;
+                        if (el.dataset.fallbackApplied) return;
+                        el.dataset.fallbackApplied = '1';
+                        el.src = TMDB_FALLBACK;
+                      }}
+                      loading="lazy" decoding="async" />
+                  );
+                })()}
 
                 {/* Bottom Info Bar */}
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-2 pt-6 pb-2">
