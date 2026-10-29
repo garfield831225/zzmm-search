@@ -1,0 +1,19 @@
+[Unit]
+Description=zzmm-search TMDB 存量匹配重跑 worker (主跑: 全部影视类, 数据盘)
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/data_s001/docker/zzmm-search
+Environment=NODE_ENV=production
+EnvironmentFile=/data_s001/docker/zzmm-search/.env.production
+ExecStart=/usr/local/bin/node /data_s001/docker/zzmm-search/scripts/rematch-worker.cjs --state-dir /data_s001/docker/zzmm-search/.rematch-main --chunk 500 --conc 16 --rps 12 --min-age-hours 6
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/data_s001/docker/zzmm-search/logs/rematch-main.log
+StandardError=append:/data_s001/docker/zzmm-search/logs/rematch-main.log
+
+[Install]
+WantedBy=multi-user.target

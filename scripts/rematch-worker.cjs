@@ -45,6 +45,8 @@ const CATS = (arg('--cats', '') || '').split(',').map(s => s.trim()).filter(Bool
 const START_ID = parseInt(arg('--after-id', '0'), 10);
 const MAX_ROWS = parseInt(arg('--max-rows', '0'), 10);
 const STOP_AFTER_MS = parseInt(arg('--stop-after-ms', '90000'), 10);
+// 跳过最近 N 小时内被处理过的行 (跟 cron 抢活 / 别的 worker 实例刚跑过)
+const MIN_AGE_HOURS = parseInt(arg('--min-age-hours', '6'), 10);
 
 const TMDB_KEYS = ['7985342d5961e9ee3d5ef6d969c1b8dd', '79e41efe870e60afb09b9de8baa47cf1'];
 const TMDB_BASE = 'https://api.themoviedb.org/3';
@@ -237,13 +239,18 @@ async function searchTmdb(query, type, lang, year) {
       if (!tn) continue;
       if (tn === cn) { tier = 'exact'; score = 100; break; }
       if (tn.startsWith(cn) && cn.length >= 2) { if (score < 90) { tier = 'prefix'; score = 90; } continue; }
-      // ⚠️ 短名 (<3 字) 禁用子串匹配 —— "火花" 会匹配到《幽灵火花》这种同类型不同作品
-      // ⚠️ 2026-10-29 实测校准: 包含匹配**不限长度差**
-      //   同口径 A/B (120 条影视类样本): 不限长度的 engine 命中 98.3%, 限长度的 worker 只有 44.2%
-      //   长度差限制会漏掉: 「吞噬星空」→「吞噬星空2」/「全职法师」→「全职法师 第五季」
-      //                      「鬼灭之刃」→「鬼灭之刃 无限列车篇」/「问心」→「问心2」
-      if (cn.length >= 3 && tn.includes(cn)) { if (score < 80) { tier = 'substr'; score = 80; } continue; }
-      // 反向包含 (片名带序号/副标题): "问心" → 《问心2》 (差值限 8, 再松就乱配了)
+      // ⚠️ 短名 (2 字) 的包含匹配要求「长度差 <= 1」
+      //   「镖人」→《护镖人》(差 1) ✓ 该匹配; 「火花」→《幽灵火花》(差 2) ✗ 不能匹配
+      //   (engine 老规则没有这个限制, 所以会把「动画」→《清华附小语文综合动画课》这种垃圾也认了)
+      if (cn.length === 2) {
+        if (tn.includes(cn) && tn.length - cn.length <= 1) { if (score < 80) { tier = 'substr'; score = 80; } continue; }
+      } else if (cn.length >= 3 && tn.includes(cn)) {
+        // 2026-10-29 实测校准: 包含匹配不限长度差
+        //   限长度会漏掉: 「吞噬星空」→「吞噬星空2」/「全职法师」→「全职法师 第五季」
+        if (score < 80) { tier = 'substr'; score = 80; }
+        continue;
+      }
+      // 反向包含 (片名带序号/副标题): "问心" → 《问心2》 (差值限 8)
       if (tn.length >= 3 && cn.includes(tn) && cn.length - tn.length <= 8) { if (score < 75) { tier = 'substr'; score = 75; } continue; }
       const sim = bigramSim(cn, tn);
       if (sim >= 0.5 && score < 60) { tier = 'bigram'; score = Math.round(sim * 60); continue; }
@@ -271,11 +278,22 @@ async function searchTmdb(query, type, lang, year) {
         poster: c.poster_path || '',
         vote: c.vote_average || 0,
         ry,
+        genres: Array.isArray(c.genre_ids) ? c.genre_ids.join(',') : '',
       };
     }
   }
   if (!best || best.score < 30) return null;
   return best;
+}
+
+// ── 「其他」分类的快速过滤 (2026-10-29) ───────────────────────────────────
+// 这批 12098 条里大部分是书/软件/课程 → 直接拿去找 TMDB 纯浪费配额
+// (实测: 软件 ~200 + 课程 ~450 + 书 ~9000, 每条要 3 次调用)
+// 命中关键词的 → 直接当 SKIP, 后面由 reclassify-other-v2.cjs 按规则归类
+const RE_OTHER_NONFILM = /(免安装|绿色版|破解|破解版|绿色中文版|Setup|Installer|Portable|Repack|课程|教程|教学|讲座|网课|公开课|课件|训练营|真题|试卷|讲义|年级|高考|复习|习题|解锁|去广告|纯净版|专业版|会员版|最新版|注册机|激活码|固件|驱动)/i;
+function isObviousNonFilm(category, name) {
+  if (category !== '其他') return false;
+  return RE_OTHER_NONFILM.test(name || '');
 }
 
 // ── 单条匹配 (带缓存) ────────────────────────────────────────────────────
@@ -287,6 +305,7 @@ async function searchTmdb(query, type, lang, year) {
 // ⚠️ 备用片名只认 exact/prefix —— 副标题/演员名拿去搜极易匹配到别的作品
 //   (实测「动画」→「清华附小语文综合动画课」、「动作」→「砵兰街行动」)
 async function matchOne(name, category, subType) {
+  if (isObviousNonFilm(category, name)) return null;
   const c = cleanFolderName(name);
   if (!c.cleanName || c.cleanName.length < 2) return null;
   const types = typesFor(category, subType, c.season);
@@ -307,7 +326,7 @@ async function matchOne(name, category, subType) {
         continue;  // 缓存里是 null → 这个 (片名,类型) 查过没有, 换下一个
       }
       const langs = isAscii(nm) ? ['en-US', 'zh-CN'] : ['zh-CN', 'en-US'];
-      let found = null;
+      let best = null;
       const tries = [];
       if (c.year) tries.push([langs[0], c.year]);
       tries.push([langs[0], null], [langs[1], null]);
@@ -316,17 +335,21 @@ async function matchOne(name, category, subType) {
         if (r && r.err === '429') {
           await new Promise(res => setTimeout(res, 8000));
           const r2 = await searchTmdb(nm, type, lang, yr);
-          if (r2 && !r2.err) { found = r2; break; }
+          if (r2 && !r2.err && r2) { if (!best || r2.score > best.score) best = r2; if (best.tier === 'exact' || best.tier === 'prefix') break; }
           continue;
         }
-        if (r && r.err) continue;
-        if (r) { found = r; break; }
+        if (!r || r.err) continue;
+        if (!best || r.score > best.score) best = r;
+        // 高置信直接收工; 不够好就继续试下一个语言/年份组合
+        // ⚠️ 2026-10-29 实测: 老写法"拿到任何结果就 break" → 后面 2 个策略白试了
+        //   engine 能多命中 65/120 就是因为它会一直试到 confidence >= 0.5
+        if (r.tier === 'exact' || r.tier === 'prefix') break;
       }
-      cachePut(key, found);
-      if (!found) continue;
-      const ok = found.tier === 'exact' || found.tier === 'prefix'
-        || (!isAlt && (found.tier === 'substr' || (ALLOW_FUZZY && (found.tier === 'bigram' || found.tier === 'fuzzy'))));
-      if (ok) return { ...found, usedName: nm };
+      cachePut(key, best);
+      if (!best) continue;
+      const ok = best.tier === 'exact' || best.tier === 'prefix'
+        || (!isAlt && (best.tier === 'substr' || (ALLOW_FUZZY && (best.tier === 'bigram' || best.tier === 'fuzzy'))));
+      if (ok) return { ...best, usedName: nm };
     }
   }
   return null;
@@ -339,12 +362,20 @@ async function matchOne(name, category, subType) {
 //   (实测: --cats 其他 跑起来 "没有更多数据了", 因为那批全是 NULL)
 function fetchChunk(afterId, limit) {
   const catFilter = CATS.length ? `AND category IN (${CATS.map(c => `'${c.replace(/'/g, "''")}'`).join(',')})` : '';
+  // ⚠️ matched_tmdb_at 守卫: 跳过最近被处理过的行
+  //   - cron match-task 每 5 分钟跑 200 条, 不加守卫会跟 worker 抢同一批行 (浪费 TMDB 配额)
+  //   - 另一个 worker 实例刚跑完的行也不用重跑
+  //   - 代价: 失败的行要等 6 小时才会被重试 (可接受, 每天多试一轮)
+  const ageGuard = MIN_AGE_HOURS > 0
+    ? `AND (matched_tmdb_at IS NULL OR matched_tmdb_at < NOW() - INTERVAL '${MIN_AGE_HOURS} hours')`
+    : '';
   const sql = `SELECT row_to_json(t)::text FROM (
     SELECT id, name, category, COALESCE(sub_type,'') AS sub_type
     FROM xx_resources
     WHERE status='active'
       AND (tmdb_id IS NULL OR tmdb_id = 'NOMATCH')
       AND id > ${afterId}
+      ${ageGuard}
       ${catFilter}
     ORDER BY id LIMIT ${limit}
   ) t`;
@@ -362,18 +393,19 @@ function fetchChunk(afterId, limit) {
 function ensureStage() {
   psql(`CREATE TABLE IF NOT EXISTS xx_rematch_stage (
     rid bigint, tid text, ttype text, ttitle text, tzh text, tposter text,
-    tvote text, tryear text, tier text, orig text
+    tvote text, tryear text, tier text, orig text, genres text
   )`);
+  // 老版本建表没有 genres 列 → 补上 (IF NOT EXISTS 不管已有表)
+  try { psql(`ALTER TABLE xx_rematch_stage ADD COLUMN IF NOT EXISTS genres text`); } catch { /* 忽略 */ }
 }
 
 function writeBack(records) {
   if (!records.length) return { updated: 0 };
   ensureStage();
   const csv = records.map(r => [
-    r.id, r.tid, r.ttype, r.ttitle, r.tzh, r.tposter, r.tvote, r.tryear, r.tier, r.orig,
+    r.id, r.tid, r.ttype, r.ttitle, r.tzh, r.tposter, r.tvote, r.tryear, r.tier, r.orig, r.genres || '',
   ].map(csvCell).join(',')).join('\n');
-  psql(`COPY xx_rematch_stage (rid,tid,ttype,ttitle,tzh,tposter,tvote,tryear,tier,orig) FROM STDIN WITH CSV`, csv + '\n');
-
+  psql(`COPY xx_rematch_stage (rid,tid,ttype,ttitle,tzh,tposter,tvote,tryear,tier,orig,genres) FROM STDIN WITH CSV`, csv + '\n');
   const out = psql(`
     WITH upd AS (
       UPDATE xx_resources r SET
@@ -394,9 +426,12 @@ function writeBack(records) {
   const updated = parseInt(out || '0', 10) || 0;
 
   // 缓存表 (海报走 LEFT JOIN xx_tmdb_cache → 不写这里就没有封面)
+  // genres 一起写 → 后面能用 genre_ids=16 (Animation) 判断是不是动漫 (分类重整要用)
   psql(`
-    INSERT INTO xx_tmdb_cache (tmdb_id, title, title_zh, tmdb_type, original_title, poster_path, release_date, vote_average, cached_at, expires_at)
-    SELECT DISTINCT ON (tid) tid, ttitle, tzh, ttype, orig, tposter, tryear, tvote, NOW(), NOW() + INTERVAL '35 days'
+    INSERT INTO xx_tmdb_cache (tmdb_id, title, title_zh, tmdb_type, original_title, poster_path, release_date, vote_average, genres, cached_at, expires_at)
+    SELECT DISTINCT ON (tid) tid, ttitle, tzh, ttype, orig, tposter, tryear, tvote,
+           CASE WHEN genres ~ '^[0-9,]*$' AND genres <> '' THEN string_to_array(genres, ',') ELSE NULL END,
+           NOW(), NOW() + INTERVAL '35 days'
     FROM xx_rematch_stage WHERE tid IS NOT NULL AND tid <> ''
     ORDER BY tid
     ON CONFLICT (tmdb_id) DO UPDATE SET
@@ -406,10 +441,17 @@ function writeBack(records) {
       poster_path = COALESCE(NULLIF(EXCLUDED.poster_path,''), xx_tmdb_cache.poster_path),
       release_date = COALESCE(NULLIF(EXCLUDED.release_date,''), xx_tmdb_cache.release_date),
       vote_average = COALESCE(NULLIF(EXCLUDED.vote_average,''), xx_tmdb_cache.vote_average),
+      genres = COALESCE(EXCLUDED.genres, xx_tmdb_cache.genres),
       expires_at = GREATEST(xx_tmdb_cache.expires_at, EXCLUDED.expires_at),
       cached_at = NOW()
   `);
   psql(`DELETE FROM xx_rematch_stage`);
+  // 审计日志: 每条写库的记录落一行 JSONL (id/tmdb_id/tier/片名)
+  //   → 万一规则放太宽导致错配, 可以按 id 精确回滚 (把 tmdb_id 改回 NOMATCH)
+  try {
+    fs.appendFileSync(path.join(STATE_DIR, 'written.jsonl'),
+      records.map(r => JSON.stringify({ id: r.id, tid: r.tid, t: r.ttype, tier: r.tier, n: r.ttitle })).join('\n') + '\n');
+  } catch { /* 审计日志失败不阻塞 */ }
   return { updated };
 }
 
@@ -442,9 +484,11 @@ async function main() {
 
   const t0 = Date.now();
   let batchNo = 0;
+  const MAX_SECONDS = parseInt(arg('--max-seconds', '0'), 10);
   while (true) {
     if (MAX_ROWS && state.processed >= MAX_ROWS) { log('达到 --max-rows 上限, 退出'); break; }
-    if (Date.now() - t0 > (parseInt(arg('--max-seconds', '0'), 10) * 1000)) { log('达到 --max-seconds 上限, 退出'); break; }
+    // ⚠️ 2026-10-29 修: max-seconds 默认 0 = 不限, 原来 `Date.now()-t0 > 0` 永远成立 → 第一批就跑完退出
+    if (MAX_SECONDS > 0 && Date.now() - t0 > MAX_SECONDS * 1000) { log('达到 --max-seconds 上限, 退出'); break; }
 
     const rows = fetchChunk(state.afterId, CHUNK);
     if (!rows.length) { log('没有更多数据了, 正常结束'); break; }
@@ -465,7 +509,9 @@ async function main() {
       }));
       for (const o of out) {
         if (o.m) hits.push(o);
-        else if (typesFor(o.r.category, o.r.sub_type || null, null) === null) { skipped++; sentinelRows.SKIP.push(o.r.id); }
+        else if (typesFor(o.r.category, o.r.sub_type || null, null) === null || isObviousNonFilm(o.r.category, o.r.name)) {
+          skipped++; sentinelRows.SKIP.push(o.r.id);
+        }
         else { failed++; sentinelRows.NOMATCH.push(o.r.id); }
       }
       if (Date.now() - bt > STOP_AFTER_MS) break;   // 单批别跑太久
@@ -489,6 +535,7 @@ async function main() {
             ttitle: h.m.title, tzh: h.m.titleZh, tposter: h.m.poster,
             tvote: h.m.vote ? String(h.m.vote) : '', tryear: h.m.ry || '',
             tier: h.m.tier, orig: h.m.originalTitle || '',
+            genres: h.m.genres || '',
           }));
         try {
           const w = writeBack(recs);

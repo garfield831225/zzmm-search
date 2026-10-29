@@ -1,0 +1,21 @@
+[Unit]
+Description=zzmm-search TMDB 存量匹配重跑 worker (游标续跑, 数据盘)
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/data_s001/docker/zzmm-search
+Environment=NODE_ENV=production
+EnvironmentFile=/data_s001/docker/zzmm-search/.env.production
+ExecStart=/usr/local/bin/node /data_s001/docker/zzmm-search/scripts/rematch-worker.cjs --state-dir /data_s001/docker/zzmm-search/.rematch --chunk 500 --conc 16 --rps 12 --min-age-hours 6
+# on-failure: 崩了自动拉起; 正常跑完 (没数据了) 就停, 不无限重启
+Restart=on-failure
+RestartSec=10
+# 日志写数据盘 (系统盘 79% 满, 禁写系统盘)
+StandardOutput=append:/data_s001/docker/zzmm-search/logs/rematch.log
+StandardError=append:/data_s001/docker/zzmm-search/logs/rematch.log
+
+[Install]
+WantedBy=multi-user.target
