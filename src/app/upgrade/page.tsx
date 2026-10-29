@@ -15,8 +15,11 @@ import { Crown, Clock, Infinity, Sparkles, Tag, ArrowRight, Home, Store, Check, 
 //   - 副按钮: 跳闲鱼店铺
 //   - 流程说明: 闲鱼下单 → 拿激活码 → /activate 兑换
 
-const SHOP_PRODUCT_URL = 'https://m.tb.cn/h.83JDFcd?tk=0ZuHgET6kFS';
-const SHOP_STORE_URL = 'https://m.tb.cn/h.8WtUS7Z?tk=qNj9gET60wz';
+// 2026-10-29: 闲鱼链接换了 (旧的 h.83JDFcd / h.8WtUS7Z 已失效, 实测返回错误页)
+//   新商品链接实测能解析到 itemId 1082850640698, 新店铺链接能正常打开
+// ⚠️ tk 里的空格和 # 必须 URL 编码, 否则浏览器会把 # 之后当 fragment 丢掉
+const SHOP_PRODUCT_URL = 'https://m.tb.cn/h.jgMFVwM?tk=kKvsTBytzdr%20tG-%2322%3ElD';
+const SHOP_STORE_URL = 'https://m.tb.cn/h.jfoCGBD?tk=mOmMTByu9Yu%20HU006';
 
 // 2026-10-15: 价格重构 (修正版, vip_forever 直接变永久 SVIP, 不要再加一档)
 const PLANS = [
