@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, useParams, usePathname } from 'next/navigation';
+import { tmdbImageUrl } from '@/lib/tmdb-image';  // 2026-10-29: 图片统一走 CF 边缘反代
 
-const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
+const TMDB_IMAGE_BASE = 'https://image.zzmm-search.uk/t/p/w500';
 
 interface Theme {
   id: number;
@@ -219,7 +220,7 @@ export default function AdminThemeDetailPage() {
                 <div key={`${h.tmdbType}-${h.tmdbId}`} className="bg-black/30 rounded overflow-hidden">
                   <div className="aspect-[2/3] bg-white/5 relative">
                     {h.posterPath ? (
-                      <img src={`${TMDB_IMAGE_BASE}${h.posterPath}`} alt={h.title} className="w-full h-full object-cover" loading="lazy" />
+                      <img src={tmdbImageUrl(h.posterPath, 'w500')} alt={h.title} className="w-full h-full object-cover" loading="lazy" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-white/20 text-2xl">🎬</div>
                     )}

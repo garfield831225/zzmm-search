@@ -7,7 +7,7 @@ import { ArrowLeft, Star, Copy, ExternalLink, Calendar, Globe, Film, Tv, Users, 
 import { SOURCE_DICT, getSourceInfo } from '@/lib/sources';
 import UploadButton from '@/components/UploadButton';
 
-const TMDB_IMG = 'https://image.tmdb.org/t/p';
+const TMDB_IMG = 'https://image.zzmm-search.uk/t/p';
 
 interface ResourceItem {
   id: number;

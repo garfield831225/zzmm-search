@@ -6,8 +6,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Search, Filter, Star, Calendar, Flame, ChevronDown, X, Library } from 'lucide-react';
 
-const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
-const TMDB_IMG_LARGE = 'https://image.tmdb.org/t/p/original';
+const TMDB_IMG = 'https://image.zzmm-search.uk/t/p/w500';
+const TMDB_IMG_LARGE = 'https://image.zzmm-search.uk/t/p/original';
 
 const CATS = [
   { key: 'all',     label: '全部' },

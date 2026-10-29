@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useRequireAuth } from '@/lib/use-require-auth';
 
-const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
+const TMDB_IMAGE_BASE = 'https://image.zzmm-search.uk/t/p/w500';
 
 interface BasicItem {
   resourceId: number;
@@ -50,11 +50,14 @@ export default function BasicPage() {
   const hasLoadedRef = useRef(false);
   const { isReady } = useRequireAuth('/basic');
 
-  if (!isReady) {
-    return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white/50 text-sm">加载中...</div>;
-  }
-
+  // 2026-10-29 🔥 修 Hooks 规则违规 (免费专区「页面加载出错」根因)
+  //   早期 return 夹在 useEffect 之前 → 第一次 render (isReady=false) 跳过 useEffect (hook 数 = N)
+  //   第二次 render (isReady=true) 补上调 useEffect (hook 数 = N+1)
+  //   → React 抛 "Rendered more hooks than during the previous render" → 被 global-error 接住
+  //   修法: useEffect 必须提到 if (!isReady) 早期 return 之前 (同 profile/page.tsx 2026-08-17 P0 修法)
   useEffect(() => {
+    // 鉴权未就绪不拉数据 (避免未登录白拉一次)
+    if (!isReady) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -100,7 +103,12 @@ export default function BasicPage() {
 
     fetchData();
     return () => { cancelled = true; };
-  }, [category, source, region, year, matchStatus, sort, pageSize, page, query, pathname]);
+  }, [category, source, region, year, matchStatus, sort, pageSize, page, query, pathname, isReady]);
+
+  // ⚠️ 鉴权未就绪 → 显示"加载中" —— 必须放在所有 hook 之后!
+  if (!isReady) {
+    return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white/50 text-sm">加载中...</div>;
+  }
 
   // 任意筛选变化 → 重置 page=1
   const resetPage = () => setPage(1);

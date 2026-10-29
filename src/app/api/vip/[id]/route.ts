@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
+import { tmdbImageUrl } from '@/lib/tmdb-image';  // 2026-10-29: 图片统一走 CF 边缘反代
 
 neonConfig.fetchConnectionCache = false;
 
@@ -19,7 +20,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
-const TMDB_IMG = 'https://image.tmdb.org/t/p';
+const TMDB_IMG = 'https://image.zzmm-search.uk/t/p';
 
 export async function GET(
   req: NextRequest,
@@ -99,12 +100,8 @@ export async function GET(
         originalLanguage: head.original_language,
         overview: head.overview,
         source: 'xingfan',
-        posterUrl: head.poster_path
-          ? (head.poster_path.startsWith('http') ? head.poster_path : `${TMDB_IMG}/w500${head.poster_path}`)
-          : null,
-        backdropUrl: head.backdrop_path
-          ? (head.backdrop_path.startsWith('http') ? head.backdrop_path : `${TMDB_IMG}/w1280${head.backdrop_path}`)
-          : null,
+        posterUrl: head.poster_path ? tmdbImageUrl(head.poster_path, 'w500') : null,
+        backdropUrl: head.backdrop_path ? tmdbImageUrl(head.backdrop_path, 'w1280') : null,
         voteAverage: head.vote_average ? Number(head.vote_average) : null,
         voteCount: head.vote_count ? Number(head.vote_count) : 0,
         releaseDate: head.release_date || head.first_air_date || null,

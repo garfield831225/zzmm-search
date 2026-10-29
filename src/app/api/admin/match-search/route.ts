@@ -53,7 +53,7 @@ async function searchTMDB(q: string, type: string, lang = 'zh-CN'): Promise<TMDB
       type,
       title: r.title || r.name,
       original_title: r.original_title || r.original_name,
-      poster: r.poster_path ? 'https://image.tmdb.org/t/p/w200' + r.poster_path : '',
+      poster: r.poster_path ? 'https://image.zzmm-search.uk/t/p/w200' + r.poster_path : '',
       year: (r.release_date || r.first_air_date || '').slice(0, 4),
       vote: r.vote_average || 0,
       overview: r.overview || '',

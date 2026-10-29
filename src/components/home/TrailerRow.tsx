@@ -52,8 +52,12 @@ export default function TrailerRow() {
     setLoading(true);
     setError(null);
     setItems([]);
-    // 2026-08-06: 永远 fresh=1 强制刷新, 避免 server 10 分钟缓存污染 (限流时 0 items 卡住)
-    fetch(`/api/tmdb/videos?tab=${tab}&lang=zh-CN&limit=12&_t=${Date.now()}&fresh=1`, { cache: 'no-store' })
+    // 2026-10-29 优化: 默认走服务端缓存 (trending 30 分钟 / now_playing 60 分钟)
+    //   之前永远带 fresh=1 → 每次打开首页都打穿缓存, 重拉 20+ 个 TMDB video 接口
+    //   实测线上: 带 fresh=1 = 47359ms, 走服务端缓存 = 868ms (54 倍差距, 首页被拖死)
+    //   只有用户手动点"重试/重新加载"才 fresh=1 (retryTick > 0)
+    const fresh = retryTick > 0 ? '&fresh=1' : '';
+    fetch(`/api/tmdb/videos?tab=${tab}&lang=zh-CN&limit=12&_t=${Date.now()}${fresh}`, { cache: 'no-store' })
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;

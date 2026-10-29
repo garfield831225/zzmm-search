@@ -5,7 +5,7 @@ import jwt from 'jsonwebtoken';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const TMDB_IMG = 'https://image.tmdb.org/t/p';
+const TMDB_IMG = 'https://image.zzmm-search.uk/t/p';
 
 interface UserInfo {
   id: number;

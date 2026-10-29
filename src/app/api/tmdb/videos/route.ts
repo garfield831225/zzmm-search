@@ -50,6 +50,13 @@ function getTTL(tab: string): number {
   return 1000 * 60 * 30;
 }
 
+// 2026-10-29: per-title video 缓存 (单个片子的 trailer 基本不变)
+//   解决冷启动: 进程重启后首次访问要重拉 20+ 个 TMDB video 接口 (实测线上 47 秒)
+//   有这层缓存后, 重启后基本是内存命中 (毫秒级), 不再每次都等超时重试
+const VIDEO_CACHE_TTL = 1000 * 60 * 60 * 24 * 7;   // 有 trailer → 缓存 7 天
+const VIDEO_NULL_TTL = 1000 * 60 * 60;            // 没 trailer → 1 小时后重试
+const videoCache = new Map<string, { at: number; video: any | null }>();
+
 async function tmdbGet(path: string, apiKey: string, params: Record<string, string> = {}): Promise<any> {
   const url = new URL(`${TMDB_BASE}${path}`);
   url.searchParams.set('api_key', apiKey);
@@ -84,6 +91,17 @@ async function tmdbGet(path: string, apiKey: string, params: Record<string, stri
 
 // 从一部 movie/tv 拿第一个 YouTube trailer/teaser
 async function fetchVideo(type: 'movie' | 'tv', tmdbId: number, lang: string, apiKey: string): Promise<any | null> {
+  // 2026-10-29: 先查 per-title 缓存 (命中就直接返, 不打 TMDB)
+  const ck = `${type}:${tmdbId}:${lang}`;
+  const hit = videoCache.get(ck);
+  if (hit) {
+    const ttl = hit.video ? VIDEO_CACHE_TTL : VIDEO_NULL_TTL;
+    if (Date.now() - hit.at < ttl) return hit.video;
+  }
+  const remember = (video: any | null) => {
+    videoCache.set(ck, { at: Date.now(), video });
+    return video;
+  };
   try {
     // 优先 zh-CN 拿中文 trailer, fallback en-US
     let vids = await tmdbGet(`/${type}/${tmdbId}/videos`, apiKey, { language: lang });
@@ -92,7 +110,7 @@ async function fetchVideo(type: 'movie' | 'tv', tmdbId: number, lang: string, ap
     }
     if (!vids?.results?.length) {
       console.warn(`[fetchVideo] ${type}/${tmdbId} no videos in any language`);
-      return null;
+      return remember(null);
     }
     // 优先 Trailer, 然后 Teaser, 然后任何 YouTube 视频
     const candidates = vids.results
@@ -103,11 +121,12 @@ async function fetchVideo(type: 'movie' | 'tv', tmdbId: number, lang: string, ap
       });
     if (candidates.length === 0) {
       console.warn(`[fetchVideo] ${type}/${tmdbId} has ${vids.results.length} videos but no YouTube`);
-      return null;
+      return remember(null);
     }
-    return candidates[0];
+    return remember(candidates[0]);
   } catch (e: any) {
     console.error(`[fetchVideo] ${type}/${tmdbId} error: ${e.message?.slice(0, 100)}`);
+    // 失败不写缓存 (下次还能重试)
     return null;
   }
 }

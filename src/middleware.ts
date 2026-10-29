@@ -199,6 +199,11 @@ const PUBLIC_PATHS = [
   // 2026-10-22: /titles 页的微信二维码 (public/wechat-qr.png)
   //   - 匿名用户要能看到二维码才能扫码加好友, 不能被踢到 /login
   '/wechat-qr.png',
+  // 2026-10-29: 海报占位图 (public/poster-placeholder.svg)
+  //   - 没海报的卡片用它兜底; 原来指向 TMDB 的 7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg 在官方上就是 404
+  //   - ⚠️ 不加进白名单会被 middleware 307 到 /login → 浏览器把登录页 HTML 当图片解码 → 裂图
+  //   - ⚠️ 以后 public/ 新增静态文件都要在这加一条 (middleware 比 Next.js 静态服务先跑)
+  '/poster-placeholder.svg',
   // 2026-08-14 拿掉的页面 (保留作为注释):
   // '/basic', '/upcoming', '/themes', '/nonfilm', '/library', '/vip', '/vip-videos',
   // '/tmdb', '/tmdb-films', '/request', '/profile', '/games', '/bounty', '/charts', '/titles', '/terms'

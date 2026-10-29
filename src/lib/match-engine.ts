@@ -11,7 +11,7 @@ const TMDB_KEYS = [
   '79e41efe870e60afb09b9de8baa47cf1',
 ];
 const TMDB_BASE = 'https://api.themoviedb.org/3';
-const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
+const TMDB_IMG = 'https://image.zzmm-search.uk/t/p/w500';
 
 // ─── 速率限制器（双 key 各 20 calls/sec，共 40 calls/sec，安全留 buffer）──
 class RateLimiter {

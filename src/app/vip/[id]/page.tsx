@@ -49,7 +49,7 @@ interface VipResource {
   runtime: number | null;
 }
 
-const TMDB_IMG = 'https://image.tmdb.org/t/p';
+const TMDB_IMG = 'https://image.zzmm-search.uk/t/p';
 
 // 流行类型 ID → 中文名 (只列常见的)
 const GENRE_MAP: Record<number, string> = {

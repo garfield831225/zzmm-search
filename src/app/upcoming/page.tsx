@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { useRequireAuth } from '@/lib/use-require-auth';
 
-const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
+const TMDB_IMAGE_BASE = 'https://image.zzmm-search.uk/t/p/w500';
 
 interface UpcomingItem {
   id: number;
@@ -39,11 +39,12 @@ export default function UpcomingPage() {
   const hasLoadedRef = useRef(false);
   const { isReady } = useRequireAuth('/upcoming');
 
-  if (!isReady) {
-    return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white/50 text-sm">加载中...</div>;
-  }
-
+  // 2026-10-29 🔥 修 Hooks 规则违规 (早期 return 夹在 useEffect 之前 → React 抛
+  //   "Rendered more hooks than during the previous render" → global-error「页面加载出错」)
+  //   修法: useEffect 提到早期 return 之前 (同 profile/page.tsx 2026-08-17 P0 修法)
   useEffect(() => {
+    // 鉴权未就绪不拉数据
+    if (!isReady) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -83,7 +84,12 @@ export default function UpcomingPage() {
 
     fetchData();
     return () => { cancelled = true; };
-  }, [tab, pathname]);  // 重新进入时 (即使 tab 不变, 组件重 mount) 也重跑
+  }, [tab, pathname, isReady]);  // 重新进入时 (即使 tab 不变, 组件重 mount) 也重跑
+
+  // ⚠️ 鉴权未就绪 → 显示"加载中" —— 必须放在所有 hook 之后!
+  if (!isReady) {
+    return <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center text-white/50 text-sm">加载中...</div>;
+  }
 
   const movies = items.filter(i => i.tmdbType === 'movie');
   const tvs = items.filter(i => i.tmdbType === 'tv');

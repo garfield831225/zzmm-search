@@ -43,8 +43,9 @@ interface SectionProps {
   linkMode?: boolean;     // 2026-08-09: 网盘资源模式, 卡片 onClick 直接 window.open(it.link) 不跳详情页
 }
 
-const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
-const TMDB_FALLBACK = 'https://image.tmdb.org/t/p/w500/7bUqJAuI5LFiJ6xMcLQ2E3YL8w1a.jpg';
+// 2026-10-29: TMDB_IMG 常量已移除 —— 改用 tmdbImageUrl() 统一规整 (API 侧已返回规整后的 posterUrl)
+// 占位图改用本地 SVG (原来的 TMDB 兜底图在官方上就是 404 → 裂图 + onError 死循环)
+const TMDB_FALLBACK = '/poster-placeholder.svg';
 
 // 2026-08-09: 网盘资源卡片配色 (noPoster 模式用)
 //  - source key 是 source 字段 (baidu/quark/aliyun/magnet/ed2k 等)
@@ -241,7 +242,13 @@ export default function HomeSection({ title, titleEn, emoji, href, items, accent
                         src={it.posterUrl || TMDB_FALLBACK}
                         alt={it.title}
                         className="w-full h-full object-cover group-hover/card:scale-105 transition duration-500"
-                        onError={(e: any) => { e.target.src = TMDB_FALLBACK; }}
+                        onError={(e: any) => {
+                          // 2026-10-29: 加守卫 —— 原来 fallback 本身 404, onError 会无限重试 (实测同一张图请求 7 次)
+                          const el = e.target;
+                          if (el.dataset.fallbackApplied) return;
+                          el.dataset.fallbackApplied = '1';
+                          el.src = TMDB_FALLBACK;
+                        }}
                         loading="lazy"
                         decoding="async"
                       />

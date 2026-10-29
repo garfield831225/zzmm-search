@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
 import { jwtVerify } from 'jose';
+import { tmdbImageUrl } from '@/lib/tmdb-image';  // 2026-10-29: 图片统一走 CF 边缘反代
 
 neonConfig.fetchConnectionCache = false;
 
@@ -18,7 +19,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 15;
 
 const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'cLWhs2015');
-const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
+const TMDB_IMAGE_BASE = 'https://image.zzmm-search.uk/t/p/w500';
 
 async function getUserId(request: NextRequest): Promise<number | null> {
   const auth = request.headers.get('authorization');
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest) {
           tmdbId: r.tmdb_id,
           tmdbTitle: r.tmdb_title || r.name,
           tmdbType: r.tmdb_type,
-          tmdbPosterUrl: r.tmdb_poster ? `${TMDB_IMAGE_BASE}${r.tmdb_poster}` : null,
+          tmdbPosterUrl: r.tmdb_poster ? tmdbImageUrl(r.tmdb_poster, 'w500') : null,
           name: r.name,
           type: r.type,
           links: links || [],

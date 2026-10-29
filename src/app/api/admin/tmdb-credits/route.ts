@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
       .map((p: any) => ({
         name: p.name,
         character: p.job || '导演',
-        profile_path: p.profile_path ? `https://image.tmdb.org/t/p/w200${p.profile_path}` : '',
+        profile_path: p.profile_path ? `https://image.zzmm-search.uk/t/p/w200${p.profile_path}` : '',
         known_for_department: p.known_for_department,
       }));
 
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
       .map((p: any) => ({
         name: p.name,
         character: p.character || '',
-        profile_path: p.profile_path ? `https://image.tmdb.org/t/p/w200${p.profile_path}` : '',
+        profile_path: p.profile_path ? `https://image.zzmm-search.uk/t/p/w200${p.profile_path}` : '',
         known_for_department: p.known_for_department,
       }));
 

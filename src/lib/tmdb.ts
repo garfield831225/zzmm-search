@@ -1,6 +1,6 @@
 export const TMDB_KEY = process.env.TMDB_API_KEY || '7985342d5961e9ee3d5ef6d969c1b8dd';
 export const TMDB_BASE = 'https://api.tmdb.org/3';
-export const TMDB_IMAGE = 'https://image.tmdb.org/t/p';
+export const TMDB_IMAGE = 'https://image.zzmm-search.uk/t/p';
 
 export async function tmdbFetch(path: string, params: Record<string, string> = {}) {
   const url = new URL(`${TMDB_BASE}${path}`);

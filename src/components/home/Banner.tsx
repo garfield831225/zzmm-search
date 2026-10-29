@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Play } from 'lucide-react';
 import Link from 'next/link';
+import { tmdbImageUrl } from '@/lib/tmdb-image';
 
 interface BannerItem {
   id: number;
@@ -24,7 +25,7 @@ interface BannerItem {
   source: string;
 }
 
-const TMDB_IMG = 'https://image.zzmm-search.uk/t/p/w780';  // 2026-08-05: w1280→w780 节省 50% 流量 + CF Worker 反代
+// 2026-10-29: TMDB_IMG 常量已移除 —— 改用 tmdbImageUrl() 统一规整 (能处理完整 URL + 换尺寸)
 
 export default function HomeBanner() {
   const [items, setItems] = useState<BannerItem[]>([]);
@@ -60,9 +61,11 @@ export default function HomeBanner() {
   }
 
   const cur = items[idx];
+  // 2026-10-29: 用 tmdbImageUrl 规整 —— backdropPath/posterPath 可能是完整 URL (库里 17 条 backdrop 是完整 URL)
+  //   原来直接字符串拼接会拼出垃圾 URL; 现在统一换到 CF 边缘并套 w780
   const bgUrl = cur.backdropPath
-    ? `${TMDB_IMG}${cur.backdropPath}`
-    : (cur.posterPath ? `${TMDB_IMG}${cur.posterPath}` : cur.posterUrl);
+    ? tmdbImageUrl(cur.backdropPath, 'w780')
+    : (cur.posterPath ? tmdbImageUrl(cur.posterPath, 'w780') : cur.posterUrl);
 
   return (
     <div
@@ -71,23 +74,26 @@ export default function HomeBanner() {
       onMouseLeave={() => setPaused(false)}
     >
       <AnimatePresence mode="wait">
-        <motion.div
+        {/* 2026-10-29: 从 CSS background-image 改成 <img>
+            - background-image 要等 CSS 应用才发起请求, <img> 在 HTML 解析时就发 → 首屏更早拿到大图
+            - 可以加 fetchPriority="high" 让浏览器优先加载当前这张
+            - 原本 CSS 写法在 backdropPath 是完整 URL 时会拼出垃圾 URL (库里确实有 17 条) */}
+        <motion.img
           key={cur.id}
+          src={bgUrl}
+          alt=""
+          fetchPriority="high"
           initial={{ opacity: 0, scale: 1.05 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.6, ease: 'easeOut' }}
-          className="absolute inset-0"
-        >
-          <div
-            className="absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: `url(${bgUrl})` }}
-          />
-          {/* 双层渐变遮罩: 左侧黑 + 底部黑 */}
-          <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/40 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20" />
-        </motion.div>
+          className="absolute inset-0 w-full h-full object-cover"
+        />
       </AnimatePresence>
+
+      {/* 双层渐变遮罩: 左侧黑 + 底部黑 (文字可读性) */}
+      <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/40 to-transparent pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 pointer-events-none" />
 
       {/* 文字信息 */}
       <div className="absolute inset-0 flex items-end p-5 sm:p-8 md:p-10">

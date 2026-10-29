@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 
-const TMDB_IMAGE = 'https://image.tmdb.org/t/p/w200';
+const TMDB_IMAGE = 'https://image.zzmm-search.uk/t/p/w200';
 
 const CATEGORIES = ['全部', '电影', '剧集', '动漫', '少儿频道', '综艺', '纪录片', '演唱会', '原盘', 'REMUX', '系列电影', '连载', '音乐', '体育', '合集'];
 const TMDB_TYPES = ['movie', 'tv'];

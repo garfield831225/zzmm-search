@@ -18,6 +18,13 @@ const TMDB_IMAGE_BASE = 'https://image.zzmm-search.uk/t/p/w500';
 const TMDB_IMAGE_BASE_W342 = 'https://image.zzmm-search.uk/t/p/w342';
 const TMDB_IMAGE_BASE_W780 = 'https://image.zzmm-search.uk/t/p/w780';
 
+// 2026-10-29: 模块级 TTL 缓存 (首页首屏调用, 实测线上 2.4 秒)
+//   数据源 xx_upcoming (后台同步的即将上映表) + LEFT JOIN xx_resources
+//   不依赖用户身份 → 可安全全局缓存; TTL 60 秒, 保证新上架能较快出现
+const CACHE_TTL = 60 * 1000;
+const CACHE_MAX = 100;
+const cache = new Map<string, { at: number; body: any }>();
+
 export async function GET(req: NextRequest) {
   const sql = neon(process.env.DATABASE_URL || '', {
     fetchOptions: { cache: 'no-store' },
@@ -27,6 +34,15 @@ export async function GET(req: NextRequest) {
   const type = (sp.get('type') || 'all').toLowerCase(); // 'movie' / 'tv' / 'all'
   const page = parseInt(sp.get('page') || '1');
   const pageSize = Math.min(parseInt(sp.get('pageSize') || '30'), 100);
+
+  // 2026-10-29: 缓存命中直接返
+  const cacheKey = `${type}:${page}:${pageSize}`;
+  const hit = cache.get(cacheKey);
+  if (hit && Date.now() - hit.at < CACHE_TTL) {
+    return NextResponse.json(hit.body, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate', 'X-Cache': 'HIT' },
+    });
+  }
 
   try {
     // type 是 'movie' / 'tv' / 'all', 安全过滤 (枚举白名单)
@@ -96,15 +112,19 @@ export async function GET(req: NextRequest) {
       matchedAccessLevel: r.matched_access_level,
     }));
 
-    return NextResponse.json({
-      total,
-      page,
-      pageSize,
-      type,
-      items,
-    }, {
+    const body = { total, page, pageSize, type, items };
+
+    // 2026-10-29: 写缓存
+    if (cache.size >= CACHE_MAX) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+    cache.set(cacheKey, { at: Date.now(), body });
+
+    return NextResponse.json(body, {
       headers: {
         'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'X-Cache': 'MISS',
       },
     });
   } catch (e: any) {

@@ -31,6 +31,7 @@ import { neon, neonConfig } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
 
 import { recordClick } from '@/lib/track-click';  // 2026-10-20 异常用户登录: 全 API 点击计数
+import { tmdbImageUrl } from '@/lib/tmdb-image';  // 2026-10-29: 图片统一走 CF 边缘反代
 // 2026-08-01: 修 Neon HTTP endpoint 偶发返 stale data bug
 //   (catalog 看到 7/31 11:00 那 13 条外语电影 link 没插入前的 7516, 但 DB 实际 7529)
 //   - neonConfig.fetchConnectionCache = false 强制每次新 connection
@@ -281,9 +282,7 @@ export async function GET(request: NextRequest) {
         importChannel: row.import_channel,
         accessLevel: row.access_level,
         isMultiLink: row.is_multi_link || false,
-        poster: row.poster_path
-          ? `https://image.tmdb.org/t/p/w300${row.poster_path}`
-          : null,
+        poster: row.poster_path ? tmdbImageUrl(row.poster_path, 'w300') : null,
         voteAverage: row.vote_average,
         releaseDate: row.release_date,
         tmdbStatus: row.tmdb_status,

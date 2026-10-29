@@ -14,7 +14,7 @@ import SearchBox from '@/components/SearchBox';
 import MobileNav from '@/components/MobileNav';
 import BasicClaimBanner from '@/components/BasicClaimBanner';
 
-const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
+const TMDB_IMAGE_BASE = 'https://image.zzmm-search.uk/t/p/w500';
 const TMDB_IMAGE_FALLBACK = TMDB_FALLBACK;
 
 const CATEGORIES = ['全部', '连载', '电影', '剧集', '动漫', '少儿频道', '综艺', '演唱会', '纪录片', '原盘', 'REMUX', '系列电影'];
@@ -375,13 +375,13 @@ export default function HomePage() {
   }, []);
 
   // 先同步 ref 再调用，永远读最新 state
+  // 2026-10-29 优化: 删掉下面那个重复的 effect
+  //   它的依赖是本 effect 的子集 (少了 matchStatus) → 每次筛选变化都打两次 /api/search
+  //   /api/search 是 47 万行表的重查询, 双倍请求 = 首屏白等一倍
   useEffect(() => {
     latestRef.current = { query, category, source, region, year, matchStatus, sort, pageSize, dedupBy };
     fetchItems(1);
   }, [category, source, region, year, matchStatus, sort, pageSize, dedupBy]); // eslint-line -- stable deps
-
-
-  useEffect(() => { fetchItems(1); }, [category, source, region, year, sort, pageSize, dedupBy]);
 
   // 2026-07-17: 真正退出 - 清 httpOnly cookie + localStorage + 跳 /
   const handleLogout = async () => {
@@ -567,15 +567,20 @@ export default function HomePage() {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               {/* 2026-08-08: HDZZMM 紫粉霓虹 logo v5-01 (跟主站主题色一致, 紫粉渐变 + 青色边缘高光) - 替代原紫色方块+emoji */}
-              <img
-                src="/logo-hdzzmm.png"
-                alt="HDZZMM"
-                width={48}
-                height={48}
-                className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex-shrink-0 shadow-[0_0_16px_rgba(168,85,247,0.3)]"
-                loading="eager"
-                decoding="async"
-              />
+              {/* 2026-10-29: 换 128px 优化版 —— 原图是 1024x1024 的 JPEG 却叫 .png, 717KB!
+                  首屏 logo 只显示 40-48px, 现在 webp 3.3KB / png 26KB (省 714KB) */}
+              <picture>
+                <source srcSet="/logo-hdzzmm-128.webp" type="image/webp" />
+                <img
+                  src="/logo-hdzzmm-128.png"
+                  alt="HDZZMM"
+                  width={48}
+                  height={48}
+                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex-shrink-0 shadow-[0_0_16px_rgba(168,85,247,0.3)]"
+                  loading="eager"
+                  decoding="async"
+                />
+              </picture>
               <div className="min-w-0">
                 <h1 className="text-xl font-bold bg-gradient-to-r from-violet-400 via-fuchsia-400 to-pink-400 bg-clip-text text-transparent tracking-wide">HDZZMM</h1>
                 <p className="text-xs text-white/40 truncate">共 {total.toLocaleString()} 条资源 · 当前显示 {items.length} 条</p>
@@ -900,7 +905,13 @@ export default function HomePage() {
                 {item.tmdb?.poster_path ? (
                   <img src={tmdbPoster(item.tmdb.poster_path, 'card')} alt={item.name}
                     className="w-full h-full object-cover transition group-hover:scale-105"
-                    onError={(e) => { (e.target as HTMLImageElement).src = TMDB_FALLBACK; }}
+                    onError={(e) => {
+                      // 2026-10-29: 加守卫 —— fallback 本身失败时会无限重试
+                      const el = e.target as HTMLImageElement;
+                      if (el.dataset.fallbackApplied) return;
+                      el.dataset.fallbackApplied = '1';
+                      el.src = TMDB_FALLBACK;
+                    }}
                     loading="lazy" decoding="async" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-4xl bg-gradient-to-br from-violet-900/30 to-pink-900/30">🎬</div>

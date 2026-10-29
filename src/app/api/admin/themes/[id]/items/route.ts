@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
 import { authAdmin } from '@/lib/admin-auth';
+import { tmdbImageUrl } from '@/lib/tmdb-image';  // 2026-10-29: 图片统一走 CF 边缘反代
 
 neonConfig.fetchConnectionCache = false;
 
@@ -12,7 +13,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
-const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
+const TMDB_IMAGE_BASE = 'https://image.zzmm-search.uk/t/p/w500';
 
 export async function GET(
   request: NextRequest,
@@ -40,9 +41,9 @@ export async function GET(
         tmdbType: r.tmdb_type,
         title: r.title,
         posterPath: r.poster_path,
-        posterUrl: r.poster_path ? `${TMDB_IMAGE_BASE}${r.poster_path}` : null,
+        posterUrl: r.poster_path ? tmdbImageUrl(r.poster_path, 'w500') : null,
         backdropPath: r.backdrop_path,
-        backdropUrl: r.backdrop_path ? `${TMDB_IMAGE_BASE}${r.backdrop_path}` : null,
+        backdropUrl: r.backdrop_path ? tmdbImageUrl(r.backdrop_path, 'w500') : null,
         sortOrder: r.sort_order,
         status: r.status,
         createdAt: r.created_at,

@@ -28,7 +28,7 @@ async function cacheTmdb(tmdbId: string, type: string, sql: any) {
       INSERT INTO xx_tmdb_cache (tmdb_id, tmdb_type, title, original_title, overview, poster_path, vote_average, vote_count, release_date, status, tagline, genres, cached_at)
       VALUES (
         ${tmdbId}, ${type}, ${d.title || d.name || ''}, ${d.original_title || d.original_name || ''},
-        ${d.overview || ''}, ${d.poster_path ? 'https://image.tmdb.org/t/p/w500' + d.poster_path : null},
+        ${d.overview || ''}, ${d.poster_path ? 'https://image.zzmm-search.uk/t/p/w500' + d.poster_path : null},
         ${d.vote_average || 0}, ${d.vote_count || 0}, ${d.release_date || d.first_air_date || null},
         ${d.status || null}, ${d.tagline || ''},
         ${d.genres ? d.genres.map((g: any) => g.name).join(',') : ''}, NOW()

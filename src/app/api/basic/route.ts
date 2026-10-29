@@ -11,13 +11,14 @@ import { neon, neonConfig } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
 
 import { recordClick } from '@/lib/track-click';  // 2026-10-20 异常用户登录: 全 API 点击计数
+import { tmdbImageUrl } from '@/lib/tmdb-image';  // 2026-10-29: 图片统一走 CF 边缘反代
 neonConfig.fetchConnectionCache = false;
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
-const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w500';
+const TMDB_IMAGE_BASE = 'https://image.zzmm-search.uk/t/p/w500';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -25,6 +26,14 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Access-Control-Max-Age': '86400',
 };
+
+// 2026-10-29: 模块级 TTL 缓存 (首页首屏 + /basic 页都调这个, 实测线上 3 秒)
+//   只缓存"重 SQL + 结果映射"部分:
+//   - userGroup 不参与 WHERE → 返回结果与用户身份无关 → 可安全全局共享
+//   - 鉴权解析 + recordClick 点击计数照常执行 (不放进缓存), 反滥用统计不受影响
+const QUERY_CACHE_TTL = 60 * 1000;  // 60 秒
+const QUERY_CACHE_MAX = 300;
+const queryCache = new Map<string, { at: number; total: number; items: any[] }>();
 
 // source 显示名 → key 映射 (跟 /api/search 对齐)
 const SOURCE_KEY_MAP: Record<string, string> = {
@@ -151,6 +160,30 @@ export async function GET(req: NextRequest) {
       orderBy = 'COALESCE(NULLIF(t.vote_average, \'\')::numeric, 0) DESC NULLS LAST, MAX(NULLIF(t.vote_count, \'\')::int) DESC NULLS LAST, t.release_date DESC';
     }
 
+    // 2026-10-29: 缓存命中直接返 (跳过 COUNT DISTINCT + GROUP BY 重查询, 实测 3 秒 → 毫秒级)
+    const cacheKey = `${whereSQL}|${JSON.stringify(condVals)}|${orderBy}|${page}|${pageSize}`;
+    const hit = queryCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < QUERY_CACHE_TTL) {
+      return NextResponse.json({
+        total: hit.total,
+        page,
+        pageSize,
+        category,
+        source,
+        region,
+        year,
+        matchStatus,
+        sort,
+        items: hit.items,
+      }, {
+        headers: {
+          ...CORS_HEADERS,
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          'X-Cache': 'HIT',
+        },
+      });
+    }
+
     // ── Count (distinct tmdb) ──
     const countSQL = `SELECT COUNT(DISTINCT r.tmdb_id) as cnt FROM xx_resources r JOIN xx_tmdb_cache t ON t.tmdb_id = r.tmdb_id ${whereSQL}`;
     const countRows = await sql(countSQL, condVals) as any[];
@@ -184,9 +217,8 @@ export async function GET(req: NextRequest) {
       title: r.title_zh || r.resource_name,
       releaseDate: r.release_date,
       posterPath: r.poster_path,
-      posterUrl: r.poster_path
-        ? (r.poster_path.startsWith('http') ? r.poster_path : `${TMDB_IMAGE_BASE}${r.poster_path}`)
-        : null,
+      // 2026-10-29: 统一走 tmdbImageUrl (库里 22238 条 poster_path 是完整 URL, 原来会直连 image.tmdb.org → 12 秒/张)
+      posterUrl: r.poster_path ? tmdbImageUrl(r.poster_path, 'w500') : null,
       voteAverage: r.vote_average ? parseFloat(r.vote_average) : null,
       overview: r.overview,
       source: r.source,
@@ -195,6 +227,13 @@ export async function GET(req: NextRequest) {
       category: r.category,
       isShortDrama: !!r.is_short_drama,
     }));
+
+    // 2026-10-29: 写缓存 (超上限就清掉最旧的一批, 防无限增长)
+    if (queryCache.size >= QUERY_CACHE_MAX) {
+      const oldest = queryCache.keys().next().value;
+      if (oldest !== undefined) queryCache.delete(oldest);
+    }
+    queryCache.set(cacheKey, { at: Date.now(), total, items });
 
     return NextResponse.json({
       total,
@@ -211,6 +250,7 @@ export async function GET(req: NextRequest) {
       headers: {
         ...CORS_HEADERS,
         'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'X-Cache': 'MISS',
       },
     });
   } catch (e: any) {

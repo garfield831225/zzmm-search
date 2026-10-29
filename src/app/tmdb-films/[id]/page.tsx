@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Star, Lock, Copy, ExternalLink, Calendar, Globe, Tag, Film, Tv, Heart, X, Check } from 'lucide-react';
 
-const TMDB_IMG = 'https://image.tmdb.org/t/p';
+const TMDB_IMG = 'https://image.zzmm-search.uk/t/p';
 
 interface LinkItem {
   id: number;

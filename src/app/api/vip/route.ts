@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
+import { tmdbImageUrl } from '@/lib/tmdb-image';  // 2026-10-29: 图片统一走 CF 边缘反代
 
 neonConfig.fetchConnectionCache = false;
 
@@ -86,12 +87,9 @@ export async function GET(req: NextRequest) {
       title: r.title || '',
       originalTitle: r.original_title,
       posterPath: r.poster_path,
-      posterUrl: r.poster_path
-        ? (r.poster_path.startsWith('http') ? r.poster_path : `${TMDB_IMAGE_BASE}${r.poster_path}`)
-        : null,
-      backdropUrl: r.backdrop_path
-        ? (r.backdrop_path.startsWith('http') ? r.backdrop_path : `https://image.tmdb.org/t/p/w1280${r.backdrop_path}`)
-        : null,
+      // 2026-10-29: 统一走 tmdbImageUrl (完整 URL 也要换到 CF 边缘, 否则直连 image.tmdb.org)
+      posterUrl: r.poster_path ? tmdbImageUrl(r.poster_path, 'w500') : null,
+      backdropUrl: r.backdrop_path ? tmdbImageUrl(r.backdrop_path, 'w1280') : null,
       overview: r.overview,
       releaseDate: r.release_date,
       voteAverage: r.vote_average ? parseFloat(r.vote_average) : null,
