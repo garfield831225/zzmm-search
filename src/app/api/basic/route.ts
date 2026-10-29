@@ -152,12 +152,15 @@ export async function GET(req: NextRequest) {
     const whereSQL = 'WHERE ' + conds.join(' AND ');
 
     // ── 排序 ──
-    let orderBy = 't.release_date DESC';
+    // 2026-10-29 🔥 未来日期处理: TMDB 的 release_date 可能是未上映/重映档期 (如 2028-03-30)
+    //   → 排序时排最后, 展示时不显示年份 (否则卡片显示 "2028" 明显不对)
+    const TODAY = new Date().toISOString().slice(0, 10);
+    let orderBy = `CASE WHEN t.release_date > '${TODAY}' THEN 1 ELSE 0 END ASC, t.release_date DESC NULLS LAST`;
     if (sort === 'added_time') {
       orderBy = 'MAX(r.created_at) DESC';
     } else if (sort === 'rating') {
       // 2026-10-16: 修 GROUP BY 缺 t.vote_count — 用 MAX 聚合 (每组就 1 个)
-      orderBy = 'COALESCE(NULLIF(t.vote_average, \'\')::numeric, 0) DESC NULLS LAST, MAX(NULLIF(t.vote_count, \'\')::int) DESC NULLS LAST, t.release_date DESC';
+      orderBy = `COALESCE(NULLIF(t.vote_average, '')::numeric, 0) DESC NULLS LAST, MAX(NULLIF(t.vote_count, '')::int) DESC NULLS LAST, CASE WHEN t.release_date > '${TODAY}' THEN 1 ELSE 0 END ASC, t.release_date DESC NULLS LAST`;
     }
 
     // 2026-10-29: 缓存命中直接返 (跳过 COUNT DISTINCT + GROUP BY 重查询, 实测 3 秒 → 毫秒级)
@@ -194,8 +197,7 @@ export async function GET(req: NextRequest) {
       SELECT
         r.tmdb_id,
         t.title_zh, t.tmdb_type, t.release_date, t.poster_path, t.vote_average, t.overview,
-        MIN(r.id) as resource_id,
-        MIN(r.source) as source,
+        MIN(r.id) as resource_id,        MIN(r.source) as source,
         MIN(r.category) as category,
         MIN(r.access_level) as access_level,
         MIN(r.name) as resource_name,
@@ -215,7 +217,7 @@ export async function GET(req: NextRequest) {
       tmdbId: r.tmdb_id,
       tmdbType: r.tmdb_type,
       title: r.title_zh || r.resource_name,
-      releaseDate: r.release_date,
+      releaseDate: r.release_date && r.release_date <= TODAY ? r.release_date : '',
       posterPath: r.poster_path,
       // 2026-10-29: 统一走 tmdbImageUrl (库里 22238 条 poster_path 是完整 URL, 原来会直连 image.tmdb.org → 12 秒/张)
       posterUrl: r.poster_path ? tmdbImageUrl(r.poster_path, 'w500') : null,

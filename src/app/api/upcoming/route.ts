@@ -54,6 +54,11 @@ export async function GET(req: NextRequest) {
     // 2026-08-06: 加 r.type=u.tmdb_type 匹配 (兼容 type 准确的新数据)
     // + r.category 白名单兜底 (兼容 type=NULL 的老数据)
     // 修 BUG: 记忆管理局 (id=1039882) type=tv 但 category 误填'电影', 原 SQL 不匹配
+    // 2026-10-29 🔥 修「最新上映」section 的未来日期问题
+    //   xx_upcoming.release_date 可能有**未来日期** (TMDB 给未上映/重映标的档期)
+    //   实测: '魔发奇缘'(2010) 的 release_date='2028-03-30' → 卡片年份显示 2028, 明显不对
+    //   → 未来日期一律抹掉 (不显示年份), 且不参与排序
+    const TODAY = new Date().toISOString().slice(0, 10);
     const rows = await sql`
       SELECT
         u.id,
@@ -61,7 +66,9 @@ export async function GET(req: NextRequest) {
         u.tmdb_type,
         u.title,
         u.original_title,
-        u.release_date::text as release_date,
+        CASE WHEN u.release_date::text <= ${TODAY}
+             THEN u.release_date::text
+             ELSE NULL END as release_date,
         u.poster_path,
         u.backdrop_path,
         u.vote_average,
@@ -81,7 +88,11 @@ export async function GET(req: NextRequest) {
         )
       WHERE u.status = 'active'
         AND (${isAll} OR u.tmdb_type = ${type})
-      ORDER BY u.release_date DESC, u.vote_average DESC NULLS LAST
+      ORDER BY
+        -- 未来日期排最后 (未上映的放后面, 已上映的按上映日倒序)
+        CASE WHEN u.release_date::text > ${TODAY} THEN 1 ELSE 0 END ASC,
+        u.release_date DESC NULLS LAST,
+        u.vote_average DESC NULLS LAST
       LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}
     `;
 
