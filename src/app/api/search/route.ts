@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { neon, neonConfig } from '@neondatabase/serverless';
 import jwt from 'jsonwebtoken';
 import { recordClick } from '@/lib/track-click';
-import { FILM_CATEGORIES, NONFILM_CATEGORIES as NONFILM_CATEGORIES_LIST, NONFILM_CATS as NONFILM_CATS_LIST } from '@/lib/categories';  // 2026-10-20 异常用户登录: 全 API 点击计数
+import { FILM_CATEGORIES, NONFILM_CATEGORIES as NONFILM_CATEGORIES_LIST, NONFILM_CATS as NONFILM_CATS_LIST, acceptableTmdbTypes } from '@/lib/categories';  // 2026-10-20 异常用户登录: 全 API 点击计数
 
 // 2026-08-13: 公共 API (moviezone + 子站) - 加 CORS 头
 const CORS_HEADERS = {
@@ -42,6 +42,17 @@ const SOURCE_DISPLAY_MAP: Record<string, string> = {
 const CATEGORIES = FILM_CATEGORIES;
 const NONFILM_CATEGORIES = NONFILM_CATEGORIES_LIST;
 const NONFILM_CATS = NONFILM_CATS_LIST;
+
+// 2026-10-29 🔥 再修 (同源塌缩 BUG): 只排掉 'NOMATCH' 还不够 ——
+//   DB 里还有 tmdb_id='SKIP'(2035) / 'GARBLED'(66) 两个哨兵值, 同样会被 COUNT(DISTINCT) 合并成 1
+//   实测: 影视区 count 393201 (错) vs 400590 (对) —— 少算 7389 条
+//   修法: 改成"只认真 tmdb_id"的正则判定 —— 纯数字 + 长度<=10 + >10000 才算真 id
+//        (跟下面的 has_tmdb 表达式保持一致, 哨兵值以后再加也不用改代码)
+//   ⚠️ 用嵌套 CASE 而不是一串 AND: PostgreSQL 的 CASE 保证短路求值, cast 一定安全
+const TMDB_ID_OR_ID = (tmdbCol: string, idCol: string) =>
+  `CASE WHEN trim(${tmdbCol}) ~ '^[0-9]{1,10}$' THEN ` +
+  `CASE WHEN trim(${tmdbCol})::int > 10000 THEN ${tmdbCol} ELSE 'id_' || ${idCol} END ` +
+  `ELSE 'id_' || ${idCol} END`;
 
 // 地区 → 国家代码映射（与 TMDB iso_3166_1 一致）
 const REGION_CODES: Record<string, string[]> = {
@@ -288,10 +299,10 @@ export async function GET(request: NextRequest) {
     // ─── Count ────────────────────────────────────────────────────────────────
     // 2026-07-27: 改成 distinct count (按 tmdb_id), 跟 fetch 同步, 否则 total 跟 items 数对不上
     // 2026-07-29: 改用 COALESCE(tmdb_id, 'id_'||id) - 没 tmdb_id 的资源按 id 独立, 否则 1 万条非影视资源被合并成 1 条
-    // 2026-10-29 🔥 再修: tmdb_id='NOMATCH' 不是空串 → COALESCE 保留它 → **所有未匹配资源被合并成 1 个**
-    //   实测: 影视区 count 16349 (错的) vs 303344 (对的) —— 少算 28.7 万条
-    //   修法: 把 'NOMATCH' 也当"没有 tmdb_id", 按 id 独立计数
-    const countSQL = `SELECT COUNT(DISTINCT COALESCE(NULLIF(NULLIF(r.tmdb_id, ''), 'NOMATCH'), 'id_' || r.id::text)) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id ${whereSQL}`;
+    // 2026-10-29 🔥 再修: 只排掉 'NOMATCH' 不够 —— 'SKIP'(2035)/'GARBLED'(66) 也是哨兵值, 同样塌缩
+    //   实测: 影视区 count 393201 (错) vs 400590 (对) —— 少算 7389 条
+    //   修法: 用 TMDB_ID_OR_ID 正则判定, 只认真 tmdb_id (纯数字 + <=10位 + >10000)
+    const countSQL = `SELECT COUNT(DISTINCT ${TMDB_ID_OR_ID('r.tmdb_id', 'r.id::text')}) as cnt FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id ${whereSQL}`;
     const countRows = await sql(countSQL, condVals) as any[];
     const total = parseInt(countRows?.[0]?.cnt || '0');
 
@@ -316,7 +327,7 @@ export async function GET(request: NextRequest) {
                CASE WHEN EXISTS (SELECT 1 FROM xx_music_cache m WHERE m.resource_id = r.id)
                      OR EXISTS (SELECT 1 FROM xx_sports_cache s WHERE s.resource_id = r.id)
                     THEN 1 ELSE 0 END as has_cover,
-               ROW_NUMBER() OVER (PARTITION BY COALESCE(NULLIF(NULLIF(r.tmdb_id, ''), 'NOMATCH'), 'id_' || r.id::text) ORDER BY created_at DESC, id ASC) as rn
+               ROW_NUMBER() OVER (PARTITION BY ${TMDB_ID_OR_ID('r.tmdb_id', 'r.id::text')} ORDER BY created_at DESC, id ASC) as rn
         FROM xx_resources r LEFT JOIN xx_tmdb_cache c ON r.tmdb_id = c.tmdb_id
         ${whereSQL}
       ) sub
@@ -415,8 +426,9 @@ export async function GET(request: NextRequest) {
     // 2026-07-27: 二次查同 tmdb_id 的所有 link (合并多连接到一个 item)
     // 用户痛点: dedup by tmdb_id 后只显示 1 个 link, 实际 600+ link 全藏起来
     // 这里按 source 优先级 + created_at 排序, 卡片用前 8 个, modal 用完整列表
-    // 2026-10-29: 过滤掉 'NOMATCH' —— 它不是真 tmdb_id, 拿去查副链接会白占 500 条 LIMIT
-    const tmdbIds = Array.from(new Set(dbRows.map((r: any) => r.tmdb_id).filter((x: any) => x && x !== 'NOMATCH')));
+    // 2026-10-29: 过滤掉所有哨兵值 —— 'NOMATCH'/'SKIP'/'GARBLED' 都不是真 tmdb_id
+    //   拿去查副链接会白占 500 条 LIMIT (SKIP 2035 条 + GARBLED 66 条)
+    const tmdbIds = Array.from(new Set(dbRows.map((r: any) => r.tmdb_id).filter((x: any) => x && /^[0-9]{1,10}$/.test(String(x).trim()) && parseInt(String(x).trim()) > 10000)));
     let tmdbLinksMap = new Map<string, any[]>();
     // source 优先级: 115 > 夸克 > 百度 > 阿里 > 磁力 > ed2k > 其他 (2026-07-31 提到外层供副表 push 用)
     const SOURCE_PRIORITY: Record<string, number> = {
@@ -533,18 +545,12 @@ export async function GET(request: NextRequest) {
     }
 
     // ─── Map results ────────────────────────────────────────────────────────
-    const TV_CATS_FILTER = new Set(['连载', '剧集', '动漫', '综艺', '少儿频道', '纪录片']);
-    const MOVIE_CATS_FILTER = new Set(['电影', '华语电影', '外语电影', '动画电影', '演唱会', 'REMUX', '系列电影']);
-    const expectedType = (cat: string): 'tv' | 'movie' | null => {
-      if (TV_CATS_FILTER.has(cat)) return 'tv';
-      if (MOVIE_CATS_FILTER.has(cat)) return 'movie';
-      return null;
-    };
-
+    // 2026-10-29: 分类→TMDB 类型改用 categories.ts 真相源 (原来这里硬编码 TV_CATS_FILTER/MOVIE_CATS_FILTER)
+    //   跟匹配引擎各写一份 → 匹配写进去的 tmdb_type 跟前端期望对不上, 海报不显示
     const items = dbRows.map((item: any) => {
       const cacheInfo = item.tmdb_id ? tmdbMap.get(item.tmdb_id) : null;
-      const exp = expectedType(item.category);
-      const tmdbOk = !cacheInfo || !exp || cacheInfo.tmdb_type === exp;
+      const acceptable = acceptableTmdbTypes(item.category);
+      const tmdbOk = !cacheInfo || !acceptable || acceptable.includes(cacheInfo.tmdb_type);
       const subLinks = linksMap.get(item.id);
       const hasSubLinks = subLinks && subLinks.length > 0;
       // 2026-08-14: 短剧打标 - 业务规则: 短剧不是分类, 是 tag

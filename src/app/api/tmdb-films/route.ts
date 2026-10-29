@@ -104,9 +104,8 @@ async function _GET(request: NextRequest) {
       FROM xx_resources r
       WHERE r.tmdb_id IS NOT NULL
         AND r.tmdb_id != ''
-        AND r.tmdb_id != 'NOMATCH'
-        AND (r.tmdb_id)::int > 10000
-        AND r.tmdb_id NOT IN ('GARBLED','NOTFOUND','NULL','0','-1')
+        AND trim(r.tmdb_id) ~ '^[0-9]{1,10}$'
+        AND trim(r.tmdb_id)::int > 10000
         AND ${resourceWhere}
       GROUP BY r.tmdb_id
     )
@@ -133,7 +132,7 @@ async function _GET(request: NextRequest) {
            to_char(r.created_at, 'YYYY-MM-DD') as sort_key
     FROM xx_resources r
     WHERE ${resourceWhere}
-      AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')
+      AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR NOT (trim(r.tmdb_id) ~ '^[0-9]{1,10}$'))
     ORDER BY r.created_at DESC
     LIMIT ${limit2} OFFSET ${offset2}
   `) as any[];
@@ -151,28 +150,32 @@ async function _GET(request: NextRequest) {
       AND poster_path IS NOT NULL
       AND NOT EXISTS (
         SELECT 1 FROM xx_resources r
-        WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH'
-          AND (r.tmdb_id)::int > 10000
-          AND r.tmdb_id NOT IN ('GARBLED','NOTFOUND','NULL','0','-1')
+        WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != ''
+          AND trim(r.tmdb_id) ~ '^[0-9]{1,10}$'
+          AND trim(r.tmdb_id)::int > 10000
           AND r.status = 'active'
-          AND (r.tmdb_id)::int = d.tmdb_id
+          AND trim(r.tmdb_id)::int = d.tmdb_id
       )
     ORDER BY sort_key DESC NULLS LAST
     LIMIT ${limit3} OFFSET ${offset3}
   `) as any[];
 
   // 真实总数（不带 LIMIT，3 个独立 COUNT；**字面拼，无 $N**，跟 b1/b2/b3 一致）
+  // 2026-10-29 🔥 修 cast 报错: 原来用 (r.tmdb_id)::int > 10000 直接把列转 int
+  //   但 DB 里 tmdb_id 有哨兵值 'SKIP'(2035)/'GARBLED'(66) → PostgreSQL 报
+  //   "invalid input syntax for type integer: SKIP" → /api/tmdb-films 整个 500
+  //   修法: 改成正则判定再 cast (正则保证是纯数字, cast 一定安全)
+  const REAL_ID = `trim(r.tmdb_id) ~ '^[0-9]{1,10}$' AND trim(r.tmdb_id)::int > 10000`;
   const count1 = await sql(`
     SELECT COUNT(DISTINCT r.tmdb_id)::int as cnt FROM xx_resources r
-    WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH'
-      AND (r.tmdb_id)::int > 10000
-      AND r.tmdb_id NOT IN ('GARBLED','NOTFOUND','NULL','0','-1')
+    WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != ''
+      AND ${REAL_ID}
       AND ${resourceWhere}
   `) as any[];
   const count2 = await sql(`
     SELECT COUNT(*)::int as cnt FROM xx_resources r
     WHERE ${resourceWhere}
-      AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR r.tmdb_id = 'NOMATCH')
+      AND (r.tmdb_id IS NULL OR r.tmdb_id = '' OR NOT (trim(r.tmdb_id) ~ '^[0-9]{1,10}$'))
   `) as any[];
   const count3 = await sql(`
     SELECT COUNT(*)::int as cnt FROM xx_tmdb_discover d
@@ -180,11 +183,10 @@ async function _GET(request: NextRequest) {
       AND poster_path IS NOT NULL
       AND NOT EXISTS (
         SELECT 1 FROM xx_resources r
-        WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != '' AND r.tmdb_id != 'NOMATCH'
-          AND (r.tmdb_id)::int > 10000
-          AND r.tmdb_id NOT IN ('GARBLED','NOTFOUND','NULL','0','-1')
+        WHERE r.tmdb_id IS NOT NULL AND r.tmdb_id != ''
+          AND ${REAL_ID}
           AND r.status = 'active'
-          AND (r.tmdb_id)::int = d.tmdb_id
+          AND trim(r.tmdb_id)::int = d.tmdb_id
       )
   `) as any[];
 

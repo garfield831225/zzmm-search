@@ -33,10 +33,41 @@ const SPEC_RE = new RegExp(
     'WEB', 'HDTV', 'HD-?DVD', 'DVDRip', 'HDRip', 'VCD', 'SVCD', 'DVD', 'Rip',
     '10\\s*bit', '8\\s*bit', 'Hi10p?', 'H\\.?264', 'H\\.?265', 'x\\.?264', 'x\\.?265', 'AVC', 'HEVC',
     '8K', '4K', '2160p', '1080p', '720p', '480p', '360p', 'UHD',
+    '2160', '1080', '720', '480', '360', '576p',
     '\\d{2,3}\\s*FPS', 'FPS',
     'DV', 'IMAX', 'MAX', 'TV',
+    'Netflix', 'NF', 'Hulu', 'HBO', 'AMC', 'DDP', 'AMZN',
   ].join('|') + ')\\b',
   'gi'
+);
+
+// ─── 题材/类型词 (2026-10-29 实测补) ─────────────────────────────────────
+// ⚠️ 必须是「独立 token」才剥 (前后都是分隔符或首尾)
+//   否则会误伤片名: 「爱情公寓」「中国合伙人」「音乐之声」「历史的车轮」
+//   实测样本: 「镖人 第二季 (2026)动作 动画 武侠」→ 原来提成「镖人 动作 动画 武侠」
+//   「将夜 (2026)动画」→ 提成「将夜 动画」→ TMDB 搜不到, 退化成拿「动画」去搜
+//   → 匹配到《清华附小语文综合动画课》这种垃圾 (engine 旧版 58.5% 里混了很多这种假阳性)
+const SEP_CLASS = '[^\\s\\-_/｜|（）()【】\\[\\]，,。·、]';
+const GENRE_WORDS = [
+  // 类型
+  '动作片', '喜剧片', '恐怖片', '科幻片', '悬疑片', '惊悚片', '犯罪片', '剧情片', '爱情片', '文艺片', '纪录片',
+  '古装剧', '悬疑剧', '科幻剧', '喜剧剧', '恐怖剧', '犯罪剧', '动作剧', '剧情剧', '偶像剧',
+  '动作', '动画', '武侠', '古装', '爱情', '悬疑', '科幻', '喜剧', '恐怖', '犯罪', '战争', '奇幻', '玄幻',
+  '仙侠', '都市', '校园', '职场', '剧情', '纪录片', '综艺', '军事', '历史', '传记', '现实', '冒险',
+  '惊悚', '灾难', '儿童', '少儿', '短片', '运动', '体育', '歌舞', '家庭', '成长', '青春', '悬疑推理',
+  // 地区/语言
+  '国语', '粤语', '英语', '日语', '韩语', '泰语', '欧美', '日韩', '港台', '大陆', '内地',
+  '港版', '台版', '国版', '美版', '日版', '韩版', '中国', '香港', '台湾', '日本', '韩国', '美国', '英国', '法国',
+  // 画质/来源/版本
+  '蓝光', '原盘', '高清', '超清', '抢先', '定档', '上映', '独家', '会员', '付费', '未删减', '数字版',
+  '导演剪辑', '加长', '重制', '修复', '蓝光修复', '内嵌', '外挂',
+  // 动画连载形态
+  '年番', '季番', '半年番', '周更', '日更', '月更', '年更',
+  '国漫', '日漫', '美漫', '番剧', '动漫', '剧场版', '总集篇',
+];
+const GENRE_TOKEN_RE = new RegExp(
+  '(?<!' + SEP_CLASS + ')(?:' + GENRE_WORDS.join('|') + ')(?!' + SEP_CLASS + ')',
+  'g'
 );
 
 // ─── 中文噪音词 (要求前面是分隔符或行首, 否则会误伤片名) ──────────────
@@ -65,6 +96,7 @@ const EPISODE_RE = new RegExp(
     '[【\\[（(]\\s*(?:0?[1-9]|[12]\\d|3\\d)\\s*[】\\]）)]',   // 【01】 [02]
     'EP\\d{1,3}', 'E\\d{1,3}\\b', 'EPISODE\\s*\\d{1,3}',
     '第\\s*\\d{1,4}\\s*集', '更新至\\s*\\d{1,4}\\s*集', '全\\s*\\d{1,4}\\s*集', '\\d{1,4}\\s*集\\s*全',
+    '更至\\s*\\d{1,4}\\s*集', '更\\s*\\d{1,4}\\s*集', '共\\s*\\d{1,4}\\s*集', '全\\s*\\d{1,4}\\s*集',
     '\\d{1,3}\\s*[-~]\\s*\\d{1,3}(?!\\s*[-~])',            // 34-38
     '(?<![\\d])\\d{1,3}\\s*集',
   ].join('|') + ')\\s*',
@@ -72,7 +104,7 @@ const EPISODE_RE = new RegExp(
 );
 
 // ─── 季度标记 ───────────────────────────────────────────────────────────
-const SEASON_RE = /第[一二三四五六七八九十\d]+季|S\d{1,2}(?![集\d])|Season\s*\d{1,2}/gi;
+const SEASON_RE = /第[一二三四五六七八九十\d]+季|S\d{1,2}(?![集\d])|Season\s*\d{1,2}|第[一二三四五六七八九十\d]+期|[一二三四五六七八九十\d]+期(?![集期])/gi;
 
 // ─── 发布组/字幕组前缀 ──────────────────────────────────────────────────
 // 【幻月字幕组】【喵萌奶茶屋】/ 桜都字幕組  / GM-Team  / ANi  / MingY
@@ -100,6 +132,8 @@ function isNoiseOnly(s: string): boolean {
   // 命中噪音词
   if (SPEC_RE.test(t)) { SPEC_RE.lastIndex = 0; return true; }
   if (CN_NOISE_RE.test(t)) { CN_NOISE_RE.lastIndex = 0; return true; }
+  // 2026-10-29: 纯题材/类型词也算噪音 ("动画"/"动作"/"武侠" 不能当片名)
+  if (GENRE_TOKEN_RE.test(t)) { GENRE_TOKEN_RE.lastIndex = 0; return true; }
   // 以描述词开头
   if (/^(?:国语|英语|粤语|日语|中文|字幕|内封|外挂|简繁|双语|特效|高码|码率|无台标|臻彩|完结|更新中|片源|版本)/.test(t)) return true;
   // 集数/季数字
@@ -162,6 +196,10 @@ export function cleanFolderName(raw: string): CleanResult {
   s = s.replace(BRACKET_GROUP_RE, '');
   s = s.replace(LEADING_GROUP_RE, '');
   s = s.replace(SHORTDRAMA_PREFIX_RE, '');
+  // ⚠️ 2026-10-29 修: GROUP_SUFFIX_RE 定义了却从来没被调用!
+  //   后果: 「诸神字幕组 文豪野犬」→「诸神文豪野犬」→ cleanName 提成「诸神」
+  //        → 匹配到《诸神末日》这种垃圾 (实测 25 条命中里错了 3 条都是这个原因)
+  s = s.replace(GROUP_SUFFIX_RE, ' ');
   // ⚠️ 这里**不**剥所有方括号 —— 方括号里可能是片名本身 (【拳王】/《XX》)
   //   magnet 那种多段方括号 【字幕组】【番名】【集数】【画质】 靠候选阶段的优先级挑出番名
   //   (见下面 B 分支: 数字开头的降权, 再按长度降序)
@@ -174,9 +212,16 @@ export function cleanFolderName(raw: string): CleanResult {
   //   "4KHDR" → "4K HDR" / "WEB-1080" → "WEB -1080" / "WEB-4K" → "WEB -4K"
   s = s.replace(/\b(4K|8K)(?=(HDR|DV|SDR|DL|WEB|X26|H26|HEVC|AVC))/gi, '$1 ');
   s = s.replace(/\bWEB(?=[\d])/gi, 'WEB ');
-  s = s.replace(/\bWEB(?=-)/gi, 'WEB ');
+  // ⚠️ WEB-DL 不能拆! 拆了 "WEB-DL" → "WEB -DL" → 'WEB-?DL' 匹配不上 → 残留 "绿夜 -DL"
+  s = s.replace(/\bWEB(?=-(?!DL\b))/gi, 'WEB ');
   s = s.replace(SPEC_RE, ' ');
   s = s.replace(CN_NOISE_RE, ' ');
+  // 「全集/全片」不带分隔符也要剥 ("杀戮一代 Generation Kill全集." → "杀戮一代 Generation Kill")
+  s = s.replace(/(?:全集|全片|全部集|完整版)/g, ' ');
+  // 2026-10-29: 年番/季番 可带数字 ("凡人修仙传 年番4") → 先剥数字再剥词
+  s = s.replace(/(?:年|季|半年)番\s*\d*/g, ' ');
+  // 2026-10-29: 剥题材/类型词 (独立 token 才剥, 避免误伤「爱情公寓」「中国合伙人」)
+  s = s.replace(GENRE_TOKEN_RE, ' ');
 
   // ── Step 6: 剥季 (季号对 TMDB 搜索是噪音) ──
   s = s.replace(SEASON_RE, ' ');
@@ -189,10 +234,17 @@ export function cleanFolderName(raw: string): CleanResult {
 
   // ── Step 9: 清理符号残留 ──
   s = s.replace(/\s{2,}/g, ' ').trim();
+  // 空括号 ("反正你也逃不掉【 】【 】" → 内容被剥完只剩空壳)
+  s = s.replace(/【\s*】|\[\s*\]|（\s*）|\(\s*\)/g, ' ');
   s = s.replace(/^[\s\-_.·、,，:：|/\\]+/, '').replace(/[\s\-_.·、,，:：|/\\]+$/, '').trim();
+  // 2026-10-29: 尾部残留的孤立括号也要剥 ("问心2 更至32集 [" → "问心2")
+  s = s.replace(/[\s\-_.·、,，:：|/\\【】\[\]()（）]*$/, '').trim();
   s = s.replace(/\s*[-–—]\s*$/, '').trim();
-  // 剥完留下的孤立字母数字块 (如 "WEB-" 剩 "WEB" 已被剥; 这里收尾)
-  s = s.replace(/(?:^|\s)[A-Za-z0-9]{1,3}(?=\s|$)/g, (m) => (m.startsWith(' ') || m.startsWith('\t') ? ' ' : ''));
+  // 尾部独立集数 ("遮天 Shrouding the Heavens 20" → 去掉末尾的 20)
+  s = s.replace(/\s+\d{1,4}\s*$/, ' ').trim();
+  // 剥完留下的孤立大写/数字块 (如 "WEB"/"NF"/"HDR");
+  // ⚠️ 只剥大写和数字 —— 2026-10-29 修了 "Shrouding the Heavens" 的 "the" 被误删
+  s = s.replace(/(?:^|\s)[A-Z0-9]{1,4}(?=\s|$)/g, (m) => (m.startsWith(' ') || m.startsWith('\t') ? ' ' : ''));
 
   // ══════════════════════════════════════════════════════════════════════
   // 取片名: 多分支 + 候选
@@ -212,7 +264,10 @@ export function cleanFolderName(raw: string): CleanResult {
   //    多个方括号时: 「数字开头」的降权 (【22年日剧】不算片名), 其次按长度降序
   //    例 【幻月字幕组】【22年日剧】【浪漫暴风圈】【01】→ 选「浪漫暴风圈」
   const bracketInner = Array.from(s.matchAll(/[【\[《]([^】\]》]{2,30})[】\]》]/g)).map((m) => m[1].trim());
-  const bracketGood = bracketInner.filter((b) => !isNoiseOnly(b));
+  // ⚠️ 2026-10-29: 方括号里可能是发布组/版本标签 ("【EMe】" "【NC-Raws】")
+  //   → 只认「含中文」或「≥5 字符」的方括号内容, 否则会提成 "EMe" 这种垃圾片名
+  const bracketGood = bracketInner.filter((b) =>
+    !isNoiseOnly(b) && (b.length >= 5 || /[\u4e00-\u9fff]/.test(b)));
   bracketGood.sort((a, b) => {
     const na = /^\d/.test(a) ? 1 : 0, nb = /^\d/.test(b) ? 1 : 0;
     if (na !== nb) return na - nb;
@@ -221,14 +276,21 @@ export function cleanFolderName(raw: string): CleanResult {
   for (const b of bracketGood) pushAlt(cand, b);
 
   // C: 点分隔 (片名.年份 / 片名.规格) —— 年份段跳过
-  const dotParts = s.split('.').map((x) => x.trim()).filter(Boolean);
-  for (const p of dotParts) {
-    if (/^(?:19|20)\d{2}$/.test(p)) continue;
-    if (p.length >= 2 && /[\u4e00-\u9fff]/.test(p) && !isNoiseOnly(p)) { pushAlt(cand, p); break; }
+  //    ⚠️ 2026-10-29: 必须要求「原串含点」且「该段不含空格」
+  //       否则整串没点号时会被整段当成片名 ("九重紫 孟子义 李昀锐" → 提成整串)
+  if (s.includes('.')) {
+    const dotParts = s.split('.').map((x) => x.trim()).filter(Boolean);
+    for (const p of dotParts) {
+      if (/^(?:19|20)\d{2}$/.test(p)) continue;
+      if (p.length >= 2 && p.length <= 24 && !/\s/.test(p) && /[\u4e00-\u9fff]/.test(p) && !isNoiseOnly(p)) { pushAlt(cand, p); break; }
+      if (p.length >= 2 && p.length <= 12 && /[\u4e00-\u9fff]/.test(p) && !isNoiseOnly(p)) { pushAlt(cand, p); break; }
+    }
   }
 
   // D: 斜杠分隔的双语片名 → 取第一段 (通常是主片名), 第二段做 alt
-  const slashParts = s.split(/\s*\/\s*/).map((x) => x.trim()).filter(Boolean);
+  //    ⚠️ 2026-10-29: 段内要先剥掉方括号组 ("【NC-Raws】 自称贤者弟子的贤者" → "自称贤者弟子的贤者")
+  const stripBrackets = (x: string) => x.replace(/[【\[《][^】\]》]{0,30}[】\]》]\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
+  const slashParts = s.split(/\s*\/\s*/).map((x) => stripBrackets(x)).filter(Boolean);
   if (slashParts.length >= 2) {
     for (const p of slashParts) {
       if (!isNoiseOnly(p) && /[\u4e00-\u9fffA-Za-z]/.test(p)) { pushAlt(cand, p); break; }
@@ -238,8 +300,15 @@ export function cleanFolderName(raw: string): CleanResult {
 
   // E: 中文片段 → **排除噪音片段** (这是旧版最大的坑)
   //    排序: 数字开头的降权, 再按长度降序
-  const cnFrags = s.match(/[\u4e00-\u9fff][^\[\]（）【】《》\s,，。:：/]{0,30}/g) || [];
-  const goodFrags = cnFrags.map((x) => x.trim()).filter((x) => x.length >= 2 && !isNoiseOnly(x));
+  //    ⚠️ 全角冒号「：」要留在片段里 —— 中文片名常用它做副标题分隔
+  //       「金特务：本色回归」被拆成「金特务」+「本色回归」→ 提成错的名字
+  const cnFrags = s.match(/[\u4e00-\u9fff][^\[\]（）【】《》\s,，。:/]{0,30}/g) || [];
+  let goodFrags = cnFrags.map((x) => x.trim()).filter((x) => x.length >= 2 && !isNoiseOnly(x));
+  // ⚠️ 2026-10-29: 含数字的片段降权 ("酷漫404 鬼灭之刃" → 原本提成 "酷漫404")
+  //   「酷漫404」是字幕组名, 「鬼灭之刃」才是片名
+  //   只在「存在不含数字的片段」时才降权, 避免误伤 "问心2" 这种真片名
+  const noDigitFrags = goodFrags.filter((x) => !/\d/.test(x));
+  if (noDigitFrags.length) goodFrags = noDigitFrags;
   goodFrags.sort((a, b) => {
     const na = /^\d/.test(a) ? 1 : 0, nb = /^\d/.test(b) ? 1 : 0;
     if (na !== nb) return na - nb;
@@ -263,9 +332,17 @@ export function cleanFolderName(raw: string): CleanResult {
   if (s.length >= 2) pushAlt(cand, s);
 
   // 最终 cleanName: 第一个非噪音候选
+  // ⚠️ 2026-10-29: 原串含中文时, 优先选「含中文」的候选
+  //   「【EMe】龙与魔女 Burn the Witch」→ 候选里 "EMe" 排前面 → 提成 "EMe" 匹配到《Eme de Muna》
+  const hasCjk = /[\u4e00-\u9fff]/.test(s);
   let cleanName = '';
-  for (const c of cand) {
-    if (!isNoiseOnly(c)) { cleanName = c; break; }
+  if (hasCjk) {
+    for (const c of cand) { if (/[\u4e00-\u9fff]/.test(c) && !isNoiseOnly(c)) { cleanName = c; break; } }
+  }
+  if (!cleanName) {
+    for (const c of cand) {
+      if (!isNoiseOnly(c)) { cleanName = c; break; }
+    }
   }
   if (!cleanName && cand.length) cleanName = cand[0];
   if (!cleanName) {
@@ -274,8 +351,10 @@ export function cleanFolderName(raw: string): CleanResult {
   }
 
   // alts: 候选里除 cleanName 外的其它可信候选
+  // 2026-10-29: alt 必须 ≥4 字 (2-3 字片段拿去搜 TMDB 极易匹配到别的作品:
+  //   「动画」→《清华附小语文综合动画课》; 「神楽坂」→《神乐坂署生活安全课》)
   for (const c of cand) {
-    if (c !== cleanName && !isNoiseOnly(c)) pushAlt(alts, c);
+    if (c !== cleanName && c.length >= 4 && !isNoiseOnly(c)) pushAlt(alts, c);
   }
 
   return { cleanName, year, season, alts: alts.slice(0, 4) };

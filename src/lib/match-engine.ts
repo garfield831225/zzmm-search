@@ -252,8 +252,11 @@ export const SKIP_MATCH_CATEGORIES = new Set([
 ]);
 
 // 2026-10-29: 明确按 tv 搜的分类 (短剧漏了 → 1.7% 匹配率)
-export const TV_ONLY_CATEGORIES = new Set(['连载', '剧集', '动漫', '综艺', '少儿频道', '短剧']);
-export const MOVIE_ONLY_CATEGORIES = new Set(['电影', '华语电影', '外语电影', '动画电影', 'REMUX', '系列电影']);
+//   ⚠️ 直接复用 categories.ts 的真相源, 跟前端"这条资源能不能显示 TMDB 海报"的判定保持一致
+//   两边各写一份 → 匹配写进去的 tmdb_type 跟前端期望对不上 → 匹配上了但没封面
+import { TMDB_TV_CATS, TMDB_MOVIE_CATS } from './categories';
+export const TV_ONLY_CATEGORIES = TMDB_TV_CATS;
+export const MOVIE_ONLY_CATEGORIES = TMDB_MOVIE_CATS;
 
 /**
  * 分类 → TMDB 类型候选 (cron 和 admin 共用, 避免两套实现跑偏)

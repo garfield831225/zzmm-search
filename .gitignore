@@ -48,3 +48,6 @@ HTTP
 build-run.log
 deploy-run.log
 *.tsbuildinfo
+
+# 构建产物: 由 scripts/build-rematch-worker.cjs 生成
+scripts/rematch-worker.clean-title.cjs
