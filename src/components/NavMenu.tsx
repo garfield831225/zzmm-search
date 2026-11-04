@@ -3,7 +3,10 @@
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ChevronDown, Crown, Sparkles, ListChecks, Calendar, Music, Library, User, Gift, Shield, LogOut } from 'lucide-react';
+import {
+  ChevronDown, Crown, Sparkles, ListChecks, Calendar, Music, Library, User, Gift, Shield, LogOut,
+  Clapperboard, Gamepad2, Film, Gem,
+} from 'lucide-react';
 
 interface UserInfo {
   id: number;
@@ -12,13 +15,25 @@ interface UserInfo {
   expire_at: string;
 }
 
-// 2026-08-14: PC 工具栏 9 入口重排
-//   1. 观影推荐▾ (榜单 / 追剧日历)
-//   2. 线上观影▾ (VIP影视区 / VIP影视2区)
-//   3. 我的▾ (个人中心 / 兑换中心 / 求片专区 / 管理中心[admin] / 退出)
-//   4. 非影视区 (单 Link, 保留)
-//   5. 文档资源库 (单 Link, 保留)
-// 搜索框已挪到 hero 区域上方
+// 2026-11-05 导航改版 (用户拍板):
+//   1. 新增「VIP专享站▾」: moviezone / game520 / 拾光影视 三个外链 (lucide 图标 + 霓虹配色)
+//   2. 「线上观影▾」→「VIP观影区」单入口, 去掉下拉, 直跳 https://zzmm-search.uk/lovemovie
+//   3. 原「VIP 影视区」(/vip) 入口下掉 —— xx_vip_links 20002 条播放链接 active=0, 播放全挂
+//   4. 移动端 (md 以下): VIP观影区 放进「VIP专享站」下拉当第 4 项, 不占独立位置
+//      (手机屏窄, 少一个一级菜单)
+//   5. 显示门槛: basic 及以上 (basic/vip/admin), 跟原「线上观影」同门槛
+//   6. /vip 页面本身保留 (21,129 条资源 + /admin/vip-sync 入口), 只是导航不再露脸
+
+// VIP 专享站三个外站
+const VIP_SITES = [
+  { label: 'moviezone', href: 'https://moviezone.cc.cd/', icon: Clapperboard, color: 'text-violet-400', badge: '需机场' },
+  { label: 'game520', href: 'https://game.zzmm-search.uk/', icon: Gamepad2, color: 'text-cyan-400', badge: '' },
+  { label: '拾光影视', href: 'https://moviezone.cc.cd/shiguang/', icon: Film, color: 'text-amber-400', badge: '' },
+];
+
+// VIP 观影区 (星帆影视镜像站, 走 /lovemovie 307 到 lovemovie.zzmm-search.uk)
+const LOVEMOVIE_URL = 'https://zzmm-search.uk/lovemovie';
+
 export default function NavMenu({ user, onLogout }: { user: UserInfo | null; onLogout: () => void }) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -52,7 +67,52 @@ export default function NavMenu({ user, onLogout }: { user: UserInfo | null; onL
 
   return (
     <div ref={containerRef} className="flex items-center gap-2 flex-wrap justify-end">
-      {/* 1. 观影推荐▾ */}
+      {/* 1. VIP专享站▾ (2026-11-05 新增) */}
+      {isVipLike && (
+        <div className="relative">
+          <button onClick={() => toggleMenu('sites')} className={menuBtnCls(openMenu === 'sites')}>
+            <Gem size={14} className="text-fuchsia-300 transition-transform group-hover:scale-110" />
+            <span>VIP专享站</span>
+            <ChevronDown size={12} className={`transition-transform ${openMenu === 'sites' ? 'rotate-180' : ''}`} />
+          </button>
+          {openMenu === 'sites' && (
+            <div className="absolute right-0 top-full mt-2 w-60 bg-[#12121f]/95 backdrop-blur-xl border border-fuchsia-400/25 rounded-xl shadow-[0_0_30px_rgba(232,121,249,0.25)] py-1.5 z-50">
+              {VIP_SITES.map((s) => (
+                <a
+                  key={s.href}
+                  href={s.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setOpenMenu(null)}
+                  className={dropdownItemCls}
+                >
+                  <s.icon size={14} className={s.color} />
+                  <span className="flex-1">{s.label}</span>
+                  {s.badge && (
+                    <span className="text-[10px] leading-none font-semibold px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-200 border border-amber-400/45 shadow-[0_0_10px_rgba(251,191,36,0.25)]">
+                      {s.badge}
+                    </span>
+                  )}
+                </a>
+              ))}
+              {/* 移动端: VIP观影区 塞进这个下拉 (PC 是独立一级入口) */}
+              <div className="md:hidden my-1 border-t border-white/5" />
+              <a
+                href={LOVEMOVIE_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setOpenMenu(null)}
+                className={`${dropdownItemCls} md:hidden`}
+              >
+                <Crown size={14} className="text-amber-300" />
+                <span>VIP观影区</span>
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 2. 观影推荐▾ */}
       <div className="relative">
         <button onClick={() => toggleMenu('recommend')} className={menuBtnCls(openMenu === 'recommend')}>
           <ListChecks size={14} className="text-violet-300" />
@@ -73,37 +133,22 @@ export default function NavMenu({ user, onLogout }: { user: UserInfo | null; onL
         )}
       </div>
 
-      {/* 2. 线上观影▾ */}
+      {/* 3. VIP观影区 (2026-11-05: 原「线上观影▾」, 去掉下拉直跳; 移动端在 VIP专享站下拉里) */}
       {isVipLike && (
-        <div className="relative">
-          <button onClick={() => toggleMenu('online')} className={menuBtnCls(openMenu === 'online')}>
-            <Crown size={14} className="text-amber-300" />
-            <span>线上观影</span>
-            <ChevronDown size={12} className={`transition-transform ${openMenu === 'online' ? 'rotate-180' : ''}`} />
-          </button>
-          {openMenu === 'online' && (
-            <div className="absolute right-0 top-full mt-2 w-48 bg-[#12121f]/95 backdrop-blur-xl border border-violet-400/25 rounded-xl shadow-[0_0_30px_rgba(139,92,246,0.25)] py-1.5 z-50">
-              <Link href="/vip" onClick={() => setOpenMenu(null)} className={dropdownItemCls}>
-                <Crown size={14} className="text-amber-400" />
-                <span>VIP 影视区</span>
-              </Link>
-              {user?.group === 'basic' ? (
-                <Link href="/upgrade" onClick={() => setOpenMenu(null)} className={dropdownItemCls}>
-                  <Sparkles size={14} className="text-violet-400" />
-                  <span>VIP 影视 2 区 (升级)</span>
-                </Link>
-              ) : (
-                <Link href="/lovemovie" target="_blank" rel="noopener" onClick={() => setOpenMenu(null)} className={dropdownItemCls}>
-                  <Sparkles size={14} className="text-violet-400" />
-                  <span>VIP 影视 2 区</span>
-                </Link>
-              )}
-            </div>
-          )}
+        <div className="hidden md:block">
+          <a
+            href={LOVEMOVIE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={menuBtnCls(false)}
+          >
+            <Crown size={14} className="text-amber-300 transition-transform group-hover:scale-110" />
+            <span>VIP观影区</span>
+          </a>
         </div>
       )}
 
-      {/* 3. 我的▾ (登录后才显示) */}
+      {/* 4. 我的▾ (登录后才显示) */}
       {user && (
         <div className="relative">
           <button onClick={() => toggleMenu('me')} className={menuBtnCls(openMenu === 'me')}>
@@ -144,13 +189,13 @@ export default function NavMenu({ user, onLogout }: { user: UserInfo | null; onL
         </div>
       )}
 
-      {/* 4. 非影视区 (单 Link) */}
+      {/* 5. 非影视区 (单 Link) */}
       <Link href="/nonfilm" className={menuBtnCls(false)}>
         <Music size={14} className="text-cyan-300 transition-transform group-hover:scale-110" />
         <span>非影视区</span>
       </Link>
 
-      {/* 5. 文档资源库 (单 Link) */}
+      {/* 6. 文档资源库 (单 Link) */}
       <Link href="/library" className={menuBtnCls(false)}>
         <Library size={14} className="text-violet-300 transition-transform group-hover:scale-110" />
         <span>文档资源库</span>
