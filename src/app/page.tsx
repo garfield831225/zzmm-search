@@ -603,33 +603,33 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              {/* 2026-11-05: 换成 ZZMM 金色徽章 (用户指定图) —— 原图 1920x1920 的 JPEG 白底,
-                  用 ImageMagick 把外圈+内部近白抠成透明 (金环 / ZZMM 手写体 / 胶片 / 播放键全保留),
-                  缩到 128px (png 43KB / webp 16KB)
-                  辉光走 .logo-zzmm (filter drop-shadow 贴合透明轮廓), 原来的 box-shadow 会画方块光晕
-                  ⚠️ picture 必须 shrink-0: 移动端顶部导航竖排占宽, 不加会被压成 31x40 把圆挤成椭圆 */}
-              <picture className="shrink-0">
-                <source srcSet="/logo-zzmm-128.webp" type="image/webp" />
+              {/* 2026-11-06: 换成 HDZZMM 红白字标 (用户指定图) —— 原图 1279x1363 的 JPEG, 深灰径向渐变底
+                  用 ImageMagick 双通道提取 alpha (白/银字走亮度, 红 HD 走饱和度) 把底抠成全透, 裁到 360x101
+                  ⚠️ h1 必须改 sr-only: 字标本身就是 "HDZZMM", 文字标题留着会变成 HDZZMM HDZZMM 重复
+                  ⚠️ max-w-none 必须加: Tailwind preflight 有 img { max-width:100% },
+                     移动端左组会被导航挤窄 → 字标被压扁 (实测 67x32, 宽高比 3.56 掉到 2.11)
+                  ⚠️ 左组不能加 min-w-0, picture 必须给固定宽:
+                     375px 下顶部导航会吃掉所有剩余空间 (实测能涨到 300px), 左组不给下限它就缩到 43px,
+                     字标溢出后直接压到导航身上 (实测重叠 43px)。锁住左组后:
+                     左组 86px / 导航 257px / 仍 3 行 / header 高度不变 / 无横向滚动 (浏览器实测)
+                  ⚠️ 移动端字标 h-6 (24px) + 计数隐藏: 375px 下没有第二行空间,
+                     计数被压成 0 宽只剩一个省略号残渣, sm 起才显示 */}
+              <picture className="shrink-0 block w-[86px] sm:w-[143px]">
+                <source srcSet="/logo-hdzzmm-wordmark.webp" type="image/webp" />
                 <img
-                  src="/logo-zzmm-128.png"
-                  alt="ZZMM"
-                  width={48}
-                  height={48}
-                  className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0 logo-zzmm"
+                  src="/logo-hdzzmm-wordmark.png"
+                  alt="HDZZMM"
+                  width={360}
+                  height={101}
+                  className="h-6 sm:h-10 w-auto aspect-[360/101] max-w-none flex-shrink-0 logo-zzmm"
                   loading="eager"
                   decoding="async"
                 />
               </picture>
-              <div className="min-w-0">
-                {/* 2026-10-30 霓虹改版: 原来 bg-clip-text + text-transparent → 渐变起点暗, 字看不清
-                    改用 .neon-title (Orbitron 字体 + 实色填充 + 多层辉光) */}
-                <h1 className="text-xl sm:text-2xl neon-title leading-tight">
-                  HDZZMM
-                </h1>
-                <p className="text-xs text-white/55 truncate">
-                  共 <span className="neon-num">{total.toLocaleString()}</span> 条资源 · 当前显示 {items.length} 条
-                </p>
-              </div>
+              <h1 className="sr-only">HDZZMM</h1>
+              <p className="hidden sm:block text-xs text-white/55 truncate max-w-[150px] lg:max-w-none">
+                共 <span className="neon-num">{total.toLocaleString()}</span> 条资源 · 当前显示 {items.length} 条
+              </p>
             </div>
             {/* 2026-08-14: 工具栏 9 入口重排 -> 3 下拉 + 2 单链接 (NavMenu 组件) */}
             <NavMenu user={user} onLogout={handleLogout} />

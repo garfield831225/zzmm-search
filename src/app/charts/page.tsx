@@ -31,9 +31,10 @@ function ChartsPageInner() {
         <div className="max-w-7xl mx-auto px-4 py-3">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-3 min-w-0">
-              <picture className="shrink-0">
-                <source srcSet="/logo-zzmm-128.webp" type="image/webp" />
-                <img src="/logo-zzmm-128.png" alt="ZZMM" width={36} height={36} className="w-9 h-9 shrink-0 logo-zzmm" loading="lazy" decoding="async" />
+              {/* 2026-11-06: 换成 HDZZMM 红白字标 (跟首页同一份资源, 这里用小号) */}
+              <picture className="shrink-0 block">
+                <source srcSet="/logo-hdzzmm-wordmark.webp" type="image/webp" />
+                <img src="/logo-hdzzmm-wordmark.png" alt="HDZZMM" width={360} height={101} className="h-6 sm:h-7 w-auto aspect-[360/101] max-w-none shrink-0 logo-zzmm" loading="lazy" decoding="async" />
               </picture>
               <div className="min-w-0">
                 <h1 className="neon-title text-lg font-bold">
