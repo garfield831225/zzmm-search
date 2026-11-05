@@ -603,17 +603,19 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              {/* 2026-08-08: HDZZMM 紫粉霓虹 logo v5-01 (跟主站主题色一致, 紫粉渐变 + 青色边缘高光) - 替代原紫色方块+emoji */}
-              {/* 2026-10-29: 换 128px 优化版 —— 原图是 1024x1024 的 JPEG 却叫 .png, 717KB!
-                  首屏 logo 只显示 40-48px, 现在 webp 3.3KB / png 26KB (省 714KB) */}
-              <picture>
-                <source srcSet="/logo-hdzzmm-128.webp" type="image/webp" />
+              {/* 2026-11-05: 换成 ZZMM 金色徽章 (用户指定图) —— 原图 1920x1920 的 JPEG 白底,
+                  用 ImageMagick 把外圈+内部近白抠成透明 (金环 / ZZMM 手写体 / 胶片 / 播放键全保留),
+                  缩到 128px (png 43KB / webp 16KB)
+                  辉光走 .logo-zzmm (filter drop-shadow 贴合透明轮廓), 原来的 box-shadow 会画方块光晕
+                  ⚠️ picture 必须 shrink-0: 移动端顶部导航竖排占宽, 不加会被压成 31x40 把圆挤成椭圆 */}
+              <picture className="shrink-0">
+                <source srcSet="/logo-zzmm-128.webp" type="image/webp" />
                 <img
-                  src="/logo-hdzzmm-128.png"
-                  alt="HDZZMM"
+                  src="/logo-zzmm-128.png"
+                  alt="ZZMM"
                   width={48}
                   height={48}
-                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex-shrink-0 shadow-[0_0_18px_rgba(167,139,250,0.45)] ring-1 ring-violet-400/35"
+                  className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0 logo-zzmm"
                   loading="eager"
                   decoding="async"
                 />

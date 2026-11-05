@@ -31,9 +31,9 @@ function ChartsPageInner() {
         <div className="max-w-7xl mx-auto px-4 py-3">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-3 min-w-0">
-              <picture>
-                <source srcSet="/logo-hdzzmm-128.webp" type="image/webp" />
-                <img src="/logo-hdzzmm-128.png" alt="HDZZMM" width={36} height={36} className="w-9 h-9 rounded-lg shrink-0" loading="lazy" decoding="async" />
+              <picture className="shrink-0">
+                <source srcSet="/logo-zzmm-128.webp" type="image/webp" />
+                <img src="/logo-zzmm-128.png" alt="ZZMM" width={36} height={36} className="w-9 h-9 shrink-0 logo-zzmm" loading="lazy" decoding="async" />
               </picture>
               <div className="min-w-0">
                 <h1 className="neon-title text-lg font-bold">
