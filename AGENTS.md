@@ -161,3 +161,58 @@ PG 里 active 的 `tmdb_id IS NULL` = **0 行**，262,492 全是 `tmdb_id='NOMAT
 - TMDB 请求量：262,492 × 1~2 次 ≈ **26~52 万次**；按 40~50 req/s ≈ **1.5~3.6 小时**纯 API 时间
 - 写回：NAS 上 26 万行 UPDATE（当前 NAS load 21、swap 16.2G 在颠簸 —— **这才是拦路虎**）
 - 写生产库必须用户拍板；不建定时器
+
+## 🔥 NAS 匹配器 3.5 天零命中：三个叠加的坑（2026-11-07 定位并修复）
+
+**现象**：`xx_resources.matched_tmdb_at` **最后成功是 2026-11-04 02:18 CST**，之后连续 3.5 天**零命中**；
+覆盖率停在 30.37%（142,675 / 469,765）。看起来像「TMDB 挂了 / 配额用完」，实际是三个独立 bug 叠加。
+
+### 坑 1：代理被 `zzm_neon_proxy_patch.mjs` 抹掉（静默全判 NOMATCH）
+```
+scripts/zzm_neon_proxy_patch.mjs (import 时执行):
+  process.env.HTTP_PROXY = '';        ← 清空
+scripts/match-direct.mjs (模块体):
+  loadEnvFile(ENV_FILE)               ← 看到 HTTP_PROXY 是空串(falsy) → 从 .env.production 读回
+                                        已失效的 http://192.168.3.3:12348 → 覆盖掉外部 export
+  const PROXY_URL = process.env.HTTP_PROXY || ...   → 12348（CLOSED）
+```
+⚠️ **ESM 的 import 先于模块体执行**，所以「先 export 再跑脚本」根本挡不住这个 patch。
+⇒ 修法：在 `loadEnvFile` **之前**钉死 `process.env.HTTP_PROXY`（env 已有值时 loadEnvFile 不会覆盖）。
+⇒ 现状：`192.168.3.3` 上 **7890 / 7897 OPEN，12348 / 12334 / 17890 CLOSED**；**NAS 直连 TMDB 也能通**（200，~0.9s）。
+
+### 坑 2：名字清洗把 `【...】` 块整个留下 → TMDB 搜索恒 0 结果
+`cleanFolderName` 只掏掉块**里面**的 1080p/4K 词，**括号本身留着**：
+```
+"唐顿庄园(六季合集)【1080p 原盘REMUX】【内封简英双语特效字幕】【剧情/家庭】"
+→ "唐顿庄园(六季合集)【 原盘 】【内封简英双语特效字幕】【剧情/家庭】"   ← 搜不到
+```
+修法（在 matchOne 里，拿到 cleanName 之后追加一遍）：
+① 剥掉所有 `【...】` 和 `[...]` 块 ②剥掉非年份的中文括号 ③去掉 `年番/剧版/合集/更N集/更新至N集` 等标记。
+
+### 坑 3：`ORDER BY created_at DESC` 让匹配器原地打转
+最新导入的行名字最脏 → 永远被优先挑中 → 5 分钟冷却一过又挑同一批 → **永远推进不了**。
+⇒ 改成 `ORDER BY last_attempt_at ASC NULLS FIRST`（最久没试过的先试）才会向前扫。
+
+### 附带修：假阳性护栏
+实测「书籍」「国漫」「刑侦」「喜剧」这类泛词会被匹配到**任意** TMDB 条目 → 往库里写错 tmdb_id。
+⇒ 加泛词黑名单 + `cleanName.length < 3` 直接判 NOMATCH。
+
+### 命中率实测（修复后）
+| 样本 | 命中率 |
+|---|---|
+| 从未试过的老行（大量图书教材错归影视类） | 4.0%（且多为真·不该匹配） |
+| 主力已尝试人群（真影视资源） | **16.5%**（电影 18.7% / 剧集 17.1%） |
+
+### 本次运行的配置
+- 脚本：`scripts/match-direct-vip.mjs`（**NAS 上的副本，原 `match-direct.mjs` 一个字没动**，md5 仍是 `5e22e5ad...`）
+  —— 因为 NAS 那份与本地 repo 不是同一版（本地 md5 `d6a9995d...`），直接覆盖会丢改动。
+- 与原脚本的差异：①`access_level='vip'` 过滤 ②强制代理 ③名字清洗 ④取行顺序 ⑤假阳性护栏 ⑥调试日志
+- 备份表：`xx_rematch_backup_20261107`（276,628 行，可回滚 tmdb_id / matched_tmdb_at / last_attempt_at）
+- systemd：`zzmm-rematch-vip.service`（Nice=19 + ionice idle + Restart=on-failure）
+  启动：`systemctl start zzmm-rematch-vip.service`　停止：`systemctl stop zzmm-rematch-vip.service`
+- 实测速度：200 行/轮 × ~45s ≈ 4.4 行/s → 全量 276,628 行约 **17 小时**（后台跑，不阻塞站点）
+- 调试开关：`MATCH_DEBUG=1` 时脚本会打 `[dbg] CLEAN2 / SEARCH / 0results / MATCH` 到日志
+
+⚠️ **别再犯**：改任何走 TMDB 的脚本前，先确认
+①`process.env.HTTP_PROXY` 在 patch 模块之后仍然正确 ②清洗后的名字能直接搜到 ③取行顺序不会原地打转。]<]minimax[>[</newString>]<]minimax[>[</invoke>
+]<]minimax[>[</tool_call>
