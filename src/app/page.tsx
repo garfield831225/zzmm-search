@@ -135,6 +135,11 @@ export default function HomePage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  // 2026-11-07: 搜索错误态
+  //   之前 fetchItems 没有 res.ok 检查也没有超时 → 后端 500 / DB 挂起时
+  //   data.items 是 undefined → setItems([]) → 网格渲染成一片空白,
+  //   用户根本分不清「服务挂了」还是「站里没这资源」(moviezone 那边踩了同一个坑)
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<ResourceItem | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [relatedItems, setRelatedItems] = useState<ResourceItem[]>([]);
@@ -377,6 +382,10 @@ export default function HomePage() {
     setPage(targetPage);
     setLoading(true);
     const { query: q, category: cat, source: src, region: reg, year: yr, matchStatus: ms, sort: s, pageSize: ps, dedupBy: db, onlyWithCover: owc } = latestRef.current;
+    // 2026-11-07: 超时保护 —— NAS 高负载时默认搜索实测要 4~9.5s, 给 45s 余量,
+    //   但不能无限等 (挂起的请求会把页面卡在空白 + 后端连接一直占着)
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 45000);
     try {
       const params = new URLSearchParams({ page: targetPage.toString(), pageSize: ps.toString() });
       if (q) params.set('q', q);
@@ -401,14 +410,33 @@ export default function HomePage() {
         cache: 'no-store',
         credentials: 'include',  // 2026-07-25: 带 cookie 鉴权 (server 端 JWT 解码)
         headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: ctrl.signal,
       });
+      // 2026-11-07 🔥 必须查 res.ok —— 500 的 body 也是合法 JSON ({error:...}),
+      //   不查的话 data.items 是 undefined → setItems([]) → 用户看到的是「搜不到」,
+      //   而不是「服务器挂了」。这两种状态在 UI 上必须长得不一样。
+      if (!res.ok) {
+        let detail = '';
+        try { const j = await res.json(); detail = j?.error || ''; } catch { /* 非 JSON body */ }
+        throw new Error(detail ? `HTTP ${res.status} · ${detail}` : `HTTP ${res.status}`);
+      }
       const data: SearchResponse = await res.json();
       setItems(data.items ?? []);
       setTotal(data.total ?? 0);
       // 2026-07-20: 记录分组 (按 tmdb_id), 用于"显示重复"按钮
       setGroups(data.groups ?? []);
-    } catch (err) { console.error('Fetch error:', err); }
-    finally { setLoading(false); }
+      setSearchError(null);
+    } catch (err: any) {
+      // 失败时**不清空** items —— 保留上一次的结果, 顶部挂错误条, 用户还能继续看
+      const msg = err?.name === 'AbortError'
+        ? '搜索超时（45 秒没有响应），服务器当前可能较忙，请稍后重试'
+        : (err?.message ? String(err.message) : '网络错误，请检查网络后重试');
+      setSearchError(msg);
+      console.error('[search] failed:', err);
+    } finally {
+      clearTimeout(timer);
+      setLoading(false);
+    }
   }, []);
 
   // 先同步 ref 再调用，永远读最新 state
@@ -717,7 +745,19 @@ export default function HomePage() {
       {/* 2026-08-04: 4ktop 风格首页模块 (Banner + 4 模块行) */}
       {/* 2026-08-14: 搜索框从 nav 顶部挪到 hero 区域上方 (Banner 之前), 大尺寸玻璃态输入框 */}
       <div className="max-w-7xl mx-auto px-4 pt-4 md:pt-6">
-        <SearchBox initial={query} onSearch={(q) => { setQuery(q); fetchItems(1); }} size="lg" />
+        <SearchBox initial={query} onSearch={(q) => {
+          // 2026-11-07 🔥 修 P0: 首页搜索框**从来没真正过滤过**
+          //   setQuery 是异步的 (要等 React 提交渲染), 紧接着调 fetchItems(1) 时
+          //   latestRef.current.query 还是**旧值** → 请求不带 q
+          //   → 用户搜什么词看到的都是同一份默认列表
+          //   实测 (Playwright 打线上): 输入「逆天邪神」回车, /api/search?q=null,
+          //   页面 8 张卡片 0 个命中, 列表还是「鉴定 / 北境往事 / ...」默认排序
+          //   而且 query 不在下面那个 effect 的依赖里 → 也没有第二次请求来兜底
+          //   修法: 跟同文件 setPageSize 的写法对齐 —— 同步先改 ref, 再让 React 更新 state
+          latestRef.current = { ...latestRef.current, query: q };
+          setQuery(q);
+          fetchItems(1);
+        }} size="lg" />
       </div>
 
       <div className="max-w-7xl mx-auto px-4 pt-6">
@@ -943,6 +983,21 @@ export default function HomePage() {
             </div>
           </div>
         </div>
+
+        {/* 2026-11-07: 搜索错误态 —— 「服务挂了」和「搜不到」必须长得不一样 */}
+        {searchError && (
+          <div className="mb-4 flex flex-col sm:flex-row sm:items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/[0.08] px-4 py-3">
+            <span className="text-xl leading-none shrink-0">⚠️</span>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-amber-200">搜索服务暂时不可用</div>
+              <div className="text-xs text-white/50 mt-0.5 break-words">{searchError}</div>
+            </div>
+            <button onClick={() => fetchItems(page)} disabled={loading}
+              className="shrink-0 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 px-4 py-2 text-xs text-amber-100 transition disabled:opacity-40">
+              {loading ? '重试中…' : '重试'}
+            </button>
+          </div>
+        )}
 
         {/* Grid */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
@@ -1215,6 +1270,23 @@ export default function HomePage() {
             );
           })}
         </div>
+
+        {/* 2026-11-07: 加载中 / 没找到 —— 空状态也要说话, 不能再是白板
+            (之前 0 条时网格高度为 0, 页面下半截整片空白, 用户以为页面坏了) */}
+        {loading && items.length === 0 && (
+          <div className="py-16 text-center">
+            <div className="text-3xl mb-3 animate-pulse">⏳</div>
+            <div className="text-sm text-white/60">搜索中…</div>
+            <div className="text-xs text-white/35 mt-1.5">数据量较大，稍等一下</div>
+          </div>
+        )}
+        {!loading && !searchError && items.length === 0 && (
+          <div className="py-16 text-center">
+            <div className="text-3xl mb-3">🔍</div>
+            <div className="text-sm text-white/60">没有找到相关资源</div>
+            <div className="text-xs text-white/35 mt-1.5">换个关键词，或清掉上面的筛选条件再试</div>
+          </div>
+        )}
 
         {/* Pagination */}
         {total > 0 && (

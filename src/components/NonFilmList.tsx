@@ -156,6 +156,13 @@ export default function NonFilmList({ category, title, icon, description, accent
       const headers: Record<string, string> = {};
       if (tk) headers['Authorization'] = `Bearer ${tk}`;
       const res = await fetch(`/api/search?${params}`, { headers });
+      // 2026-11-07: 必须查 res.ok —— 500 的 body 也是合法 JSON, 不查的话 data.items
+      //   是 undefined → 静默渲染成「没有资源」, 用户以为站里没这内容, 实际是服务挂了
+      if (!res.ok) {
+        let detail = '';
+        try { const j = await res.json(); detail = j?.error || ''; } catch { /* 非 JSON body */ }
+        throw new Error(detail ? `HTTP ${res.status} · ${detail}` : `HTTP ${res.status}`);
+      }
       const data = await res.json();
       const mapped: ResourceItem[] = (data.items || []).map((it: any) => ({
         ...it,
@@ -164,7 +171,10 @@ export default function NonFilmList({ category, title, icon, description, accent
       setItems(prev => append ? [...prev, ...mapped] : mapped);
       setTotal(data.total || 0);
       setPage(p);
-    } catch { addToast('error', '搜索失败'); }
+    } catch (e: any) {
+      // 2026-11-07: 把后端返回的真实原因带出来, 别只丢一句「搜索失败」
+      addToast('error', e?.message ? '搜索失败: ' + e.message : '搜索失败，请稍后重试');
+    }
     finally { setLoading(false); }
   }, [query, source, category, sort, addToast]);
 

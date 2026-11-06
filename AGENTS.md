@@ -91,3 +91,32 @@ const PUBLIC_PATHS = [
   （`DATABASE_URL` 指向 `127.0.0.1:5432/zzmm_search`）—— 拿它查到的全是 PG 数据。
 - `xx_users.group` 除 user/basic/vip/admin 外，PG 里还有 `viewer` / `member`，
   按上游 middleware 属于「未激活」，会被 `addCond('1=0')` 挡掉 —— **这是业务铁律，不放开**。
+
+## 前端 fetch 三条铁律（2026-11-07 血泪）
+
+### ① 后端 500 ≠ 搜不到，必须查 `res.ok`
+`fetch` 拿到 500 时 body 往往**也是合法 JSON**（`{error: '...'}`）。
+不查 `res.ok` 就直接 `data.items` → `undefined` → `setItems([])` → **页面渲染成白板**。
+用户分不清「服务器炸了」还是「站里没这资源」⇒ 直接把「服务挂了」显示成「搜不到」。
+（moviezone 那边踩了同一个坑：`assets/app.js` 的 `bff()` 静默吞 fetch 失败。）
+**修法**：查 `res.ok` → 抛错 → 挂错误条 + 重试按钮；失败时**不要清空 items**。
+
+### ② `setState` 之后同步读 state = 读到旧值
+```tsx
+// ❌ setQuery 是异步的，紧接着 fetchItems 读 latestRef.current.query 还是旧值
+onSearch={(q) => { setQuery(q); fetchItems(1); }}
+// ✅ 跟同文件 setPageSize 的写法对齐：同步先改 ref
+onSearch={(q) => { latestRef.current = { ...latestRef.current, query: q }; setQuery(q); fetchItems(1); }}
+```
+**这条曾让首页搜索框完全失效**（输入「逆天邪神」回车 → 请求 `q=null` → 返回默认列表，
+8 张卡片 0 个命中）。引入于 `aa9e8045`。**首页搜索框现在是真的能搜了**。
+排查同类问题时：抓 Playwright 的 `/api/search` 请求 URL，看 `q=` 在不在。
+
+### ③ fetch 必须带超时
+NAS 高负载（loadavg 18）时 `/api/search` 登录态实测 **4~9.5s**，
+挂起的请求会把页面卡在空白。用 `AbortController` + `setTimeout(45000)`，
+超时要给用户明确文案，不要静默。
+
+### ④ 空状态也要说话
+0 条时网格高度为 0，页面下半截整片白板，用户以为页面坏了。
+必须显式渲染「没有找到相关资源」+ 加载中态（`loading && items.length === 0`）。
