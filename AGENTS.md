@@ -120,3 +120,44 @@ NAS 高负载（loadavg 18）时 `/api/search` 登录态实测 **4~9.5s**，
 ### ④ 空状态也要说话
 0 条时网格高度为 0，页面下半截整片白板，用户以为页面坏了。
 必须显式渲染「没有找到相关资源」+ 加载中态（`loading && items.length === 0`）。
+
+## PG 匹配候选池实测（2026-11-07 只读核实，别再拍脑袋估数字）
+
+**结论：存量匹配的候选池是 262,492 行，不是之前记的 97,247（97,247 是某次试跑的命中数）。**
+
+| 口径 | 数字 |
+|---|---|
+| active 总数 | 469,765 |
+| **有有效 tmdb_id**（纯数字且 >10000） | **142,675 = 30.37%** |
+| `xx_tmdb_cache` | 38,559 行（34,243 有海报） |
+| **匹配候选池** | **262,492** |
+
+候选池的 SELECT 条件（`src/app/api/admin/match/route.ts`）：
+`status='active' AND (tmdb_id IS NULL OR tmdb_id='' OR tmdb_id IN ('NOMATCH','GARBLED')) AND name IS NOT NULL AND LENGTH(TRIM(name))>1 AND category NOT IN ('音乐','体育','合集','学习资料','其他','游戏','电子书','精品课','文档')`
+
+**候选池按 access_level 拆**（证明没有只匹配 vip 的坑）：
+- vip **252,489**（96.2%）｜free **9,806**（3.7%）｜code 172｜basic 25
+
+### 🔥 两个会「静默少一半」的坑（都不报错）
+1. **access_level 只匹配 vip** —— ⚠️ **我这边没有**。已逐处核实：
+   `scripts/match-direct.mjs`（PG，match-now 就是 spawn 它）里 `access_level` 出现 **0 次**；
+   `/api/admin/match` 的 SELECT、`scripts/rematch-worker.cjs` 的 SELECT+UPDATE 均无该条件。
+   （moviezone 那边**有**这个坑：`functions/api/index.ts` 的后台匹配端点 `only_vip` 默认 true，
+   会跳过 146,588 行 basic 且不报错 —— 要跑全表必须传 `{"only_vip": false}`。）
+2. **分类排除表静默挡掉 1.6 万行** —— ⚠️ **我这边有**。
+   上面那条 `category NOT IN (...)` 挡掉 **24,147 行**带 NOMATCH 的资源：
+   其他 7,235 / 电子书 4,307 / 文档 2,618 / 精品课 1,971（这四条是**分类错位**，不是该排除）
+   ｜音乐 6,933 / 合集 862 / 体育 210 / 游戏 11（这几条确实不该匹配）
+   ⇒ **不先重分类，这 1.6 万行永远拿不到海报。**
+
+### `tmdb_id IS NULL` 是空集
+PG 里 active 的 `tmdb_id IS NULL` = **0 行**，262,492 全是 `tmdb_id='NOMATCH'`（262,470）。
+⇒ `scripts/rematch-worker.cjs` 注释里那句「必须同时捞 tmdb_id IS NULL 的行」在 PG 上捞不到东西，**别被误导**。
+
+### NOMATCH 分布（重跑收益排序）
+动漫 84,363 ｜短剧 82,595 ｜剧集 57,609 ｜电影 26,654 ｜原盘 5,404 ｜其他 2,884 ｜演唱会 2,365 ｜软件 1,791
+
+### 重跑的账（等用户拍板，勿擅自执行）
+- TMDB 请求量：262,492 × 1~2 次 ≈ **26~52 万次**；按 40~50 req/s ≈ **1.5~3.6 小时**纯 API 时间
+- 写回：NAS 上 26 万行 UPDATE（当前 NAS load 21、swap 16.2G 在颠簸 —— **这才是拦路虎**）
+- 写生产库必须用户拍板；不建定时器
