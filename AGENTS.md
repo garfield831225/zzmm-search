@@ -216,3 +216,63 @@ scripts/match-direct.mjs (模块体):
 ⚠️ **别再犯**：改任何走 TMDB 的脚本前，先确认
 ①`process.env.HTTP_PROXY` 在 patch 模块之后仍然正确 ②清洗后的名字能直接搜到 ③取行顺序不会原地打转。]<]minimax[>[</newString>]<]minimax[>[</invoke>
 ]<]minimax[>[</tool_call>
+
+## 🔥 清洗器 A/B 实测 + 「垃圾条目」陷阱（2026-11-07 实测，必读）
+
+### ① 两个清洗器 A/B（同一批 PG 300 行 / 同一套 TMDB 探测 / 同一判分标准）
+| | 真命中 | 占比 | 未命中 | 假阳性 | 跳过 |
+|---|---|---|---|---|---|
+| A = `match-direct-vip.mjs` 的清洗补丁 | 18 | 6.0% | 273 | 5 | 4 |
+| B = 拾光的 `rematch-worker.clean-title.cjs` | **62** | **20.7%** | 203 | 24 | 11 |
+
+两者都命中 16 / **只有 B 命中 46** / 只有 A 命中 2 / 都没中 236
+⇒ **clean-title 抽片名强 3.4 倍**，用户拍板换新引擎（`rematch-worker` + clean-title）。
+A 的典型失败：噪声留在片名里 → `沧元图 动作 动画 奇幻 4KHQ 更新76集`（TMDB 搜不到）；B → `沧元图` ✓
+脚本：NAS `scripts/ab/ab-runner.cjs`（只读）｜明细 `logs/ab-clean-title.json`
+
+### ② 🔥 最阴的坑：字幕组**编码标签**被当片名 → 匹配到真存在的垃圾条目
+清洗器把 `【GB】`/`【Big5】` 当成片名 → TMDB 搜 "GB" 返回**真存在**的条目 `Hotel GB`、搜 "Big5" 返回 `Big5 Türkiye`
+→ 前缀匹配 `startsWith` **没有长度差上限** → 直接接受 → 写库。
+实测后果：我这一轮 2,448 条写入里 **683 条（27.9%）是错配**，其中 **390 条正是这一类**（动漫重灾区 524/683）。
+⇒ 两条铁律：
+1. **前缀匹配必须限长度差**（`tn.length - cn.length <= 4`）
+2. **噪声词表必须含 GB / Big5 / BIG5 / GBK / 简日 / 繁中 / (字幕组|压制组|发布组) 这类编码标签**
+（`isNoiseOnly` 的开头黑名单只有「国语/英语/字幕/内封/简繁/双语/特效…」这类，**不含编码标签** ⇒ 别照抄）
+
+### ③ 写库前必须有「分级置信度」闸
+新引擎 `rematch-worker.cjs` 的做法（比 `match-direct-vip` 严，**照这个来**）：
+exact=100 / prefix=90 / substr=80 / 反向包含=75 / bigram≤60 / fuzzy=30，
+**`best.score < 30` 直接放弃**；默认**只有 exact/prefix/substr 才写库**（`--allow-fuzzy` 才放开 bigram/fuzzy）；
+每条写库落一行 jsonl 审计（可按 id 精确回滚）。
+⇒ **别把「拿到 TMDB 第一条结果就写库」当默认。**
+
+### ④ `tmdb_id` 列里混着失败标记，统计覆盖率只能用数字口径
+| PG 侧 (status='active', 共 469,765) | 行数 |
+|---|---|
+| **NUMERIC（真匹配）** | **154,503（32.9%）** |
+| `NOMATCH` | 264,983 |
+| `SKIP` | 30,847 |
+| `GARBLED` | 68 |
+| NULL / '' | 19,364 |
+
+⇒ 真实覆盖率 = `count(*) filter (where tmdb_id ~ '^[0-9]+$')`；
+**`tmdb_id IS NOT NULL` 会把 29.8 万行假标记算成「已匹配」**，报出去的数字会离谱地好看。
+⚠️ `SKIP` 30,847 行是**死角**：新旧两个引擎的 WHERE 都只认 `NULL/NOMATCH`（新引擎还不认 `GARBLED`）⇒ 这批永远不会被重试。
+
+### ⑤ NAS 直连 TMDB 可用（推翻「Node fetch 直连必超时」）
+实测：NAS 直连 `api.themoviedb.org` curl 200（0.265~0.95s）、Node fetch 200、3 个 key 全通；
+`match-direct-vip.mjs` 第 45 行用的是 `new Agent()`（**不是 ProxyAgent**）⇒ `HTTP_PROXY` 只被 log，实际全程**直连**，
+106,200 行跑完命中 2,448；A/B 那 571 次直连探测 **0 次超时**。
+⇒ **走代理反而更容易 `fetch failed`**，别把「直连必超时」写进新引擎。
+
+### ⑥ 审计与回滚资产（2026-11-07）
+- 审计脚本：NAS `scripts/ab/audit-local.cjs`（拿 `xx_tmdb_cache` 的官方标题回比，不打 TMDB）
+- 我这轮写入清单：`logs/my-writes-audit.psv`（2,446 行）、明细 `logs/my-writes-audit.json`
+- 回滚 SQL：`logs/rollback-my-bad-matches.sql`（口径 A=391 纯垃圾 / 口径 B=683 全部疑似；**未执行，等用户拍板**）
+- 回滚依据表：`xx_rematch_backup_20261107`（276,628 行，含原 tmdb_id/matched_tmdb_at/last_attempt_at）
+
+### ⑦ 跑批现状（2026-11-07 11:51 CST 停）
+- 用户拍板：PG 存量匹配换新引擎（拾光 `rematch-worker` + clean-title，rps=20 / 5 段并行）
+- `zzmm-rematch-vip.service` **已停**；停服前 **531 轮 / 106,200 行 / 命中 2,448**（已落 PG，不会丢）
+- 备份表 `xx_rematch_backup_20261107` 保留（两边都能回滚）
+- 新引擎三个必改项（已发拾光）：① prefix 长度差 ② GB/Big5 噪声词 ③ `access_level='vip'` 过滤（它原版没有）
